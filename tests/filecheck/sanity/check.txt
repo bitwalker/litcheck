@@ -1,0 +1,12 @@
+; RUN: awk '/^;/ { next }; /.*/ { print }' %s | filecheck %s
+
+; CHECK-LABEL: Some random
+Some random
+; CHECK-EMPTY:
+; CHECK-EMPTY:
+
+; CHECK: content to
+; CHECK-SAME: show output
+; CHECK-NEXT: and some rules
+content to show output
+and some rules

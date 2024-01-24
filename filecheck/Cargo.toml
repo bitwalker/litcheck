@@ -1,0 +1,40 @@
+[package]
+name = "litcheck-filecheck"
+description = "The implementation of litcheck's FileCheck functionality as a library"
+version.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+categories.workspace = true
+keywords.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = ["fancy-diagnostics"]
+fancy-diagnostics = ["miette/fancy", "litcheck/fancy-diagnostics"]
+
+[dependencies]
+anyhow.workspace = true
+aho-corasick = "1.1"
+bitflags = "2.4"
+bstr = { version = "1.9", default-features = false }
+clap.workspace = true
+either.workspace = true
+lalrpop-util = "0.20"
+litcheck.workspace = true
+logos = "0.13"
+miette.workspace = true
+memchr.workspace = true
+regex.workspace = true
+regex-automata = "0.4"
+rustc-hash.workspace = true
+smallvec.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+pretty_assertions = "1.0"
+
+[build-dependencies]
+lalrpop = { version = "0.20", default-features = false }

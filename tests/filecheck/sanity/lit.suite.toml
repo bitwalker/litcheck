@@ -1,0 +1,4 @@
+name = "filecheck-sanity"
+patterns = ["*.txt"]
+
+[format.shtest]

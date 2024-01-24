@@ -1,0 +1,52 @@
+[workspace]
+resolver = "2"
+members = [
+  "core",
+  "filecheck",
+  "lit",
+  "litcheck",
+]
+
+[workspace.package]
+version = "0.1.0"
+rust-version = "1.75"
+authors = ["Paul Schoenfelder"]
+repository = "https://github.com/bitwalker/litcheck"
+homepage = "https://github.com/bitwalker/litcheck"
+categories = ["Testing"]
+keywords = ["lit", "filecheck", "llvm"]
+edition = "2021"
+license = "Apache-2.0"
+
+[workspace.dependencies]
+anyhow = "1.0"
+clap = { version = "4.1", features = ["derive", "env", "cargo", "wrap_help"] }
+console = "0.15"
+either = "1.9"
+log = "0.4"
+intrusive-collections = "0.9"
+parking_lot = "0.12"
+memchr = "2.7"
+miette = { version = "5.10", default-features = false }
+rayon = "1.8"
+regex = "1.10"
+rustc-hash = "1.1"
+serde = { version = "1.0", features = ["derive", "rc"] }
+smallvec = { version = "1.9", features = ["union", "const_generics", "const_new"] }
+target-lexicon = "0.12"
+thiserror = "1.0"
+toml = { version = "0.8", features = ["parse", "preserve_order"] }
+
+litcheck = { package = "litcheck-core", path = "./core" }
+filecheck = { package = "litcheck-filecheck", path = "./filecheck" }
+lit = { package = "litcheck-lit", path = "./lit" }
+
+#[profile.dev]
+# Needed for 'inventory'
+#codegen-units = 1
+
+[profile.release]
+opt-level = 2
+debug = true
+codegen-units = 1
+lto = true

@@ -1,0 +1,169 @@
+use litcheck::{StringInterner, Symbol, diagnostics::Span};
+
+use crate::expr::*;
+
+use super::{Token, ParseError};
+
+grammar<'input, 'parser>(_source: &'input str, interner: &'parser mut StringInterner);
+
+// LEXER
+// ================================================================================================
+
+extern {
+    type Error = ExprError;
+    type Location = usize;
+
+    enum Token<'input> {
+        ident => Token::Ident(<&'input str>),
+        number => Token::Num(<i64>),
+        "(" => Token::LParen,
+        ")" => Token::RParen,
+        "#" => Token::Hash,
+        "$" => Token::Dollar,
+        "%" => Token::Percent,
+        "@" => Token::At,
+        "," => Token::Comma,
+        "." => Token::Dot,
+        ":" => Token::Colon,
+        "+" => Token::Plus,
+        "-" => Token::Minus,
+        "=" => Token::Equal,
+        "==" => Token::Equals,
+        "add" => Token::Add,
+        "sub" => Token::Sub,
+        "mul" => Token::Mul,
+        "div" => Token::Div,
+        "min" => Token::Min,
+        "max" => Token::Max,
+    }
+}
+
+
+// Comma-delimited with at least one element
+#[inline]
+Comma<T>: Vec<T> = {
+    <v:(<T> ",")*> <e:T> => {
+        let mut v = v;
+        v.push(e);
+        v
+    }
+};
+
+/// VARIABLES
+
+
+pub NumericVar: Var<'input> = {
+    "#" <format:NumberFormat> <name:("," <Var>)> <value:("=" <Expr>)> => {
+        Var { name, value: Value::Num(value) }
+    }
+}
+
+NumberFormat: NumberFormat = {
+    "%" <require_prefix:RequirePrefix> <precision:("." <Precision>)?> <ty:FormatSpecifier> => {
+        match ty {
+            FormatSpecifier::Unsigned => NumberFormat::Unsigned { precision: precision.unwrap_or(0) },
+            FormatSpecifier::Signed => NumberFormat::Signed { precision: precision.unwrap_or(0) },
+            FormatSpecifier::Hex => NumberFormat::Hex { require_prefix, precision: precision.unwrap_or(0) },
+        }
+    }
+}
+
+/// EXPRS
+
+Expr: Expr = {
+    <l:@L> <x:Expr> "+" <y:Subexpr> <r:@R> => Expr::Binary { span: span!(l, r), op: BinaryOp::Add, lhs: Box::new(x), rhs: Box::new(y) },
+    <l:@L> <x:Expr> "-" <y:Subexpr> <r:@R> => Expr::Binary { span: span!(l, r), op: BinaryOp::Sub, lhs: Box::new(x), rhs: Box::new(y) },
+    Subexpr,
+}
+
+Subexpr: Expr = {
+    Builtin,
+    Call,
+    Term,
+}
+
+#[inline]
+Builtin: Expr = {
+    <l:@L> <op:BinaryOp> "(" <x:Expr> "," <y:Expr> ")" <r:@R> => Expr::Binary { span: span!(l, r), op, lhs: Box::new(x), rhs: Box::new(y) },
+}
+
+Call: Expr = {
+    <l:@L> <callee:Callee> "(" <args:Comma<Expr>> ")" <r:@R> =>? {
+        Expr::from_call(interner, span!(l, r), callee, args).map_err(|err| ParseError::User { error: err.into() })
+    }
+}
+
+Term: Expr = {
+    Num,
+    <PatternVar> => Expr::Var(<>),
+    "(" <Expr> ")" => <>,
+}
+
+BinaryOp: BinaryOp = {
+    "add" => BinaryOp::Add,
+    "sub" => BinaryOp::Sub,
+    "mul" => BinaryOp::Mul,
+    "div" => BinaryOp::Div,
+    "min" => BinaryOp::Min,
+    "max" => BinaryOp::Max,
+}
+
+
+/// ATOMS
+
+PatternVar: VariableName = {
+    GlobalVar,
+    PseudoVar,
+    Var,
+}
+
+GlobalVar: VariableName = {
+    <l:@L> "$" <name:Ident> <r:@R> => VariableName::Global(Span::new(span!(l, r), name)),
+}
+
+PseudoVar: VariableName = {
+    <l:@L> "@" <name:Ident> <r:@R> => VariableName::Pseudo(Span::new(span!(l, r), name)),
+}
+
+Var: VariableName = {
+    <l:@L> <name:Ident> <r:@R> => VariableName::User(Span::new(span!(l, r), name)),
+}
+
+Callee: Span<Symbol> = {
+    <l:@L> <name:Ident> <r:@R> => Span::new(span!(l, r), name),
+}
+
+Num: Expr = {
+    <l:@L> <n:number> <r:@R> => Expr::Num(Number::new(span!(l, r), n)),
+}
+
+RequirePrefix: bool = {
+    "#" => true,
+    => false,
+}
+
+FormatSpecifier: FormatSpecifier = {
+    <l:@L> <value:ident> <r:@R> =>? {
+        match value {
+            "a" => Ok(FormatSpecifier::Unsigned),
+            "d" => Ok(FormatSpecifier::Signed),
+            "x" => Ok(FormatSpecifier::Hex),
+            "X" => Ok(FormatSpecifier::Hex),
+            _ => Err(ParseError::User {
+                error: ExprError::InvalidFormatSpecifier { span: span!(l, r) }.into()
+            }),
+        }
+    }
+}
+
+Precision: u8 = {
+    <l:@L> <n:number> <r:@R> =>? {
+        u8::try_from(n).map_err(|_| ParseError::User {
+            error: ExprError::InvalidNumericPrecision { span: span!(l, r) }.into()
+        })
+    },
+}
+
+Ident: Symbol = {
+    ident => interner.get_or_intern(<>),
+}

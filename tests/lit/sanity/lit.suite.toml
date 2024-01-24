@@ -1,0 +1,4 @@
+name = "lit-sanity"
+patterns = ["*.txt"]
+
+[format.shtest]

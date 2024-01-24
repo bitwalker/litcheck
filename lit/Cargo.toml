@@ -1,0 +1,41 @@
+[package]
+name = "litcheck-lit"
+description = "The implementation of litcheck's lit functionality as a library"
+version.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+categories.workspace = true
+keywords.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = ["fancy-diagnostics"]
+fancy-diagnostics = ["miette/fancy", "litcheck/fancy-diagnostics", "dep:console"]
+
+[dependencies]
+anyhow.workspace = true
+assert_cmd = "2.0"
+clap.workspace = true
+console = { workspace = true, optional = true }
+indexmap = { version = "2.1", features = ["serde"] }
+litcheck.workspace = true
+log.workspace = true
+intrusive-collections.workspace = true
+miette.workspace = true
+parking_lot.workspace = true
+rayon.workspace = true
+regex.workspace = true
+rustc-hash.workspace = true
+serde.workspace = true
+shlex = "1.2"
+smallvec.workspace = true
+target-lexicon.workspace = true
+tempdir = "0.3"
+thiserror.workspace = true
+toml.workspace = true
+
+[dev-dependencies]
+pretty_assertions = "1.0"

@@ -1,0 +1,33 @@
+[package]
+name = "litcheck-core"
+description = "An internal library used by various litcheck components"
+version.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+categories.workspace = true
+keywords.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = []
+fancy-diagnostics = ["miette/fancy"]
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+either.workspace = true
+glob = "0.3"
+miette.workspace = true
+memchr.workspace = true
+rustc-hash.workspace = true
+serde.workspace = true
+smallvec.workspace = true
+string-interner = "0.14"
+thiserror.workspace = true
+walkdir = "2.4"
+
+[dev-dependencies]
+pretty_assertions = "1.0"

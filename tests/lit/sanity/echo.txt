@@ -1,0 +1,5 @@
+; RUN: cat < %s
+
+Some random
+
+content to show output

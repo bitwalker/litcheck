@@ -1,0 +1,286 @@
+use either::Either;
+use either::Either::*;
+use litcheck::{StringInterner, Symbol, diagnostics::{Span, Spanned}};
+
+use crate::check::*;
+use crate::expr::*;
+use crate::parse::{ast::*, LexerError, Token, ParserError, ParseError};
+
+grammar<'input, 'parser>(_source: &'input str, interner: &'parser mut StringInterner);
+
+// LEXER
+// ================================================================================================
+
+extern {
+    type Error = ParserError;
+    type Location = usize;
+
+    enum Token<'input> {
+        LF => Token::Lf,
+        ERROR => Token::Error(<LexerError>),
+        COMMENT => Token::Comment(<std::borrow::Cow<'input, str>>),
+        CHECK => Token::Check(<Check>),
+        raw => Token::Raw(<&'input str>),
+        ident => Token::Ident(<&'input str>),
+        number => Token::Num(<i64>),
+        "[[" => Token::MatchStart,
+        "]]" => Token::MatchEnd,
+        "{{" => Token::RegexStart,
+        "}}" => Token::RegexEnd,
+        "{" => Token::LBrace,
+        "}" => Token::RBrace,
+        "(" => Token::LParen,
+        ")" => Token::RParen,
+        "#" => Token::Hash,
+        "$" => Token::Dollar,
+        "%" => Token::Percent,
+        "@" => Token::At,
+        "," => Token::Comma,
+        "." => Token::Dot,
+        ":" => Token::Colon,
+        "+" => Token::Plus,
+        "-" => Token::Minus,
+        "=" => Token::Equal,
+        "==" => Token::Equals,
+        "LITERAL" => Token::Literal,
+        "LINE" => Token::Line,
+        "add" => Token::Add,
+        "sub" => Token::Sub,
+        "mul" => Token::Mul,
+        "div" => Token::Div,
+        "min" => Token::Min,
+        "max" => Token::Max,
+
+    }
+}
+
+
+// Comma-delimited with at least one element
+#[inline]
+Comma<T>: Vec<T> = {
+    <v:(<T> ",")*> <e:T> => {
+        let mut v = v;
+        v.push(e);
+        v
+    }
+};
+
+
+/// MATCH
+
+pub Match: Match<'input> = {
+    <l:@L> "[[" <name:Var> "]]" <r:@R> => Match::Substitution { span: span!(l, r), name, pattern: None },
+
+    <l:@L> "[[" <name:Var> ":" <pattern:String>  "]]" <r:@R> => Match::Substitution { span: span!(l, r), name, pattern: Some(pattern) },
+
+    <l:@L> "[[" "#" <format:(<NumberFormat> ",")?> <capture:CaptureNumericOrExpr?> "]]" <r:@R> => {
+        let format = format.unwrap_or_default();
+        let span = span!(l, r);
+        match capture {
+            None => Match::Numeric {
+                span,
+                format,
+                capture: None,
+                constraint: Constraint::Eq,
+                expr: None,
+            },
+            Some(CaptureNumericOrExpr::Capture(CaptureNumeric { name, constraint, expr })) => Match::Numeric {
+                span,
+                format,
+                capture: Some(name),
+                constraint,
+                expr,
+            },
+            Some(CaptureNumericOrExpr::Expr(expr)) => Match::Numeric {
+                span,
+                format,
+                capture: None,
+                constraint: Constraint::Eq,
+                expr: Some(expr),
+            },
+        }
+    },
+}
+
+#[inline]
+MatchPatternInner: Match<'input> = {
+    <name:PatternVar> => Match::Substitution { span: name.span(), name, pattern: None },
+
+    <l:@L> <name:Var> ":" <pattern:String>  <r:@R> => Match::Substitution { span: span!(l, r), name, pattern: Some(pattern) },
+
+    <l:@L> "#" <format:(<NumberFormat> ",")?> <capture:CaptureNumericOrExpr?> <r:@R> => {
+        let format = format.unwrap_or_default();
+        let span = span!(l, r);
+        match capture {
+            None => Match::Numeric {
+                span,
+                format,
+                capture: None,
+                constraint: Constraint::Eq,
+                expr: None,
+            },
+            Some(CaptureNumericOrExpr::Capture(CaptureNumeric { name, constraint, expr })) => Match::Numeric {
+                span,
+                format,
+                capture: Some(name),
+                constraint,
+                expr,
+            },
+            Some(CaptureNumericOrExpr::Expr(expr)) => Match::Numeric {
+                span,
+                format,
+                capture: None,
+                constraint: Constraint::Eq,
+                expr: Some(expr),
+            },
+        }
+    },
+}
+
+CaptureNumericOrExpr: CaptureNumericOrExpr = {
+    <l:@L> <var:PatternVar> <ty:EitherCaptureOrExpr> => {
+        match ty {
+            Left(None) => CaptureNumericOrExpr::Capture(CaptureNumeric { name: var, constraint: Constraint::Eq, expr: None }),
+            Left(Some(constraint)) => CaptureNumericOrExpr::Capture(CaptureNumeric { name: var, constraint: constraint.constraint, expr: Some(constraint.expr) }),
+            Right(None) => CaptureNumericOrExpr::Expr(Expr::Var(var)),
+            Right(Some(BinaryOpAndOperand { op, operand: rhs })) => {
+                let rhs_span = rhs.span();
+                let end = rhs_span.offset() + rhs_span.len();
+                CaptureNumericOrExpr::Expr(Expr::Binary { span: span!(l, end), op, lhs: Box::new(Expr::Var(var)), rhs })
+            }
+        }
+    },
+    Builtin => CaptureNumericOrExpr::Expr(<>),
+}
+
+EitherCaptureOrExpr: Either<Option<ConstraintExpr>, Option<BinaryOpAndOperand>> = {
+    ":" <constraint:Constraint?> => Left(constraint),
+    "+" <expr:Expr> => Right(Some(BinaryOpAndOperand { op: BinaryOp::Add, operand: Box::new(expr) })),
+    "-" <expr:Expr> => Right(Some(BinaryOpAndOperand { op: BinaryOp::Sub, operand: Box::new(expr) })),
+    => Either::Right(None),
+}
+
+Constraint: ConstraintExpr = {
+    "==" <expr:Expr> => ConstraintExpr { constraint: Constraint::Eq, expr },
+    <expr:Expr> => ConstraintExpr { constraint: Constraint::Eq, expr },
+}
+
+/// VARIABLES
+
+
+NumberFormat: NumberFormat = {
+    "%" <require_prefix:RequirePrefix> <precision:("." <Precision>)?> <ty:FormatSpecifier> => {
+        match ty {
+            FormatSpecifier::Unsigned => NumberFormat::Unsigned { precision: precision.unwrap_or(0) },
+            FormatSpecifier::Signed => NumberFormat::Signed { precision: precision.unwrap_or(0) },
+            FormatSpecifier::Hex => NumberFormat::Hex { require_prefix, precision: precision.unwrap_or(0) },
+        }
+    }
+}
+
+/// EXPRS
+
+Expr: Expr = {
+    <l:@L> <x:Expr> "+" <y:Subexpr> <r:@R> => Expr::Binary { span: span!(l, r), op: BinaryOp::Add, lhs: Box::new(x), rhs: Box::new(y) },
+    <l:@L> <x:Expr> "-" <y:Subexpr> <r:@R> => Expr::Binary { span: span!(l, r), op: BinaryOp::Sub, lhs: Box::new(x), rhs: Box::new(y) },
+    Subexpr,
+}
+
+Subexpr: Expr = {
+    Builtin,
+    Call,
+    Term,
+}
+
+#[inline]
+Builtin: Expr = {
+    <l:@L> <op:BinaryOp> "(" <x:Expr> "," <y:Expr> ")" <r:@R> => Expr::Binary { span: span!(l, r), op, lhs: Box::new(x), rhs: Box::new(y) },
+}
+
+Call: Expr = {
+    <l:@L> <callee:Callee> "(" <args:Comma<Expr>> ")" <r:@R> =>? {
+        Expr::from_call(interner, span!(l, r), callee, args).map_err(|err| ParseError::User { error: ExprError::from(err).into() })
+    }
+}
+
+Term: Expr = {
+    Num,
+    <PatternVar> => Expr::Var(<>),
+    "(" <Expr> ")" => <>,
+}
+
+BinaryOp: BinaryOp = {
+    "add" => BinaryOp::Add,
+    "sub" => BinaryOp::Sub,
+    "mul" => BinaryOp::Mul,
+    "div" => BinaryOp::Div,
+    "min" => BinaryOp::Min,
+    "max" => BinaryOp::Max,
+}
+
+
+/// ATOMS
+
+PatternVar: VariableName = {
+    GlobalVar,
+    PseudoVar,
+    Var,
+}
+
+GlobalVar: VariableName = {
+    <l:@L> "$" <name:Ident> <r:@R> => VariableName::Global(Span::new(l..r, name)),
+}
+
+PseudoVar: VariableName = {
+    <l:@L> "@" <name:Ident> <r:@R> => VariableName::Pseudo(Span::new(l..r, name)),
+    <l:@L> "@" "LINE" <r:@R> => VariableName::Pseudo(Span::new(l..r, interner.get_or_intern("LINE"))),
+}
+
+Var: VariableName = {
+    <l:@L> <name:Ident> <r:@R> => VariableName::User(Span::new(l..r, name)),
+}
+
+Callee: Span<Symbol> = {
+    <l:@L> <name:Ident> <r:@R> => Span::new(l..r, name),
+}
+
+Num: Expr = {
+    <l:@L> <n:number> <r:@R> =>? Ok(Expr::Num(Number::new(span!(l, r), n))),
+    <error:ERROR> =>? Err(ParseError::User { error: error.into() }),
+}
+
+RequirePrefix: bool = {
+    "#" => true,
+    => false,
+}
+
+FormatSpecifier: FormatSpecifier = {
+    <l:@L> <value:ident> <r:@R> =>? {
+        match value {
+            "a" => Ok(FormatSpecifier::Unsigned),
+            "d" => Ok(FormatSpecifier::Signed),
+            "x" => Ok(FormatSpecifier::Hex),
+            "X" => Ok(FormatSpecifier::Hex),
+            _ => Err(ParseError::User {
+                error: ParserError::from(ExprError::InvalidFormatSpecifier { span: span!(l, r) }).into()
+            }),
+        }
+    }
+}
+
+Precision: u8 = {
+    <l:@L> <n:number> <r:@R> =>? {
+        u8::try_from(n).map_err(|_| ParseError::User {
+            error: ParserError::from(ExprError::InvalidNumericPrecision { span: span!(l, r) }).into()
+        })
+    },
+    <error:ERROR> =>? Err(ParseError::User { error: error.into() }),
+}
+
+Ident: Symbol = {
+    ident => interner.get_or_intern(<>),
+}
+
+String: Span<&'input str> = {
+    <l:@L> <raw:raw> <r:@R> => Span::new(l..r, raw),
+}
