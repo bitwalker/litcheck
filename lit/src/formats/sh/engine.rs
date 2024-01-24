@@ -85,7 +85,7 @@ fn write_script(script: &TestScript, pipefail: bool) -> Vec<u8> {
             buf.push_str(" && ");
         }
         buf.push_str("{\n  ");
-        let quoted = shlex::quote(&test.command);
+        let quoted = shlex::try_quote(&test.command).expect("bad shell command");
         buf.push_str("{ set +x; } 2>/dev/null && ");
         write!(
             &mut buf,
