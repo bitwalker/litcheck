@@ -44,7 +44,7 @@ impl<'a> FileCheckTest<'a> {
             .map_err(|err| Report::new(err).with_source_code(self.match_file.clone()))?;
 
         // Compile the check rules, and raise an error if any are invalid
-        let program = match_file.compile(self.config)?;
+        let program = match_file.compile(self.config, &mut self.strings)?;
 
         // Apply the checks
         Checker::new(
@@ -60,56 +60,52 @@ impl<'a> FileCheckTest<'a> {
 
 #[cfg(test)]
 mod tests {
-    use std::assert_matches::assert_matches;
-
     use super::*;
-    use crate::check::{CheckFailedError, TestFailed};
+    use crate::check::CheckFailedError;
+    use crate::testing::TestContext;
 
     #[test]
     fn filecheck_sanity_test() -> DiagResult<()> {
-        const MATCH_FILE: &str = include_str!(concat!(
+        const MATCH_FILE: &'static str = include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../tests/filecheck/sanity/check.txt"
         ));
 
-        const INPUT_FILE: &str = r"
+        const INPUT_FILE: &'static str = r"
 Some random
+
 
 content to show output
 and some rules
 ";
 
-        let config = Config::default();
-        let mut test = FileCheckTest::new(MATCH_FILE, &config);
-        test.check(INPUT_FILE)
+        let mut context = TestContext::new();
+        context.with_checks(MATCH_FILE).with_input(INPUT_FILE);
+        context.check()
     }
 
     #[test]
     fn filecheck_sanity_check_same_violation_test() -> DiagResult<()> {
-        const MATCH_FILE: &str = include_str!(concat!(
+        const MATCH_FILE: &'static str = include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../tests/filecheck/sanity/check.txt"
         ));
 
-        const INPUT_FILE: &str = r"
+        const INPUT_FILE: &'static str = r"
 Some random
+
 
 content to
 and some rules
 ";
 
-        let config = Config::default();
-        let mut test = FileCheckTest::new(MATCH_FILE, &config);
-        let error = test
-            .check(INPUT_FILE)
-            .unwrap_err()
-            .downcast::<TestFailed>()
-            .unwrap();
-        assert_matches!(
-            error.errors(),
-            [CheckFailedError::MatchNoneButExpected { .. }]
-        );
-
-        Ok(())
+        let mut context = TestContext::new();
+        context.with_checks(MATCH_FILE).with_input(INPUT_FILE);
+        let error = context.check_failed();
+        if let [CheckFailedError::MatchNoneButExpected { .. }] = error.errors() {
+            Ok(())
+        } else {
+            Err(error.into())
+        }
     }
 }

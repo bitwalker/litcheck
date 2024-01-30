@@ -1,10 +1,10 @@
-use std::{borrow::Cow, fmt};
+use std::{borrow::Cow, fmt, ops::RangeBounds};
 
 use aho_corasick::{AhoCorasick, AhoCorasickBuilder, AhoCorasickKind, MatchKind, StartKind};
 
 use litcheck::diagnostics::{Diag, DiagResult, LabeledSpan, Report, SourceSpan, Span, Spanned};
 
-use super::*;
+use super::{searcher::Searcher, *};
 use crate::check::Input;
 
 /// This matcher searches for a given substring in the input buffer,
@@ -56,11 +56,38 @@ impl<'a> SubstringMatcher<'a> {
         })
     }
 }
+impl<'a> MatcherMut for SubstringMatcher<'a> {
+    fn try_match_mut<'input, 'context, C>(
+        &self,
+        input: Input<'input>,
+        context: &mut C,
+    ) -> DiagResult<MatchResult<'input>>
+    where
+        C: Context<'input, 'context> + ?Sized,
+    {
+        self.try_match(input, context)
+    }
+}
 impl<'a> Matcher for SubstringMatcher<'a> {
-    fn try_match<'input>(&self, input: Input<'input>) -> Option<MatchInfo<'input>> {
-        let matched = self.searcher.find(input)?;
-        let span = SourceSpan::from(matched.range());
-        Some(MatchInfo::new(span, self.span))
+    fn try_match<'input, 'context, C>(
+        &self,
+        input: Input<'input>,
+        context: &C,
+    ) -> DiagResult<MatchResult<'input>>
+    where
+        C: Context<'input, 'context> + ?Sized,
+    {
+        if let Some(matched) = self.searcher.find(input) {
+            Ok(MatchResult::ok(MatchInfo::new(matched.range(), self.span)))
+        } else {
+            Ok(MatchResult::failed(
+                CheckFailedError::MatchNoneButExpected {
+                    span: self.span,
+                    match_file: context.match_file(),
+                    note: None,
+                },
+            ))
+        }
     }
 }
 impl<'a> Spanned for SubstringMatcher<'a> {
@@ -69,20 +96,20 @@ impl<'a> Spanned for SubstringMatcher<'a> {
     }
 }
 
-pub struct MultiSubstringMatcherBuilder<'a> {
+pub struct SubstringSetBuilder<'a> {
     patterns: Vec<Span<Cow<'a, str>>>,
     start_kind: Option<StartKind>,
     match_kind: Option<MatchKind>,
     case_insensitive: bool,
     support_overlapping_matches: bool,
 }
-impl<'a> Default for MultiSubstringMatcherBuilder<'a> {
+impl<'a> Default for SubstringSetBuilder<'a> {
     #[inline]
     fn default() -> Self {
         Self::new_with_patterns(vec![])
     }
 }
-impl<'a> MultiSubstringMatcherBuilder<'a> {
+impl<'a> SubstringSetBuilder<'a> {
     #[inline]
     pub fn new_with_patterns(patterns: Vec<Span<Cow<'a, str>>>) -> Self {
         Self {
@@ -156,11 +183,11 @@ impl<'a> MultiSubstringMatcherBuilder<'a> {
         self
     }
 
-    /// Build the [MultiSubstringMatcher]
+    /// Build the [SubstringSetMatcher]
     ///
     /// This function will panic if there are no patterns configured, or if
     /// an incompatible configuration is provided.
-    pub fn build(self) -> DiagResult<MultiSubstringMatcher<'a>> {
+    pub fn build(self) -> DiagResult<SubstringSetMatcher<'a>> {
         assert!(
             !self.patterns.is_empty(),
             "there must be at least one pattern in the set"
@@ -193,10 +220,183 @@ impl<'a> MultiSubstringMatcherBuilder<'a> {
                     ));
                 Report::from(diag)
             })?;
-        Ok(MultiSubstringMatcher {
+        Ok(SubstringSetMatcher {
             patterns: self.patterns,
             searcher,
         })
+    }
+}
+
+pub struct SubstringSetSearcher<'a, 'patterns, 'input> {
+    buffer: &'input [u8],
+    crlf: bool,
+    last_match_end: Option<usize>,
+    /// The set of raw input patterns from which
+    /// this matcher was constructed
+    patterns: Cow<'patterns, Vec<Span<Cow<'a, str>>>>,
+    /// The compiled regex which will be used to search the input buffer
+    pattern: AhoCorasick,
+    /// The searcher used to maintain the search state in the buffer
+    searcher: super::searcher::AhoCorasickSearcher<'input>,
+}
+impl<'a, 'patterns, 'input> SubstringSetSearcher<'a, 'patterns, 'input> {
+    pub fn new(
+        input: Input<'input>,
+        patterns: Cow<'patterns, Vec<Span<Cow<'a, str>>>>,
+    ) -> DiagResult<Self> {
+        let buffer = input.buffer();
+        let crlf = input.is_crlf();
+        let mut builder = AhoCorasickBuilder::new();
+        builder
+            .ascii_case_insensitive(false)
+            .match_kind(MatchKind::LeftmostLongest)
+            .start_kind(StartKind::Unanchored);
+        let pattern = builder
+            .build(patterns.iter().map(|p| p.as_bytes()))
+            .map_err(|err| {
+                let labels = patterns
+                    .iter()
+                    .map(|s| LabeledSpan::new_with_span(Some(err.to_string()), s.span()));
+                let diag = Diag::new("failed to build substring set searcher")
+                    .and_labels(labels)
+                    .with_help(format!(
+                        "search configuration: {:?}, {:?}",
+                        MatchKind::LeftmostLongest,
+                        StartKind::Unanchored
+                    ));
+                Report::from(diag)
+            })?;
+
+        let searcher = super::searcher::AhoCorasickSearcher::new(input.into());
+
+        Ok(Self {
+            buffer,
+            crlf,
+            last_match_end: None,
+            patterns,
+            pattern,
+            searcher,
+        })
+    }
+
+    pub fn input(&self) -> Input<'input> {
+        let input = self.searcher.input();
+        Input::new(self.buffer, self.crlf)
+            .span(input.get_range())
+            .anchored(input.get_anchored().is_anchored())
+    }
+
+    pub fn num_patterns(&self) -> usize {
+        self.patterns.len()
+    }
+
+    pub fn pattern_span(&self, index: usize) -> SourceSpan {
+        self.patterns[index].span()
+    }
+}
+impl<'a, 'patterns, 'input> fmt::Debug for SubstringSetSearcher<'a, 'patterns, 'input> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("SubstringSetSearcher")
+            .field("patterns", &self.patterns)
+            .field("kind", &self.pattern.kind())
+            .field("start_kind", &self.pattern.start_kind())
+            .field("match_kind", &self.pattern.match_kind())
+            .finish()
+    }
+}
+
+impl<'a, 'patterns, 'input> Spanned for SubstringSetSearcher<'a, 'patterns, 'input> {
+    fn span(&self) -> SourceSpan {
+        let start = self.patterns.iter().map(|p| p.start()).min().unwrap();
+        let end = self.patterns.iter().map(|p| p.end()).max().unwrap();
+        SourceSpan::from(start..end)
+    }
+}
+impl<'a, 'patterns, 'input> Searcher for SubstringSetSearcher<'a, 'patterns, 'input> {
+    type Input = aho_corasick::Input<'input>;
+    type Match = aho_corasick::Match;
+    type MatchError = aho_corasick::MatchError;
+
+    fn input(&self) -> &Self::Input {
+        self.searcher.input()
+    }
+    fn last_match_end(&self) -> Option<usize> {
+        self.last_match_end
+    }
+    fn set_last_match_end(&mut self, end: usize) {
+        self.last_match_end = Some(end);
+        self.searcher.set_last_match_end(end);
+    }
+    fn set_range<R>(&mut self, range: R)
+    where
+        R: RangeBounds<usize>,
+    {
+        self.searcher.set_range(range);
+    }
+    fn try_advance<F>(&mut self, finder: F) -> Result<Option<Self::Match>, Self::MatchError>
+    where
+        F: FnMut(&Self::Input) -> Result<Option<Self::Match>, Self::MatchError>,
+    {
+        self.searcher.try_advance(finder).map(|m| match m {
+            Some(m) => {
+                self.last_match_end = Some(m.end());
+                Some(m)
+            }
+            None => None,
+        })
+    }
+
+    fn handle_overlapping_empty_match<F>(
+        &mut self,
+        m: Self::Match,
+        finder: F,
+    ) -> Result<Option<Self::Match>, Self::MatchError>
+    where
+        F: FnMut(&Self::Input) -> Result<Option<Self::Match>, Self::MatchError>,
+    {
+        self.searcher.handle_overlapping_empty_match(m, finder)
+    }
+}
+impl<'a, 'patterns, 'b> super::searcher::PatternSetSearcher
+    for SubstringSetSearcher<'a, 'patterns, 'b>
+{
+    fn patterns_len(&self) -> usize {
+        self.num_patterns()
+    }
+    fn pattern_span(
+        &self,
+        id: <<Self as Searcher>::Match as searcher::Match>::PatternID,
+    ) -> SourceSpan {
+        SubstringSetSearcher::pattern_span(self, id.as_usize())
+    }
+    fn try_match_next<'input, 'context, C>(
+        &mut self,
+        context: &C,
+    ) -> DiagResult<MatchResult<'input>>
+    where
+        C: Context<'input, 'context> + ?Sized,
+    {
+        use super::searcher::Input as SearchInput;
+        let result = self
+            .searcher
+            .advance(|input| self.pattern.try_find(input.as_input()));
+        if let Some(matched) = result {
+            let pattern_id = matched.pattern().as_usize();
+            let pattern_span = self.patterns[pattern_id].span();
+            Ok(MatchResult::ok(MatchInfo::new_with_pattern(
+                matched.range(),
+                pattern_span,
+                pattern_id,
+            )))
+        } else {
+            Ok(MatchResult::failed(
+                CheckFailedError::MatchNoneButExpected {
+                    span: self.span(),
+                    match_file: context.match_file(),
+                    note: None,
+                },
+            ))
+        }
     }
 }
 
@@ -206,30 +406,44 @@ impl<'a> MultiSubstringMatcherBuilder<'a> {
 /// This is much more efficient than performing multiple independent searches
 /// with [SubstringMatcher], so should be used whenever multiple substring
 /// patterns could be matched at the same time.
-pub struct MultiSubstringMatcher<'a> {
+pub struct SubstringSetMatcher<'a> {
     /// The set of patterns to be matched
     patterns: Vec<Span<Cow<'a, str>>>,
     /// The automaton that will perform the search
     searcher: AhoCorasick,
 }
-impl<'a> fmt::Debug for MultiSubstringMatcher<'a> {
+impl<'a> fmt::Debug for SubstringSetMatcher<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("MultiSubstringMatcher")
-            .field("searcher", &self.searcher)
+        f.debug_struct("SubstringSetMatcher")
+            .field("patterns", &self.patterns)
+            .field("kind", &self.searcher.kind())
+            .field("start_kind", &self.searcher.start_kind())
+            .field("match_kind", &self.searcher.match_kind())
             .finish()
     }
 }
-impl<'a> MultiSubstringMatcher<'a> {
+impl<'a> SubstringSetMatcher<'a> {
     /// Create a new matcher for the given set of substring patterns
     ///
     /// NOTE: This function will panic if the set is empty.
     pub fn new(patterns: Vec<Span<Cow<'a, str>>>) -> DiagResult<Self> {
-        MultiSubstringMatcherBuilder::new_with_patterns(patterns).build()
+        SubstringSetBuilder::new_with_patterns(patterns).build()
     }
 
-    /// Get a builder for configuring and building a new [MultiSubstringMatcher]
-    pub fn build() -> MultiSubstringMatcherBuilder<'a> {
-        MultiSubstringMatcherBuilder::default()
+    pub fn search<'input, 'patterns>(
+        &'patterns self,
+        input: Input<'input>,
+    ) -> DiagResult<SubstringSetSearcher<'a, 'patterns, 'input>> {
+        SubstringSetSearcher::new(input, Cow::Borrowed(&self.patterns))
+    }
+
+    pub fn pattern_len(&self) -> usize {
+        self.patterns.len()
+    }
+
+    /// Get a builder for configuring and building a new [SubstringSetMatcher]
+    pub fn build() -> SubstringSetBuilder<'a> {
+        SubstringSetBuilder::default()
     }
 
     /// Search for all of the non-overlapping matches in the input
@@ -256,53 +470,91 @@ impl<'a> MultiSubstringMatcher<'a> {
         matches
     }
 }
-impl<'a> Spanned for MultiSubstringMatcher<'a> {
+impl<'a> Spanned for SubstringSetMatcher<'a> {
     fn span(&self) -> SourceSpan {
         let start = self.patterns.iter().map(|p| p.start()).min().unwrap();
         let end = self.patterns.iter().map(|p| p.end()).max().unwrap();
         SourceSpan::from(start..end)
     }
 }
-impl<'a> Matcher for MultiSubstringMatcher<'a> {
-    fn try_match<'input>(&self, input: Input<'input>) -> Option<MatchInfo<'input>> {
-        let matched = self.searcher.find(input)?;
-        let pattern_id = matched.pattern().as_usize();
-        let pattern_span = self.patterns[pattern_id].span();
-        let span = SourceSpan::from(matched.range());
-        Some(MatchInfo::new_with_pattern(span, pattern_span, pattern_id))
+impl<'a> MatcherMut for SubstringSetMatcher<'a> {
+    fn try_match_mut<'input, 'context, C>(
+        &self,
+        input: Input<'input>,
+        context: &mut C,
+    ) -> DiagResult<MatchResult<'input>>
+    where
+        C: Context<'input, 'context> + ?Sized,
+    {
+        self.try_match(input, context)
+    }
+}
+impl<'a> Matcher for SubstringSetMatcher<'a> {
+    fn try_match<'input, 'context, C>(
+        &self,
+        input: Input<'input>,
+        context: &C,
+    ) -> DiagResult<MatchResult<'input>>
+    where
+        C: Context<'input, 'context> + ?Sized,
+    {
+        if let Some(matched) = self.searcher.find(input) {
+            let pattern_id = matched.pattern().as_usize();
+            let pattern_span = self.patterns[pattern_id].span();
+            Ok(MatchResult::ok(MatchInfo::new_with_pattern(
+                matched.range(),
+                pattern_span,
+                pattern_id,
+            )))
+        } else {
+            Ok(MatchResult::failed(
+                CheckFailedError::MatchNoneButExpected {
+                    span: self.span(),
+                    match_file: context.match_file(),
+                    note: None,
+                },
+            ))
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fmt::Write;
+    use crate::testing::TestContext;
 
     #[test]
-    fn test_substring_matcher() {
-        let mut input = String::new();
-        writeln!(&mut input, "Name: foo").unwrap();
-        writeln!(&mut input, "Field: 1").unwrap();
-        writeln!(&mut input).unwrap();
-        writeln!(&mut input, "Name: bar").unwrap();
-        writeln!(&mut input, "Field: 2").unwrap();
+    fn test_substring_matcher() -> DiagResult<()> {
+        let mut context = TestContext::new();
+        context.with_checks("CHECK: Name: bar").with_input(
+            "
+Name: foo
+Field: 1
 
-        let pattern = Span::new(SourceSpan::from(0..0), Cow::Borrowed("Name: bar"));
+Name: bar
+Field: 2
+"
+            .trim_start(),
+        );
+
+        let pattern = Span::new(8..10, Cow::Borrowed("Name: bar"));
         let matcher = SubstringMatcher::new(pattern).expect("expected pattern to be valid");
-        let bytes = input.as_bytes();
-        let input = Input::new(bytes, false).span(0..);
-        let result = matcher.try_match(input);
-        let info = result.expect("expected match");
+        let mctx = context.match_context();
+        let input = mctx.search();
+        let result = matcher.try_match(input, &mctx)?;
+        let info = result.info.expect("expected match");
         assert_eq!(info.span.offset(), 20);
         assert_eq!(info.span.len(), 9);
         assert_eq!(
             input.as_str(info.span.offset()..(info.span.offset() + info.span.len())),
             "Name: bar"
         );
+
+        Ok(())
     }
 
     #[test]
-    fn test_multi_substring_matcher_overlapping() {
+    fn test_multi_substring_matcher_overlapping() -> DiagResult<()> {
         const INPUT: &str = "
 define void @sub1(i32* %p, i32 %v) {
 entry:
@@ -316,22 +568,32 @@ entry:
         ret void
 }
 ";
+        let mut context = TestContext::new();
+        context
+            .with_checks(
+                "
+CHECK-DAG: tail call i64
+CHECK-DAG: tail call i32
+",
+            )
+            .with_input(INPUT);
 
-        let pattern1 = Span::new(SourceSpan::from(0..0), Cow::Borrowed("tail call i64"));
-        let pattern2 = Span::new(SourceSpan::from(0..0), Cow::Borrowed("tail call i32"));
-        let matcher = MultiSubstringMatcher::new(vec![pattern1, pattern2])
+        let pattern1 = Span::new(12..24, Cow::Borrowed("tail call i64"));
+        let pattern2 = Span::new(25..41, Cow::Borrowed("tail call i32"));
+        let matcher = SubstringSetMatcher::new(vec![pattern1, pattern2])
             .expect("expected pattern to be valid");
-        let bytes = INPUT.as_bytes();
-        let input = Input::new(bytes, false).span(0..);
-        let result = matcher.try_match(input);
-        let info = result.expect("expected match");
+        let mctx = context.match_context();
+        let input = mctx.search();
+        let result = matcher.try_match(input, &mctx)?;
+        let info = result.info.expect("expected match");
         assert_eq!(info.span.offset(), 58);
         assert_eq!(info.span.len(), 13);
         assert_eq!(input.as_str(info.matched_range()), "tail call i32");
+        Ok(())
     }
 
     #[test]
-    fn test_multi_substring_matcher_overlapped() {
+    fn test_multi_substring_matcher_overlapped() -> DiagResult<()> {
         const INPUT: &str = "
 define void @sub1(i32* %p, i32 %v) {
 entry:
@@ -345,22 +607,32 @@ entry:
         ret void
 }
 ";
+        let mut context = TestContext::new();
+        context
+            .with_checks(
+                "
+CHECK-DAG: tail call i32
+CHECK-DAG: tail call
+",
+            )
+            .with_input(INPUT);
 
-        let pattern1 = Span::new(SourceSpan::from(0..0), Cow::Borrowed("tail call i32"));
-        let pattern2 = Span::new(SourceSpan::from(0..0), Cow::Borrowed("tail call"));
-        let matcher = MultiSubstringMatcher::new(vec![pattern1, pattern2])
+        let pattern1 = Span::new(12..24, Cow::Borrowed("tail call i32"));
+        let pattern2 = Span::new(25..37, Cow::Borrowed("tail call"));
+        let matcher = SubstringSetMatcher::new(vec![pattern1, pattern2])
             .expect("expected pattern to be valid");
-        let bytes = INPUT.as_bytes();
-        let input = Input::new(bytes, false).span(0..);
-        let result = matcher.try_match(input);
-        let info = result.expect("expected match");
+        let mctx = context.match_context();
+        let input = mctx.search();
+        let result = matcher.try_match(input, &mctx)?;
+        let info = result.info.expect("expected match");
         assert_eq!(info.span.offset(), 58);
         assert_eq!(info.span.len(), 13);
         assert_eq!(input.as_str(info.matched_range()), "tail call i32");
+        Ok(())
     }
 
     #[test]
-    fn test_multi_substring_matcher_disjoint() {
+    fn test_multi_substring_matcher_disjoint() -> DiagResult<()> {
         const INPUT: &str = "
 define void @sub1(i32* %p, i32 %v) {
 entry:
@@ -374,22 +646,32 @@ entry:
         ret void
 }
 ";
+        let mut context = TestContext::new();
+        context
+            .with_checks(
+                "
+CHECK-DAG: inc4
+CHECK-DAG: sub1
+",
+            )
+            .with_input(INPUT);
 
-        let pattern1 = Span::new(SourceSpan::from(0..0), Cow::Borrowed("inc4"));
-        let pattern2 = Span::new(SourceSpan::from(0..0), Cow::Borrowed("sub1"));
-        let matcher = MultiSubstringMatcher::new(vec![pattern1, pattern2])
+        let pattern1 = Span::new(12..17, Cow::Borrowed("inc4"));
+        let pattern2 = Span::new(19..35, Cow::Borrowed("sub1"));
+        let matcher = SubstringSetMatcher::new(vec![pattern1, pattern2])
             .expect("expected pattern to be valid");
-        let bytes = INPUT.as_bytes();
-        let input = Input::new(bytes, false).span(0..);
-        let result = matcher.try_match(input);
-        let info = result.expect("expected match");
+        let mctx = context.match_context();
+        let input = mctx.search();
+        let result = matcher.try_match(input, &mctx)?;
+        let info = result.info.expect("expected match");
         assert_eq!(info.span.offset(), 14);
         assert_eq!(info.span.len(), 4);
         assert_eq!(input.as_str(info.matched_range()), "sub1");
+        Ok(())
     }
 
     #[test]
-    fn test_multi_substring_matcher_anchored() {
+    fn test_multi_substring_matcher_anchored() -> DiagResult<()> {
         const INPUT: &str = "
 define void @sub1(i32* %p, i32 %v) {
 entry:
@@ -403,24 +685,34 @@ entry:
         ret void
 }
 ";
+        let mut context = TestContext::new();
+        context
+            .with_checks(
+                "
+CHECK-DAG: @inc4
+CHECK-DAG: @sub1
+",
+            )
+            .with_input(INPUT);
 
-        let pattern1 = Span::new(SourceSpan::from(0..0), Cow::Borrowed("@inc4"));
-        let pattern2 = Span::new(SourceSpan::from(0..0), Cow::Borrowed("@sub1"));
-        let mut builder = MultiSubstringMatcher::build();
+        let pattern1 = Span::new(0..0, Cow::Borrowed("@inc4"));
+        let pattern2 = Span::new(0..0, Cow::Borrowed("@sub1"));
+        let mut builder = SubstringSetMatcher::build();
         builder
             .with_patterns([pattern1, pattern2])
             .support_anchored_search(true);
         let matcher = builder.build().expect("expected pattern to be valid");
-        let bytes = INPUT.as_bytes();
-        let input = Input::new(bytes, false).span(13..).anchored(true);
-        let result = matcher.try_match(input);
-        let info = result.expect("expected match");
+        let mctx = context.match_context();
+        let input = mctx.search_range(13..).anchored(true);
+        let result = matcher.try_match(input, &mctx)?;
+        let info = result.info.expect("expected match");
         assert_eq!(info.span.offset(), 13);
         assert_eq!(info.span.len(), 5);
         assert_eq!(input.as_str(info.matched_range()), "@sub1");
 
-        let input = Input::new(bytes, false).anchored(true);
-        let result = matcher.try_match(input);
-        assert_eq!(result, None);
+        let input = mctx.search().anchored(true);
+        let result = matcher.try_match(input, &mctx)?;
+        assert_eq!(result.info, None);
+        Ok(())
     }
 }

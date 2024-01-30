@@ -11,10 +11,13 @@ use litcheck::{
     range::Range,
 };
 use regex_automata::meta::Regex;
-use smallvec::SmallVec;
 
 use crate::{
-    check::{self, CheckModifier, Input},
+    check::{
+        self,
+        matchers::searcher::{AhoCorasickSearcher, RegexSearcher, Searcher},
+        CheckModifier, Input,
+    },
     parse::ParserError,
 };
 
@@ -32,10 +35,11 @@ pub struct Lexer<'input> {
     input: Input<'input>,
     patterns: Vec<Pattern>,
     regex: Regex,
-    searcher: regex_automata::util::iter::Searcher<'input>,
+    searcher: RegexSearcher<'input>,
     cache: regex_automata::meta::Cache,
     captures: regex_automata::util::captures::Captures,
-    delimiter_searcher: aho_corasick::AhoCorasick,
+    delimiter_patterns: aho_corasick::AhoCorasick,
+    delimiter_searcher: AhoCorasickSearcher<'input>,
     /// When we have reached true Eof, this gets set to true, and the only token
     /// produced after that point is Token::Eof, or None, depending on how you are
     /// consuming the lexer
@@ -65,7 +69,7 @@ impl<'input> Lexer<'input> {
         patterns.extend(Pattern::generate_comment_patterns(comment_prefixes));
         let regex =
             Regex::new_many(&patterns).expect("expected valid prefix searcher configuration");
-        let searcher = regex_automata::util::iter::Searcher::new(input.into());
+        let searcher = RegexSearcher::new(input.into());
         let eof = input.is_empty();
         let captures = regex.create_captures();
         let cache = regex.create_cache();
@@ -75,9 +79,10 @@ impl<'input> Lexer<'input> {
             .match_kind(aho_corasick::MatchKind::LeftmostLongest)
             .start_kind(aho_corasick::StartKind::Both)
             .kind(Some(aho_corasick::AhoCorasickKind::DFA));
-        let delimiter_searcher = builder
+        let delimiter_patterns = builder
             .build(Delimiter::ALL)
             .expect("expected delimiter searcher configuration");
+        let delimiter_searcher = AhoCorasickSearcher::new(input.into());
 
         Lexer {
             input,
@@ -86,6 +91,7 @@ impl<'input> Lexer<'input> {
             searcher,
             cache,
             captures,
+            delimiter_patterns,
             delimiter_searcher,
             eof,
             leading_lf: true,
@@ -132,8 +138,9 @@ impl<'input> Lexer<'input> {
                 return;
             }
             (offset, b'\n') => {
-                self.input.set_start(offset + 1);
-                self.buffer.push_back(Ok((offset, Token::Lf, offset + 1)));
+                let next_offset = offset + 1;
+                self.input.set_start(next_offset);
+                self.buffer.push_back(Ok((offset, Token::Lf, next_offset)));
             }
             _ => (),
         }
@@ -149,10 +156,12 @@ impl<'input> Lexer<'input> {
             self.input.set_start(word_boundary);
         }
 
-        // Reconfigure the searcher if necessary to ensure it is caught up to our view of the input
-        if self.input.start() > self.searcher.input().start() {
-            self.searcher = regex_automata::util::iter::Searcher::new(self.input.into());
+        // Force the searcher forward if necessary to ensure it is caught up to our view of the input
+        let start = self.input.start();
+        if self.searcher.input().start() < start {
+            self.searcher.set_last_match_end(start);
         }
+
         let search_result = self.searcher.advance(|input| {
             self.regex
                 .search_captures_with(&mut self.cache, input, &mut self.captures);
@@ -283,13 +292,12 @@ impl<'input> Lexer<'input> {
         let mut in_regex: Option<Span<Delimiter>> = None;
 
         let mut last_delimiter_end = start;
-        let input = Input::new(self.input.buffer(), false).span(start..eol);
-        let delimiters = self
-            .delimiter_searcher
-            .find_iter(input)
-            .collect::<SmallVec<[_; 4]>>();
+        self.delimiter_searcher.set_range(start..eol);
         let mut is_first = true;
-        for matched in delimiters {
+        while let Some(matched) = self
+            .delimiter_searcher
+            .advance(|input| Ok(self.delimiter_patterns.find(input.clone())))
+        {
             let pid = matched.pattern();
             let delim_range = Range::from(matched.range());
             match Delimiter::from_pid(pid.as_usize()) {
@@ -297,17 +305,17 @@ impl<'input> Lexer<'input> {
                     if in_match.is_none() && in_regex.is_none() =>
                 {
                     in_match = Some(Span::new(delim_range, delim));
-                    if delim_range.start > start {
-                        let raw = &input.buffer()[start..delim_range.start];
+                    if delim_range.start > last_delimiter_end {
+                        let raw = &self.input.buffer()[last_delimiter_end..delim_range.start];
                         if !raw.iter().all(u8::is_ascii_whitespace) {
-                            let content = input.as_str(start..delim_range.start);
+                            let content = self.input.as_str(last_delimiter_end..delim_range.start);
                             let content = if is_first {
                                 content.strip_prefix(' ').unwrap_or(content)
                             } else {
                                 content
                             };
                             self.buffer.push_back(Ok((
-                                start,
+                                last_delimiter_end,
                                 Token::Raw(content),
                                 delim_range.start,
                             )));
@@ -335,17 +343,17 @@ impl<'input> Lexer<'input> {
                 }
                 Delimiter::RegexStart if in_match.is_none() && in_regex.is_none() => {
                     in_regex = Some(Span::new(delim_range, Delimiter::RegexStart));
-                    if delim_range.start > start {
-                        let raw = &input.buffer()[start..delim_range.start];
+                    if delim_range.start > last_delimiter_end {
+                        let raw = &self.input.buffer()[last_delimiter_end..delim_range.start];
                         if !raw.iter().all(u8::is_ascii_whitespace) {
-                            let content = input.as_str(start..delim_range.start);
+                            let content = self.input.as_str(last_delimiter_end..delim_range.start);
                             let content = if is_first {
                                 content.strip_prefix(' ').unwrap_or(content)
                             } else {
                                 content
                             };
                             self.buffer.push_back(Ok((
-                                start,
+                                last_delimiter_end,
                                 Token::Raw(content),
                                 delim_range.start,
                             )));
@@ -378,12 +386,13 @@ impl<'input> Lexer<'input> {
                         delim_range.end,
                     )));
                     self.input.set_start(delim_range.end);
+                    self.searcher.set_last_match_end(delim_range.end);
                 }
                 Delimiter::RegexEnd if in_regex.is_some() => {
                     last_delimiter_end = delim_range.end;
                     let regex_start = in_regex.take().unwrap();
                     let pattern_start = regex_start.end();
-                    let raw = input.as_str(pattern_start..delim_range.start).trim();
+                    let raw = self.input.as_str(pattern_start..delim_range.start).trim();
                     self.buffer
                         .push_back(Ok((pattern_start, Token::Raw(raw), delim_range.start)));
                     self.buffer.push_back(Ok((
@@ -392,6 +401,7 @@ impl<'input> Lexer<'input> {
                         delim_range.end,
                     )));
                     self.input.set_start(delim_range.end);
+                    self.searcher.set_last_match_end(delim_range.end);
                 }
                 delim @ (Delimiter::RegexEnd | Delimiter::MatchEnd)
                     if in_match.is_none() && in_regex.is_none() =>
@@ -412,7 +422,7 @@ impl<'input> Lexer<'input> {
 
         // The line has been sliced up in delimited parts, but we have to handle any trailing content
         if last_delimiter_end < eol && in_match.is_none() && in_regex.is_none() {
-            let line = input.as_str(last_delimiter_end..eol);
+            let line = self.input.as_str(last_delimiter_end..eol);
             if !line.trim().is_empty() {
                 let line = if is_first {
                     line.strip_prefix(' ').unwrap_or(line)
@@ -423,6 +433,8 @@ impl<'input> Lexer<'input> {
                     .push_back(Ok((last_delimiter_end, Token::Raw(line), eol)));
             }
             self.input.set_start(eol);
+            self.searcher.set_last_match_end(eol);
+            self.delimiter_searcher.set_last_match_end(eol);
         }
 
         // Handle unclosed delimiters
@@ -479,7 +491,6 @@ impl<'input> Lexer<'input> {
                                     Token::Raw(self.input.as_str((end + 1)..range.end)),
                                     range.end,
                                 )));
-                                self.input.set_start(range.end);
                                 return;
                             }
                         }
@@ -503,7 +514,6 @@ impl<'input> Lexer<'input> {
                     let raw = self.input.as_str(next_offset..range.end);
                     self.buffer
                         .push_back(Ok((offset + 1, Token::Raw(raw), range.end)));
-                    self.input.set_start(range.end);
                     return;
                 }
                 c if c.is_whitespace() => (),
@@ -521,13 +531,11 @@ impl<'input> Lexer<'input> {
                         Token::Raw(self.input.as_str(next_offset..range.end)),
                         range.end,
                     )));
-                    self.input.set_start(next_offset);
                     return;
                 }
             }
             offset = next_offset;
         }
-        self.input.set_start(offset);
     }
 
     fn tokenize_capture_or_match_numeric(&mut self, range: Range<usize>) {
@@ -665,13 +673,11 @@ impl<'input> Lexer<'input> {
                         Token::Raw(self.input.as_str(next_offset..range.end)),
                         range.end,
                     )));
-                    self.input.set_start(next_offset);
                     return;
                 }
             }
             offset = next_offset;
         }
-        self.input.set_start(offset);
     }
 }
 impl<'input> Iterator for Lexer<'input> {

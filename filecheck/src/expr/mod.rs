@@ -1,6 +1,6 @@
 mod parser;
 
-use std::{fmt, str::FromStr};
+use std::{borrow::Cow, fmt, str::FromStr};
 
 use litcheck::{
     diagnostics::{Diagnostic, LabeledSpan, Report, SourceSpan, Span, Spanned},
@@ -187,7 +187,7 @@ impl CliVariable {
             .map(|sym| interner.resolve(sym).to_string().into_boxed_str());
         let value = match var.value {
             Value::Undef => Value::Undef,
-            Value::Str(s) => Value::Str(Box::leak::<'static>(s.to_string().into_boxed_str())),
+            Value::Str(s) => Value::Str(Cow::Owned(s.to_string())),
             Value::Num(n) => Value::Num(n),
         };
         Self { name, value }
@@ -226,7 +226,7 @@ impl TypedVariable for CliVariable {
             let v = if v.is_empty() {
                 Value::Undef
             } else {
-                Value::Str(Box::leak::<'static>(v.to_string().into_boxed_str()))
+                Value::Str(Cow::Owned(v.to_string()))
             };
             let span = SourceSpan::from(0..(k.as_bytes().len()));
             Ok(CliVariable {
@@ -248,8 +248,25 @@ pub struct Var<'a> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Value<'a> {
     Undef,
-    Str(&'a str),
+    Str(Cow<'a, str>),
     Num(Expr),
+}
+impl<'a> Value<'a> {
+    pub fn unwrap_string(&self) -> Cow<'a, str> {
+        match self {
+            Self::Undef => Cow::Borrowed(""),
+            Self::Str(s) => s.clone(),
+            Self::Num(Expr::Num(n)) => Cow::Owned(format!("{n}")),
+            Self::Num(expr) => panic!("cannot unwrap expression as string: {expr:?}"),
+        }
+    }
+
+    pub fn as_number(&self) -> Option<Number> {
+        match self {
+            Value::Num(Expr::Num(num)) => Some(num.clone()),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -326,7 +343,68 @@ impl fmt::Display for Number {
 pub enum NumberFormat {
     Unsigned { precision: u8 },
     Signed { precision: u8 },
-    Hex { require_prefix: bool, precision: u8 },
+    Hex { precision: u8, require_prefix: bool },
+}
+impl NumberFormat {
+    pub fn is_signed(&self) -> bool {
+        matches!(self, Self::Signed { .. })
+    }
+
+    pub fn is_hex(&self) -> bool {
+        matches!(self, Self::Hex { .. })
+    }
+
+    pub fn precision(&self) -> usize {
+        match self {
+            Self::Unsigned { precision }
+            | Self::Signed { precision }
+            | Self::Hex { precision, .. } => *precision as usize,
+        }
+    }
+
+    pub fn pattern(&self) -> String {
+        const I64_MAX: &'static str = "9223372036854775807";
+        const MAX_DIGITS: usize = I64_MAX.len();
+
+        match self {
+            NumberFormat::Signed { precision: 0 } => {
+                format!("[-+]?(?P<digits>[0-9]{{1,{MAX_DIGITS}}})")
+            }
+            NumberFormat::Signed { precision } => {
+                format!("[-+]?(?P<digits>[0-9]{{{precision}}})")
+            }
+            NumberFormat::Unsigned { precision: 0 } => {
+                format!("(?P<digits>[0-9]{{1,{MAX_DIGITS}}})")
+            }
+            NumberFormat::Unsigned { precision } => {
+                format!("(?P<digits>[0-9]{{{precision}}})")
+            }
+            NumberFormat::Hex {
+                require_prefix: true,
+                precision: 0,
+            } => {
+                format!("0x(?P<digits>[A-Fa-f0-9]{{1,{MAX_DIGITS}}})")
+            }
+            NumberFormat::Hex {
+                require_prefix: true,
+                precision,
+            } => {
+                format!("0x(?P<digits>[A-Fa-f0-9]{{{precision}}})")
+            }
+            NumberFormat::Hex {
+                require_prefix: false,
+                precision: 0,
+            } => {
+                format!("(?P<digits>[A-Fa-f0-9]{{1,{MAX_DIGITS}}})")
+            }
+            NumberFormat::Hex {
+                require_prefix: false,
+                precision,
+            } => {
+                format!("(?P<digits>[A-Fa-f0-9]{{{precision}}})")
+            }
+        }
+    }
 }
 impl Default for NumberFormat {
     fn default() -> Self {
@@ -352,19 +430,13 @@ pub enum Expr {
         lhs: Box<Expr>,
         rhs: Box<Expr>,
     },
-    #[allow(dead_code)]
-    Call {
-        span: SourceSpan,
-        callee: Span<Symbol>,
-        args: Vec<Expr>,
-    },
 }
 impl Spanned for Expr {
     fn span(&self) -> SourceSpan {
         match self {
             Self::Num(spanned) => spanned.span(),
             Self::Var(spanned) => spanned.span(),
-            Self::Binary { span, .. } | Self::Call { span, .. } => *span,
+            Self::Binary { span, .. } => *span,
         }
     }
 }
@@ -432,18 +504,6 @@ impl PartialEq for Expr {
                     ..
                 },
             ) => aop == bop && al == bl && ar == br,
-            (
-                Self::Call {
-                    callee: ac,
-                    args: aargs,
-                    ..
-                },
-                Self::Call {
-                    callee: bc,
-                    args: bargs,
-                    ..
-                },
-            ) => ac == bc && aargs == bargs,
             _ => false,
         }
     }

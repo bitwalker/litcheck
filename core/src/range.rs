@@ -225,3 +225,21 @@ pub fn range_from_bounds<R: RangeBounds<usize>>(
         Ok(Range::new(start, end))
     }
 }
+
+pub fn range_from_bounds_with_defaults<R: RangeBounds<usize>>(
+    range: R,
+    default_start: usize,
+    default_end: usize,
+) -> Range<usize> {
+    let start = match range.start_bound() {
+        Bound::Included(&i) => i,
+        Bound::Excluded(&i) => i + 1,
+        Bound::Unbounded => default_start,
+    };
+    let end = match range.end_bound() {
+        Bound::Included(&i) => i + 1,
+        Bound::Excluded(&i) => i,
+        Bound::Unbounded => default_end,
+    };
+    Range::new(start, end)
+}

@@ -53,6 +53,11 @@ impl<'a> Input<'a> {
         self.span.end
     }
 
+    /// Set whether searches of this input should be anchored
+    pub fn set_anchored(&mut self, anchored: bool) {
+        self.anchored = anchored;
+    }
+
     /// Set the start of the search area to `start`
     ///
     /// `start` is clamped to the end of the buffer.

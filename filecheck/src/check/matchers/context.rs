@@ -1,335 +1,303 @@
-use std::{collections::BTreeMap, ops::RangeBounds};
+use std::ops::RangeBounds;
 
 use litcheck::{
-    diagnostics::ArcSource,
-    range::{self, Range},
-    text::{self, Newline},
+    diagnostics::{ArcSource, SourceFile},
     StringInterner, Symbol,
 };
 
-use crate::{
-    check::{matchers::LookMatcher, Input},
-    expr::{Value, VariableName},
-    Config,
-};
+use crate::{check::Input, expr::Value, Config};
 
-#[derive(Debug, Copy, Clone)]
-pub struct Cursor {
-    eol: usize,
-    block: Range<usize>,
+use super::{Cursor, CursorGuard, CursorPosition, Env, LexicalScope, LexicalScopeMut, ScopeGuard};
+
+pub trait Context<'input, 'context> {
+    fn config(&self) -> &'context Config;
+
+    fn env(&self) -> &dyn LexicalScope<Value = Value<'input>>;
+
+    fn env_mut<'env, 'this: 'env>(
+        &'this mut self,
+    ) -> &'env mut dyn LexicalScopeMut<Value = Value<'input>>;
+
+    fn match_file(&self) -> ArcSource;
+
+    fn match_file_bytes(&self) -> &[u8];
+
+    fn input_file(&self) -> ArcSource;
+
+    fn buffer(&self) -> &'input [u8];
+
+    fn cursor(&self) -> &Cursor<'input>;
+
+    fn cursor_mut(&mut self) -> &mut Cursor<'input>;
+
+    fn move_to(&mut self, pos: CursorPosition) {
+        self.cursor_mut().move_to(pos);
+    }
+
+    fn reset(&mut self) {
+        self.cursor_mut().reset();
+    }
+
+    fn symbolize(&mut self, value: &str) -> Symbol;
+
+    fn resolve(&mut self, value: Symbol) -> &str;
+
+    /// Compute the value of `@LINE` for a given offset in the match file
+    fn pseudo_line_for_offset(&self, offset: usize) -> usize {
+        let bytes = self.match_file_bytes();
+        let end = core::cmp::min(bytes.len(), offset);
+        memchr::memchr_iter(b'\n', &bytes[..end]).count() + 1
+    }
+
+    /// Get an [Input] that can be used to search the entire underlying buffer
+    fn search(&self) -> Input<'input> {
+        self.cursor().search()
+    }
+
+    /// Get an [Input] that can be used to search from the current position to the
+    /// end of the underlying buffer, ignoring the end bound of the cursor.
+    fn search_to_end(&self) -> Input<'input> {
+        self.cursor().search_to_end()
+    }
+
+    /// Get an [Input] that can be used to search the unvisited portion of the current block
+    fn search_block(&self) -> Input<'input> {
+        self.cursor().search_block()
+    }
+
+    /// Get an [Input] that can be used to search the unvisited portion of the current line
+    fn search_line(&self) -> Input<'input> {
+        self.cursor().search_line()
+    }
+
+    fn protect<'guard, 'this: 'guard>(&'this mut self) -> ContextGuard<'guard, 'input, 'context>;
 }
-impl Cursor {
-    /// Returns the index of this cursor in the underlying buffer
-    pub fn at(&self) -> usize {
-        self.block.start
+
+pub trait ContextExt<'input, 'context>: Context<'input, 'context> {
+    fn get_or_intern<S: AsRef<str>>(&mut self, value: S) -> Symbol;
+
+    /// Get an [Input] that can be used to search an arbitrary range of the underlying buffer
+    fn search_range<R>(&self, range: R) -> Input<'input>
+    where
+        R: RangeBounds<usize>,
+    {
+        self.cursor().search_range(range)
+    }
+}
+impl<'input, 'context, C: Context<'input, 'context> + ?Sized> ContextExt<'input, 'context> for C {
+    #[inline(always)]
+    fn get_or_intern<S: AsRef<str>>(&mut self, value: S) -> Symbol {
+        <C as Context<'input, 'context>>::symbolize(self, value.as_ref())
+    }
+
+    #[inline(always)]
+    fn search_range<R>(&self, range: R) -> Input<'input>
+    where
+        R: RangeBounds<usize>,
+    {
+        self.cursor().search_range(range)
     }
 }
 
-pub struct MatchContext<'a> {
+pub struct ContextGuard<'guard, 'input, 'context> {
+    config: &'context Config,
+    match_file: ArcSource,
+    input_file: ArcSource,
+    scope: ScopeGuard<'guard, 'input, Value<'input>>,
+    cursor: CursorGuard<'guard, 'input>,
+    _marker: core::marker::PhantomData<&'input ()>,
+}
+impl<'guard, 'input, 'context> ContextGuard<'guard, 'input, 'context> {
+    pub fn save(self) {
+        self.cursor.save();
+        self.scope.save();
+    }
+
+    pub fn extend_locals<I>(&mut self, bindings: I)
+    where
+        I: IntoIterator<Item = (Symbol, Value<'input>)>,
+    {
+        use super::LexicalScopeExtend;
+
+        self.scope.extend(bindings);
+    }
+}
+impl<'guard, 'input: 'guard, 'context> Context<'input, 'context>
+    for ContextGuard<'guard, 'input, 'context>
+{
+    fn protect<'nested, 'this: 'nested>(
+        &'this mut self,
+    ) -> ContextGuard<'nested, 'input, 'context> {
+        ContextGuard {
+            config: self.config,
+            match_file: self.match_file.clone(),
+            input_file: self.match_file.clone(),
+            scope: self.scope.protect(),
+            cursor: self.cursor.protect(),
+            _marker: core::marker::PhantomData,
+        }
+    }
+
+    #[inline(always)]
+    fn config(&self) -> &'context Config {
+        self.config
+    }
+
+    #[inline(always)]
+    fn env(&self) -> &dyn LexicalScope<Value = Value<'input>> {
+        &self.scope
+    }
+
+    #[inline(always)]
+    fn env_mut<'env, 'this: 'env>(
+        &'this mut self,
+    ) -> &'env mut dyn LexicalScopeMut<Value = Value<'input>> {
+        &mut self.scope
+    }
+
+    #[inline]
+    fn match_file(&self) -> ArcSource {
+        self.match_file.clone()
+    }
+
+    #[inline(always)]
+    fn match_file_bytes(&self) -> &[u8] {
+        self.match_file.source_bytes()
+    }
+
+    #[inline]
+    fn input_file(&self) -> ArcSource {
+        self.input_file.clone()
+    }
+
+    #[inline(always)]
+    fn buffer(&self) -> &'input [u8] {
+        self.cursor.buffer()
+    }
+
+    #[inline(always)]
+    fn cursor(&self) -> &Cursor<'input> {
+        self.cursor.as_ref()
+    }
+
+    #[inline(always)]
+    fn cursor_mut(&mut self) -> &mut Cursor<'input> {
+        self.cursor.as_mut()
+    }
+
+    #[inline]
+    fn symbolize(&mut self, value: &str) -> Symbol {
+        self.scope.symbolize(value)
+    }
+
+    #[inline]
+    fn resolve(&mut self, value: Symbol) -> &str {
+        self.scope.resolve(value)
+    }
+}
+
+pub struct MatchContext<'input, 'context> {
     /// The current global configuration
-    pub config: &'a Config,
-    /// The current string interner
-    pub interner: &'a mut StringInterner,
-    /// The input buffer being checked
-    pub buffer: &'a [u8],
+    pub config: &'context Config,
+    pub env: Env<'input, 'context>,
     pub match_file: ArcSource,
     pub input_file: ArcSource,
-    /// The index at which the current line ends
-    pub eol: usize,
-    /// The byte range of the current block.
-    ///
-    /// Any searches will implicitly stop at the end of this range as if it is EOF.
-    ///
-    /// Defaults to the full span of the input buffer.
-    pub block: Range<usize>,
-    /// The operand stack used by some patterns
-    pub stack: Vec<Value<'a>>,
-    /// Global variables set on command line
-    pub globals: BTreeMap<Symbol, Value<'a>>,
-    /// Local variables bound during matching
-    pub locals: BTreeMap<Symbol, Value<'a>>,
-    /// A look-around matcher for the current input
-    pub look: LookMatcher,
-    /// Set to true if the current buffer uses CRLF line endings
-    pub crlf: bool,
+    cursor: Cursor<'input>,
 }
-impl<'a> MatchContext<'a> {
+impl<'input, 'context: 'input> MatchContext<'input, 'context> {
     pub fn new(
-        config: &'a Config,
-        interner: &'a mut StringInterner,
+        config: &'context Config,
+        interner: &'context mut StringInterner,
         match_file: ArcSource,
         input_file: ArcSource,
-        buffer: &'a [u8],
+        buffer: &'input [u8],
     ) -> Self {
-        let newline = Newline::next(buffer);
-        let eof = buffer.len();
-
-        let globals = BTreeMap::from_iter(config.variables.iter().map(|v| {
-            (
-                interner.get_or_intern(v.name.as_ref()),
-                match v.value {
-                    Value::Undef => Value::Undef,
-                    Value::Str(s) => Value::Str(s),
-                    Value::Num(ref n) => Value::Num(n.clone()),
-                },
-            )
-        }));
-
+        let env = Env::<'input, 'context>::from_config(config, interner);
         Self {
             config,
-            interner,
+            env,
             match_file,
             input_file,
-            buffer,
-            eol: newline.offset(),
-            block: Range::new(0, eof),
-            stack: vec![],
-            globals,
-            locals: Default::default(),
-            look: LookMatcher::new(),
-            crlf: newline.is_crlf(),
+            cursor: Cursor::new(buffer),
         }
-    }
-
-    pub fn cursor(&self) -> Cursor {
-        Cursor {
-            eol: self.eol,
-            block: self.block,
-        }
-    }
-
-    pub fn reset_to_cursor(&mut self, cursor: Cursor) {
-        self.eol = cursor.eol;
-        self.block = cursor.block;
-    }
-
-    pub fn reset(&mut self) {
-        let newline = Newline::next(self.buffer);
-        self.eol = newline.offset();
-        self.crlf = newline.is_crlf();
-        self.block.start = 0;
-        self.block.end = self.buffer.len();
-        self.stack.clear();
-        self.locals.clear();
     }
 
     pub fn enter_block<R>(&mut self, range: R)
     where
         R: RangeBounds<usize>,
     {
-        let eof = self.buffer.len();
-        let range = range::range_from_bounds(range, Range::new(0, eof)).unwrap();
-        let eol = self.next_newline_from(range.start).unwrap_or(eof);
-        self.block = range;
-        self.eol = eol;
+        self.cursor.set_bounds(range);
         if self.config.enable_var_scope {
-            self.locals.clear();
+            self.env.clear();
+        }
+    }
+}
+impl<'input, 'context: 'input> Context<'input, 'context> for MatchContext<'input, 'context> {
+    fn protect<'guard, 'this: 'guard>(&'this mut self) -> ContextGuard<'guard, 'input, 'context> {
+        ContextGuard {
+            config: self.config,
+            match_file: self.match_file.clone(),
+            input_file: self.match_file.clone(),
+            scope: self.env.protect(),
+            cursor: self.cursor.protect(),
+            _marker: core::marker::PhantomData,
         }
     }
 
-    pub fn set_local(&mut self, key: Symbol, value: Value<'a>) {
-        self.locals.insert(key, value);
-    }
-
-    pub fn get_local(&self, key: Symbol) -> Option<&Value<'a>> {
-        self.locals.get(&key)
-    }
-
-    pub fn get_global(&self, key: Symbol) -> Option<&Value<'a>> {
-        self.globals.get(&key)
-    }
-
-    pub fn get_variable(&self, name: &VariableName) -> Option<&Value<'a>> {
-        match name {
-            VariableName::User(key) => self.locals.get(key),
-            VariableName::Global(key) => self.globals.get(key),
-            VariableName::Pseudo(key) => panic!(
-                "expected pseudo-variable '{}' to have been expanded by caller",
-                self.interner.resolve(key.into_inner())
-            ),
-        }
-    }
-
-    /// Returns the index corresponding to the start of the searchable buffer (current block)
     #[inline(always)]
-    pub fn start(&self) -> usize {
-        self.block.start
+    fn config(&self) -> &'context Config {
+        self.config
     }
 
-    /// Returns the index corresponding to the end of the searchable buffer (current block)
     #[inline(always)]
-    pub fn end(&self) -> usize {
-        self.block.end
+    fn env(&self) -> &dyn LexicalScope<Value = Value<'input>> {
+        &self.env
     }
 
-    /// Returns the index (exclusive) corresponding to the end of the input buffer
-    ///
-    /// The returned index is valid for use in a range, but cannot be used to index the buffer.
     #[inline(always)]
-    pub fn end_of_file(&self) -> usize {
-        self.buffer.len()
+    fn env_mut<'env, 'this: 'env>(
+        &'this mut self,
+    ) -> &'env mut dyn LexicalScopeMut<Value = Value<'input>> {
+        &mut self.env
     }
 
-    /// Return the index corresponding to the next newline in the input
-    ///
-    /// This will be equal to `self.end_of_file()` if there are no more newlines in the input.
+    #[inline]
+    fn match_file(&self) -> ArcSource {
+        self.match_file.clone()
+    }
+
     #[inline(always)]
-    pub fn end_of_line(&self) -> usize {
-        self.eol
+    fn match_file_bytes(&self) -> &[u8] {
+        self.match_file.source_bytes()
     }
 
-    /// Return the index corresponding to the first byte following the next newline in the input
-    ///
-    /// This will be equal to `self.end_of_file()` if there are no more newlines in the input.
+    #[inline]
+    fn input_file(&self) -> ArcSource {
+        self.input_file.clone()
+    }
+
     #[inline(always)]
-    pub fn start_of_next_line(&self) -> usize {
-        if self.crlf {
-            core::cmp::min(self.eol + 2, self.buffer.len())
-        } else {
-            core::cmp::min(self.eol + 1, self.buffer.len())
-        }
+    fn buffer(&self) -> &'input [u8] {
+        self.cursor.buffer
     }
 
-    /// Get an [Input] that can be used to search the entire underlying buffer
-    pub fn search(&self) -> Input<'a> {
-        Input::new(self.buffer, self.crlf)
+    #[inline(always)]
+    fn cursor(&self) -> &Cursor<'input> {
+        &self.cursor
     }
 
-    /// Get an [Input] that can be used to search an arbitrary range of the underlying buffer
-    pub fn search_range<R: RangeBounds<usize>>(&self, range: R) -> Input<'a> {
-        Input::new(self.buffer, self.crlf).span(range)
+    #[inline(always)]
+    fn cursor_mut(&mut self) -> &mut Cursor<'input> {
+        &mut self.cursor
     }
 
-    /// Get an [Input] that can be used to search the unvisited portion of the current block
-    pub fn search_block(&self) -> Input<'a> {
-        Input::new(self.buffer, self.crlf).span(self.block)
+    #[inline]
+    fn symbolize(&mut self, value: &str) -> Symbol {
+        self.env.symbolize(value)
     }
 
-    /// Get an [Input] that can be used to search the unvisited portion of the current line
-    pub fn search_line(&self) -> Input<'a> {
-        Input::new(self.buffer, self.crlf).span(self.block.start..self.eol)
-    }
-
-    /// Consume `num_bytes` of the current block, ensuring all future searches of the
-    /// block start after the consumed region.
-    ///
-    /// NOTE: This function will panic if `num_bytes` exceeds the size of the current block
-    pub fn consume(&mut self, num_bytes: usize) {
-        assert!(num_bytes < self.block.len());
-
-        self.block.shrink_front(num_bytes);
-        if self.block.start >= self.eol {
-            let eof = self.buffer.len();
-            self.eol = if self.crlf {
-                text::find_next_crlf_or_eof(self.buffer, Range::new(self.block.start, eof))
-                    .unwrap_or(eof)
-            } else {
-                text::find_next_lf_or_eof(self.buffer, Range::new(self.block.start, eof))
-                    .unwrap_or(eof)
-            };
-        }
-    }
-
-    pub fn consume_newline(&mut self) {
-        debug_assert!(
-            self.is_end_of_line(self.block.start),
-            "expected newline (crlf={}) at offset {}, invalid sequence starts with character code {}",
-            self.crlf,
-            self.block.start,
-            self.buffer[self.block.start]
-        );
-        if self.crlf {
-            self.consume(2);
-        } else {
-            self.consume(1);
-        }
-    }
-
-    /// Returns true if the current position is at end of input
-    pub fn at_eof(&self) -> bool {
-        self.is_eof(self.block.start)
-    }
-
-    /// Returns true if `offset` in the input buffer is end of input
-    pub fn is_eof(&self, offset: usize) -> bool {
-        self.look.is_end(self.buffer, offset)
-    }
-
-    /// Returns true if the current position is at the start of a line
-    pub fn at_start_of_line(&self) -> bool {
-        self.is_start_of_line(self.block.start)
-    }
-
-    /// Returns true if `offset` in the input buffer is the start of a line (which includes the start of the input)
-    ///
-    /// The start of a line is immediately following a `\n` or `\r\n` (depending on crlf mode)
-    pub fn is_start_of_line(&self, offset: usize) -> bool {
-        if self.crlf {
-            self.look.is_start_crlf(self.buffer, offset)
-        } else {
-            self.look.is_start_lf(self.buffer, offset)
-        }
-    }
-
-    /// Returns true if the current position is at the end of a line
-    pub fn at_end_of_line(&self) -> bool {
-        self.is_end_of_line(self.block.start)
-    }
-
-    /// Returns true if `offset` in the input buffer is the end of a line (which includes the end of the input)
-    ///
-    /// The end of a line is immediately preceding a `\n` or `\r\n` (depending on crlf mode)
-    pub fn is_end_of_line(&self, offset: usize) -> bool {
-        if self.crlf {
-            self.look.is_end_crlf(self.buffer, offset)
-        } else {
-            self.look.is_end_lf(self.buffer, offset)
-        }
-    }
-
-    /// Find the next newline from the current position, up to the end of the current block
-    pub fn next_newline(&self) -> Option<usize> {
-        self.next_newline_in_range(self.block)
-    }
-
-    /// Find the previous newline from the current position, up to the end of the current block
-    pub fn prev_newline(&self) -> Option<usize> {
-        self.prev_newline_in_range(self.block)
-    }
-
-    /// Find the next newline from the given offset
-    pub fn next_newline_from(&self, offset: usize) -> Option<usize> {
-        self.next_newline_in_range(offset..)
-    }
-
-    /// Find the previous newline, staring from from the given offset
-    pub fn prev_newline_from(&self, offset: usize) -> Option<usize> {
-        self.prev_newline_in_range(..offset)
-    }
-
-    /// Find the next newline in the given range
-    pub fn next_newline_in_range<R>(&self, range: R) -> Option<usize>
-    where
-        R: RangeBounds<usize>,
-    {
-        let range = range::range_from_bounds(range, Range::new(0, self.buffer.len())).unwrap();
-        if self.crlf {
-            text::find_next_crlf_or_eof(self.buffer, range)
-        } else {
-            text::find_next_lf_or_eof(self.buffer, range)
-        }
-    }
-
-    /// Find the previous newline in the given range, starting from the end of the range
-    pub fn prev_newline_in_range<R>(&self, range: R) -> Option<usize>
-    where
-        R: RangeBounds<usize>,
-    {
-        let range = range::range_from_bounds(range, Range::new(0, self.buffer.len())).unwrap();
-        if self.crlf {
-            text::find_prev_crlf_or_eof(self.buffer, range)
-        } else {
-            text::find_prev_lf_or_eof(self.buffer, range)
-        }
+    #[inline]
+    fn resolve(&mut self, value: Symbol) -> &str {
+        self.env.resolve(value)
     }
 }

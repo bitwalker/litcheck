@@ -1,32 +1,36 @@
 pub mod bytecode;
 mod checker;
+mod errors;
 mod input;
 pub mod matchers;
+mod pattern;
 mod rules;
 mod test;
 
-use self::bytecode::{CheckProgram, Pattern, PatternSet};
+pub use self::bytecode::CheckProgram;
 pub use self::checker::{Checker, TestFailed};
+pub use self::errors::*;
 pub use self::input::Input;
 use self::matchers::*;
-use self::rules::Rule;
+pub use self::matchers::{
+    Context, ContextGuard, LexicalScope, LexicalScopeExtend, LexicalScopeMut, MatchContext,
+    MatchInfo, MatchResult, ScopeGuard,
+};
+pub use self::pattern::{MatchAll, MatchAny, Pattern, PatternIdentifier, PatternPrefix};
+pub use self::rules::{DynRule, Rule};
 pub use self::test::FileCheckTest;
 
 use std::{borrow::Cow, fmt, str::FromStr};
 
-use litcheck::diagnostics::{DiagResult, Diagnostic, Report, SourceSpan, Span, Spanned};
+use litcheck::{
+    diagnostics::{DiagResult, SourceSpan, Span, Spanned},
+    StringInterner,
+};
 
 use crate::{expr::*, Config};
 
 pub const DEFAULT_CHECK_PREFIXES: &[&str] = &["CHECK"];
 pub const DEFAULT_COMMENT_PREFIXES: &[&str] = &["COM", "RUN"];
-
-#[derive(Diagnostic, Debug, thiserror::Error)]
-pub enum CheckError {
-    #[error("check failed: invalid expression in directive: {0}")]
-    #[diagnostic(transparent)]
-    Expr(#[from] ExprError),
-}
 
 /// A check file is the source file we're going to check matches some set of rules.
 ///
@@ -53,8 +57,12 @@ impl<'a> CheckFile<'a> {
         self.lines
     }
 
-    pub fn compile(self, config: &'a Config) -> DiagResult<CheckProgram<'a>> {
-        CheckProgram::compile(self, config)
+    pub fn compile(
+        self,
+        config: &'a Config,
+        interner: &mut StringInterner,
+    ) -> DiagResult<CheckProgram<'a>> {
+        CheckProgram::compile(self, config, interner)
     }
 }
 
@@ -286,6 +294,7 @@ impl FromStr for CheckModifier {
 }
 impl fmt::Debug for CheckModifier {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use std::fmt::Write;
         f.write_str("CheckModifier(")?;
         let mut mods = 0;
         if self.contains(Self::LITERAL) {
@@ -298,7 +307,7 @@ impl fmt::Debug for CheckModifier {
             }
             write!(f, "COUNT({})", self.count())?;
         }
-        Ok(())
+        f.write_char(')')
     }
 }
 impl CheckModifier {
@@ -327,10 +336,10 @@ impl PartialEq for CheckModifier {
 }
 
 /// A check pattern is the part of a check line which must match in the check file somewhere
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub enum CheckPattern<'a> {
     /// There is no content, we're at the end of line
-    Empty,
+    Empty(SourceSpan),
     /// The entire pattern is a single raw string
     Literal(Span<&'a str>),
     /// The entire pattern is a single regex string
@@ -338,18 +347,96 @@ pub enum CheckPattern<'a> {
     /// The pattern is some mix of literal parts and match rules
     Match(Span<Vec<CheckPatternPart<'a>>>),
 }
+impl<'a> PartialEq for CheckPattern<'a> {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Empty(_), Self::Empty(_)) => true,
+            (Self::Literal(l), Self::Literal(r)) => l == r,
+            (Self::Regex(l), Self::Regex(r)) => l == r,
+            (Self::Match(l), Self::Match(r)) => l == r,
+            _ => false,
+        }
+    }
+}
 impl<'a> CheckPattern<'a> {
     pub fn is_empty(&self) -> bool {
         match self {
-            Self::Empty => true,
+            Self::Empty(_) => true,
             Self::Literal(ref spanned) => spanned.is_empty(),
             Self::Regex(_) | Self::Match(_) => false,
         }
     }
 
+    pub fn prefix(&self) -> Option<(Span<Cow<'a, str>>, bool)> {
+        match self {
+            Self::Literal(literal) => Some((literal.map(Cow::Borrowed), true)),
+            Self::Regex(pattern) => Some((pattern.map(Cow::Borrowed), false)),
+            Self::Match(parts) => match &parts[0] {
+                CheckPatternPart::Literal(literal) => Some((literal.map(Cow::Borrowed), true)),
+                CheckPatternPart::Regex(pattern) => Some((pattern.map(Cow::Borrowed), false)),
+                CheckPatternPart::Match(Match::Numeric {
+                    span,
+                    format,
+                    capture: None,
+                    expr: None,
+                    ..
+                }) => Some((Span::new(*span, Cow::Owned(format.pattern())), false)),
+                CheckPatternPart::Match(_) => None,
+            },
+            Self::Empty(_) => None,
+        }
+    }
+
+    pub fn pop_prefix(&mut self) -> Option<(Span<Cow<'a, str>>, bool)> {
+        use std::collections::VecDeque;
+
+        match self {
+            Self::Literal(literal) => {
+                let span = literal.span();
+                let result = Some((literal.map(Cow::Borrowed), true));
+                *self = Self::Empty(span);
+                result
+            }
+            Self::Regex(pattern) => {
+                let span = pattern.span();
+                let result = Some((pattern.map(Cow::Borrowed), false));
+                *self = Self::Empty(span);
+                result
+            }
+            Self::Match(ref mut parts) => {
+                let span = parts.span();
+                let mut ps = VecDeque::<CheckPatternPart<'a>>::from(core::mem::take(&mut **parts));
+                let prefix = match ps.pop_front().unwrap() {
+                    CheckPatternPart::Literal(literal) => Some((literal.map(Cow::Borrowed), true)),
+                    CheckPatternPart::Regex(pattern) => Some((pattern.map(Cow::Borrowed), false)),
+                    CheckPatternPart::Match(Match::Numeric {
+                        span,
+                        format,
+                        capture: None,
+                        expr: None,
+                        ..
+                    }) => Some((Span::new(span, Cow::Owned(format.pattern())), false)),
+                    part @ CheckPatternPart::Match(_) => {
+                        ps.push_front(part);
+                        None
+                    }
+                };
+                if prefix.is_some() {
+                    if ps.is_empty() {
+                        *self = Self::Empty(span);
+                    } else {
+                        *parts = Span::new(span, ps.into());
+                    }
+                }
+                prefix
+            }
+            Self::Empty(_) => None,
+        }
+    }
+
     pub fn has_variable(&self) -> Option<&CheckPatternPart<'a>> {
         match self {
-            Self::Empty | Self::Literal(_) | Self::Regex(_) => None,
+            Self::Empty(_) | Self::Literal(_) | Self::Regex(_) => None,
             Self::Match(ref parts) => parts.iter().find(|p| p.has_variable()),
         }
     }
@@ -357,7 +444,7 @@ impl<'a> CheckPattern<'a> {
 impl<'a> Spanned for CheckPattern<'a> {
     fn span(&self) -> SourceSpan {
         match self {
-            Self::Empty => SourceSpan::from(0..0),
+            Self::Empty(span) => *span,
             Self::Literal(ref spanned) => spanned.span(),
             Self::Regex(ref spanned) => spanned.span(),
             Self::Match(ref spanned) => spanned.span(),
@@ -367,7 +454,7 @@ impl<'a> Spanned for CheckPattern<'a> {
 impl<'a> From<Vec<CheckPatternPart<'a>>> for CheckPattern<'a> {
     fn from(mut parts: Vec<CheckPatternPart<'a>>) -> Self {
         match parts.len() {
-            0 => CheckPattern::Empty,
+            0 => CheckPattern::Empty(SourceSpan::from(0..0)),
             1 => match parts.pop().unwrap() {
                 CheckPatternPart::Literal(lit) => Self::Literal(lit),
                 CheckPatternPart::Regex(re) => Self::Regex(re),
@@ -573,204 +660,4 @@ impl<'a> PartialEq for Match<'a> {
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Constraint {
     Eq,
-}
-
-/// This type wraps related diagnostics for use with [CheckFailedError]
-#[derive(Debug)]
-pub struct RelatedError(Report);
-impl RelatedError {
-    pub fn into_report(self) -> Report {
-        self.0
-    }
-
-    #[inline(always)]
-    pub fn as_diagnostic(&self) -> &dyn Diagnostic {
-        self.0.as_ref()
-    }
-}
-impl Diagnostic for RelatedError {
-    fn code<'a>(&'a self) -> Option<Box<dyn fmt::Display + 'a>> {
-        self.as_diagnostic().code()
-    }
-    fn severity(&self) -> Option<litcheck::diagnostics::Severity> {
-        self.as_diagnostic().severity()
-    }
-    fn help<'a>(&'a self) -> Option<Box<dyn fmt::Display + 'a>> {
-        self.as_diagnostic().help()
-    }
-    fn url<'a>(&'a self) -> Option<Box<dyn fmt::Display + 'a>> {
-        self.as_diagnostic().url()
-    }
-    fn source_code(&self) -> Option<&dyn litcheck::diagnostics::SourceCode> {
-        self.as_diagnostic().source_code()
-    }
-    fn labels(&self) -> Option<Box<dyn Iterator<Item = litcheck::diagnostics::LabeledSpan> + '_>> {
-        self.as_diagnostic().labels()
-    }
-    fn related<'a>(&'a self) -> Option<Box<dyn Iterator<Item = &'a dyn Diagnostic> + 'a>> {
-        self.as_diagnostic().related()
-    }
-    fn diagnostic_source(&self) -> Option<&dyn Diagnostic> {
-        self.as_diagnostic().diagnostic_source()
-    }
-}
-impl fmt::Display for RelatedError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Display::fmt(&self.0, f)
-    }
-}
-impl std::error::Error for RelatedError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        AsRef::<dyn std::error::Error>::as_ref(&self.0).source()
-    }
-}
-impl From<Report> for RelatedError {
-    fn from(report: Report) -> Self {
-        Self(report)
-    }
-}
-impl RelatedError {
-    pub const fn new(report: Report) -> Self {
-        Self(report)
-    }
-
-    pub fn wrap<E>(error: E) -> Self
-    where
-        E: Diagnostic + Send + Sync + 'static,
-    {
-        Self(Report::new_boxed(Box::new(error)))
-    }
-}
-
-#[derive(Diagnostic, Debug, thiserror::Error)]
-pub enum CheckFailedError {
-    /// Indicates a match for an excluded pattern.
-    #[error("match found, but was excluded")]
-    #[diagnostic()]
-    MatchFoundButExcluded {
-        #[label("match found here")]
-        span: SourceSpan,
-        #[source_code]
-        input_file: litcheck::diagnostics::ArcSource,
-        #[related]
-        pattern: Option<RelatedCheckError>,
-    },
-    /// Indicates a match for an expected pattern, but the match is on the
-    /// wrong line.
-    #[error("match found for expected pattern, but on the wrong line")]
-    #[diagnostic()]
-    MatchFoundButWrongLine {
-        #[label("match found here")]
-        span: SourceSpan,
-        #[source_code]
-        input_file: litcheck::diagnostics::ArcSource,
-        #[related]
-        pattern: Option<RelatedCheckError>,
-    },
-    /// Indicates a discarded match for an expected pattern.
-    #[error("match found, but was discarded")]
-    #[diagnostic()]
-    MatchFoundButDiscarded {
-        #[label("match found here")]
-        span: SourceSpan,
-        #[source_code]
-        input_file: litcheck::diagnostics::ArcSource,
-        #[related]
-        pattern: Option<RelatedCheckError>,
-        #[help]
-        note: Option<String>,
-    },
-    /// Indicates an error while processing a match after the match was found
-    /// for an expected or excluded pattern.  The error is specified by `Note`,
-    /// to which it should be appropriate to prepend "error: " later.  The full
-    /// match itself should be recorded in a preceding diagnostic of a different
-    /// `MatchFound*` match type.
-    #[error("match found, but there was an error processing it")]
-    #[diagnostic()]
-    MatchFoundErrorNote {
-        #[label("match found here")]
-        span: SourceSpan,
-        #[source_code]
-        input_file: litcheck::diagnostics::ArcSource,
-        #[related]
-        error: Option<RelatedError>,
-    },
-    /// Indicates no match for an expected pattern, but this might follow good
-    /// matches when multiple matches are expected for the pattern, or it might
-    /// follow discarded matches for the pattern.
-    #[error("no matches were found for expected pattern")]
-    #[diagnostic()]
-    MatchNoneButExpected {
-        #[label("pattern at this location was not matched")]
-        span: SourceSpan,
-        #[source_code]
-        match_file: litcheck::diagnostics::ArcSource,
-        #[help]
-        note: Option<String>,
-    },
-    /// Indicates no match due to an expected or excluded pattern that has
-    /// proven to be invalid at match time.  The exact problems are usually
-    /// reported in subsequent diagnostics of the same match type but with
-    /// `Note` set.
-    #[error("unable to match invalid pattern")]
-    #[diagnostic()]
-    MatchNoneForInvalidPattern {
-        #[label("pattern at this location was invalid")]
-        span: SourceSpan,
-        #[source_code]
-        match_file: litcheck::diagnostics::ArcSource,
-        #[related]
-        error: Option<RelatedError>,
-    },
-    /// Indicates a fuzzy match that serves as a suggestion for the next
-    /// intended match for an expected pattern with too few or no good matches.
-    #[error("an exact match was not found, but some similar matches were found, see notes")]
-    #[diagnostic()]
-    MatchFuzzy {
-        #[label("pattern at this location was invalid")]
-        span: SourceSpan,
-        #[source_code]
-        match_file: litcheck::diagnostics::ArcSource,
-        #[help]
-        notes: Option<String>,
-    },
-}
-
-/// This is used to associated source spans from the match file
-/// with those from the input file.
-#[derive(Diagnostic, Debug, thiserror::Error)]
-#[error("check failed")]
-#[diagnostic()]
-pub struct RelatedCheckError {
-    #[label("due to pattern at this location")]
-    pub span: SourceSpan,
-    #[source_code]
-    pub match_file: litcheck::diagnostics::ArcSource,
-}
-
-#[derive(Debug)]
-pub enum MatchType {
-    /// Indicates a good match for an expected pattern.
-    MatchFoundAndExpected,
-    /// Indicates no match for an excluded pattern.
-    MatchNoneAndExcluded,
-    /// The match failed for some reason
-    Failed(CheckFailedError),
-}
-impl MatchType {
-    pub fn is_ok(&self) -> bool {
-        matches!(
-            self,
-            Self::MatchFoundAndExpected | Self::MatchNoneAndExcluded
-        )
-    }
-}
-impl fmt::Display for MatchType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::MatchFoundAndExpected => f.write_str("match found for expected pattern"),
-            Self::MatchNoneAndExcluded => f.write_str("excluded pattern was never matched"),
-            Self::Failed(err) => write!(f, "{err}"),
-        }
-    }
 }

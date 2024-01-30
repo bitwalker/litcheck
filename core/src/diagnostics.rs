@@ -375,6 +375,21 @@ pub trait Spanned {
     }
     fn span(&self) -> SourceSpan;
 }
+impl<S: Spanned + ?Sized> Spanned for Box<S> {
+    fn span(&self) -> SourceSpan {
+        (**self).span()
+    }
+}
+impl<S: Spanned + ?Sized> Spanned for &S {
+    fn span(&self) -> SourceSpan {
+        (**self).span()
+    }
+}
+impl<S: Spanned + ?Sized> Spanned for &mut S {
+    fn span(&self) -> SourceSpan {
+        (**self).span()
+    }
+}
 impl Spanned for SourceSpan {
     #[inline(always)]
     fn start(&self) -> usize {

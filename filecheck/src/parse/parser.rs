@@ -203,7 +203,7 @@ impl<'config> CheckFileParser<'config> {
                 (_, _, end) if matches!(ty.kind, Check::Empty) => Ok(CheckLine::new(
                     SourceSpan::from(line_start..end),
                     ty,
-                    CheckPattern::Empty,
+                    CheckPattern::Empty(SourceSpan::from(line_start..end)),
                 )),
                 (_, _, end) => {
                     // Expected a non-empty pattern
@@ -257,7 +257,7 @@ impl<'config> CheckFileParser<'config> {
                 0 if matches!(ty.kind, Check::Empty) => Ok(CheckLine::new(
                     SourceSpan::from(line_start..check_end),
                     ty,
-                    CheckPattern::Empty,
+                    CheckPattern::Empty(SourceSpan::from(line_start..check_end)),
                 )),
                 0 => Err(ParserError::EmptyPattern {
                     span: SourceSpan::from(line_start..check_end),

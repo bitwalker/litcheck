@@ -207,12 +207,7 @@ impl<V> PathPrefixTree<V> {
         path: P,
         max_depth: Option<usize>,
     ) -> impl Iterator<Item = Entry<'_, V>> + '_ {
-        dbg!(Dfs::at(
-            self,
-            path.as_ref(),
-            /*only_leaves=*/ false,
-            max_depth
-        ))
+        Dfs::at(self, path.as_ref(), /*only_leaves=*/ false, max_depth)
     }
 }
 

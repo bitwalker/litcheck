@@ -1,105 +1,18 @@
 use std::assert_matches::assert_matches;
 use std::borrow::Cow;
 
-use litcheck::{
-    diagnostics::{self, DiagResult, Report, SourceFile, SourceSpan, Span},
-    StringInterner,
-};
+use litcheck::diagnostics::{DiagResult, SourceSpan, Span};
 use pretty_assertions::assert_eq;
 
-use super::check::*;
-use super::expr::*;
-use super::parse::{self, Lexer, ParserError, Token};
+use crate::check::*;
+use crate::expr::*;
+use crate::parse::{ParserError, Token};
+use crate::testing::TestContext;
 
 macro_rules! empty_span {
     () => {
         SourceSpan::from(0..0)
     };
-}
-
-struct Tokens<'a, S: ?Sized> {
-    source: &'a S,
-    lexer: Lexer<'a>,
-}
-impl<'a, S: SourceFile + ?Sized> Tokens<'a, S> {
-    #[inline]
-    pub fn next(&mut self) -> DiagResult<Option<Token<'a>>> {
-        self.lexer
-            .next()
-            .transpose()
-            .map_err(|err| Report::new(err).with_source_code(self.source.source().to_string()))
-            .map(|opt| opt.map(|(_, tok, _)| tok))
-    }
-}
-
-struct TokensWithErrors<'a> {
-    lexer: Lexer<'a>,
-}
-impl<'a> TokensWithErrors<'a> {
-    #[inline]
-    pub fn next(&mut self) -> Result<Option<Token<'a>>, ParserError> {
-        self.lexer
-            .next()
-            .transpose()
-            .map(|opt| opt.map(|(_, tok, _)| tok))
-    }
-}
-
-struct TestContext {
-    check_prefixes: Vec<Box<str>>,
-    comment_prefixes: Vec<Box<str>>,
-    pub interner: StringInterner,
-}
-impl TestContext {
-    pub fn new() -> Self {
-        let result = diagnostics::reporting::set_hook(Box::new(|_| {
-            Box::new(diagnostics::reporting::ReportHandlerOpts::new().build())
-        }));
-        if result.is_ok() {
-            diagnostics::set_panic_hook();
-        }
-
-        let check_prefixes = vec!["CHECK".to_string().into_boxed_str()];
-        let comment_prefixes = vec![
-            "COM".to_string().into_boxed_str(),
-            "RUN".to_string().into_boxed_str(),
-        ];
-        Self {
-            check_prefixes,
-            comment_prefixes,
-            interner: StringInterner::new(),
-        }
-    }
-
-    #[track_caller]
-    pub fn lex<'a, S: SourceFile + ?Sized>(&self, source: &'a S) -> Tokens<'a, S> {
-        Tokens {
-            source,
-            lexer: Lexer::<'a>::new(source, &self.check_prefixes, &self.comment_prefixes),
-        }
-    }
-
-    #[track_caller]
-    pub fn lex_with_errors<'a, S: SourceFile + ?Sized>(
-        &self,
-        source: &'a S,
-    ) -> TokensWithErrors<'a> {
-        TokensWithErrors {
-            lexer: Lexer::<'a>::new(source, &self.check_prefixes, &self.comment_prefixes),
-        }
-    }
-
-    #[track_caller]
-    pub fn parse<'a>(&mut self, source: &'a str) -> DiagResult<CheckFile<'a>> {
-        let mut parser = parse::CheckFileParser::new(
-            &self.check_prefixes,
-            &self.comment_prefixes,
-            &mut self.interner,
-        );
-        parser
-            .parse(source)
-            .map_err(|err| Report::new(err).with_source_code(source.to_string()))
-    }
 }
 
 #[test]
@@ -861,7 +774,7 @@ fn parser_sanity_test() -> DiagResult<()> {
     let expected = CheckLine::new(
         empty_span!(),
         CheckType::new(empty_span!(), Check::Empty),
-        CheckPattern::Empty,
+        CheckPattern::Empty(empty_span!()),
     );
     assert_eq!(&lines[1], &expected);
     assert_eq!(&lines[2], &expected);

@@ -1,70 +1,6 @@
 use litcheck::diagnostics::{DiagResult, Report, Spanned};
 
-use crate::{check::*, expr::*, Config};
-
-/// The compiled form of [CheckPattern]
-#[derive(Debug)]
-pub enum Pattern<'a> {
-    /// A literal string that must occur somewhere in the input
-    Substring(SubstringMatcher<'a>),
-    /// A regular expression that must occur somewhere in the input
-    Regex(RegexMatcher),
-    /// A hybrid match expression that must occur somewhere in the input
-    Hybrid(HybridMatcher<'a>),
-    /// A matcher for pure ASCII whitespace patterns
-    Whitespace(AsciiWhitespaceMatcher),
-}
-impl<'a> Matcher for Pattern<'a> {
-    fn try_match<'input>(&self, input: Input<'input>) -> Option<MatchInfo<'input>> {
-        match self {
-            Self::Substring(ref matcher) => matcher.try_match(input),
-            Self::Regex(ref matcher) => matcher.try_match(input),
-            Self::Hybrid(ref matcher) => matcher.try_match(input),
-            Self::Whitespace(ref matcher) => matcher.try_match(input),
-        }
-    }
-}
-impl<'a> Spanned for Pattern<'a> {
-    fn span(&self) -> SourceSpan {
-        match self {
-            Self::Substring(ref matcher) => matcher.span(),
-            Self::Regex(ref matcher) => matcher.span(),
-            Self::Hybrid(ref matcher) => matcher.span(),
-            Self::Whitespace(ref matcher) => matcher.span(),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub enum PatternSet<'a> {
-    /// Match a set of literal strings
-    Literal(MultiSubstringMatcher<'a>),
-    /// Match a set of static regex patterns
-    Regex(RegexSetMatcher<'a>),
-    // Match a set of regex patterns, including both static and dynamic patterns
-    //Tree(PatternTree<'a>),
-}
-impl<'a> Spanned for PatternSet<'a> {
-    fn span(&self) -> SourceSpan {
-        match self {
-            Self::Literal(ref matcher) => matcher.span(),
-            Self::Regex(ref matcher) => matcher.span(),
-        }
-    }
-}
-
-/// Used during construction of a [PatternTree] to represent a [PatternSet]
-pub enum DelayedPatternSet<'a> {
-    Literal(Vec<Span<Cow<'a, str>>>),
-    Regex(Vec<CheckPattern<'a>>),
-    Match(Vec<Vec<CheckPatternPart<'a>>>),
-    Mixed(Vec<CheckPattern<'a>>),
-}
-impl<'a> DelayedPatternSet<'a> {
-    pub fn into_pattern_set(self) -> DiagResult<PatternSet<'a>> {
-        todo!()
-    }
-}
+use crate::{check::*, Config};
 
 /// 1. Issue instructions to search for each CHECK-LABEL: directive (if present)
 /// and divide the input into blocks.
@@ -80,36 +16,11 @@ pub enum CheckOp<'a> {
     ///
     /// When evaluated, the checker will see if there are remaining blocks
     /// in the program, and if so, find the index of the next BlockStart
-    BlockStart(Pattern<'a>),
-    ApplyRule(Box<dyn Rule + 'a>),
-    ApplyRulePrecededBy(Box<dyn Rule + 'a>, Box<dyn Rule + 'a>),
-    RepeatRule(Box<dyn Rule + 'a>, usize),
-    RepeatRulePrecededBy(Box<dyn Rule + 'a>, usize, Box<dyn Rule + 'a>),
-}
-
-#[derive(Diagnostic, Debug, thiserror::Error)]
-pub enum InvalidCheckFileError {
-    #[error("check file did not contain any rules")]
-    #[diagnostic()]
-    Empty,
-    #[error("invalid CHECK-LABEL pattern")]
-    #[diagnostic()]
-    CheckLabelVariable {
-        #[label("in this pattern")]
-        line: SourceSpan,
-        #[label("variables/substitutions are not allowed on CHECK-LABEL lines")]
-        var: SourceSpan,
-    },
-    #[error("{kind} directives are not permitted to be the first directive in a file")]
-    #[diagnostic()]
-    InvalidFirstCheck {
-        #[label]
-        line: SourceSpan,
-        kind: Check,
-    },
-    #[error("invalid CHECK pattern")]
-    #[diagnostic()]
-    EmptyPattern(#[label("expected a non-empty pattern here")] SourceSpan),
+    BlockStart(StaticMatcher<'a>),
+    ApplyRule(Box<dyn DynRule + 'a>),
+    ApplyRulePrecededBy(Box<dyn DynRule + 'a>, Box<dyn DynRule + 'a>),
+    RepeatRule(Box<dyn DynRule + 'a>, usize),
+    RepeatRulePrecededBy(Box<dyn DynRule + 'a>, usize, Box<dyn DynRule + 'a>),
 }
 
 #[derive(Default)]
@@ -117,7 +28,11 @@ pub struct CheckProgram<'a> {
     pub code: Vec<CheckOp<'a>>,
 }
 impl<'a> CheckProgram<'a> {
-    pub fn compile(check_file: CheckFile<'a>, _config: &'a Config) -> DiagResult<Self> {
+    pub fn compile(
+        check_file: CheckFile<'a>,
+        _config: &'a Config,
+        interner: &mut StringInterner,
+    ) -> DiagResult<Self> {
         // 1. Identify and split lines into blocks
         // 2. For each block, compile the rules of that block
         let mut program = Self::default();
@@ -173,13 +88,17 @@ impl<'a> CheckProgram<'a> {
 
         // Now, all blocks have been computed, so process each block
         for block in blocks.into_iter().filter(|b| !b.is_empty()) {
-            program.compile_block(block)?;
+            program.compile_block(block, interner)?;
         }
 
         Ok(program)
     }
 
-    fn compile_block(&mut self, block: Vec<CheckLine<'a>>) -> DiagResult<()> {
+    fn compile_block(
+        &mut self,
+        block: Vec<CheckLine<'a>>,
+        interner: &mut StringInterner,
+    ) -> DiagResult<()> {
         let mut lines = block.into_iter().peekable();
 
         // Handle labeled block prologue
@@ -190,18 +109,13 @@ impl<'a> CheckProgram<'a> {
         if is_labeled {
             let line = lines.next().unwrap();
             assert_eq!(line.kind(), Check::Label);
-            if let Some(var) = line.has_variable() {
-                return Err(Report::from(InvalidCheckFileError::CheckLabelVariable {
-                    line: line.span(),
-                    var: var.span(),
-                }));
-            }
-            let pattern = self.compile_pattern(line.pattern)?;
+
+            let pattern = Pattern::compile_static(line.span, line.pattern)?;
             self.push(CheckOp::BlockStart(pattern));
         }
 
         // Emit the body of the block
-        let mut before: Option<Box<dyn Rule + 'a>> = None;
+        let mut before: Option<Box<dyn DynRule + 'a>> = None;
         while let Some(line) = lines.next() {
             match line.kind() {
                 Check::Dag => {
@@ -213,7 +127,7 @@ impl<'a> CheckProgram<'a> {
                         }
                         break;
                     }
-                    let rule = self.compile_rule_from_many(Check::Dag, dags)?;
+                    let rule = self.compile_rule_from_many(Check::Dag, dags, interner)?;
                     if let Some(before) = before.take() {
                         self.push(CheckOp::ApplyRulePrecededBy(rule, before));
                     } else {
@@ -229,7 +143,7 @@ impl<'a> CheckProgram<'a> {
                         }
                         break;
                     }
-                    let rule = self.compile_rule_from_many(Check::Not, nots)?;
+                    let rule = self.compile_rule_from_many(Check::Not, nots, interner)?;
                     assert!(before.replace(rule).is_none());
                 }
                 Check::Empty => {
@@ -253,7 +167,7 @@ impl<'a> CheckProgram<'a> {
                             line: line.span(),
                         }));
                     }
-                    let rule = self.compile_rule(line.ty, line.pattern)?;
+                    let rule = self.compile_rule(line.ty, line.pattern, interner)?;
                     if let Some(before) = before.take() {
                         self.push(CheckOp::ApplyRulePrecededBy(rule, before));
                     } else {
@@ -261,7 +175,7 @@ impl<'a> CheckProgram<'a> {
                     }
                 }
                 Check::Count(n) => {
-                    let rule = self.compile_rule(line.ty, line.pattern)?;
+                    let rule = self.compile_rule(line.ty, line.pattern, interner)?;
                     if let Some(before) = before.take() {
                         self.push(CheckOp::RepeatRulePrecededBy(rule, n, before));
                     } else {
@@ -288,17 +202,20 @@ impl<'a> CheckProgram<'a> {
         &mut self,
         ty: CheckType,
         pattern: CheckPattern<'a>,
-    ) -> DiagResult<Box<dyn Rule + 'a>> {
+        interner: &mut StringInterner,
+    ) -> DiagResult<Box<dyn DynRule + 'a>> {
         let pattern = if ty.is_literal_match() {
-            self.compile_literal_pattern(pattern)?
+            Pattern::compile_literal(pattern)?
         } else {
-            self.compile_pattern(pattern)?
+            Pattern::compile(pattern, interner)?
         };
 
         match ty.kind {
-            Check::Plain | Check::Count(_) => Ok(Box::new(rules::CheckPlain::new(pattern))),
-            Check::Same => Ok(Box::new(rules::CheckSame::new(pattern))),
-            Check::Next => Ok(Box::new(rules::CheckNext::new(pattern))),
+            Check::Plain | Check::Count(_) => {
+                Ok(Box::new(rules::CheckPlain::new(pattern.into_matcher_mut())))
+            }
+            Check::Same => Ok(Box::new(rules::CheckSame::new(pattern.into_matcher_mut()))),
+            Check::Next => Ok(Box::new(rules::CheckNext::new(pattern.into_matcher_mut()))),
             kind => unreachable!("we should never be compiling a rule for {kind} here"),
         }
     }
@@ -307,210 +224,13 @@ impl<'a> CheckProgram<'a> {
         &mut self,
         kind: Check,
         lines: Vec<CheckLine<'a>>,
-    ) -> DiagResult<Box<dyn Rule + 'a>> {
-        let set = self.compile_pattern_set(lines)?;
+        interner: &mut StringInterner,
+    ) -> DiagResult<Box<dyn DynRule + 'a>> {
+        let match_all = MatchAll::compile(lines, interner)?;
         match kind {
-            Check::Dag => Ok(Box::new(rules::CheckDag::new(set))),
-            Check::Not => Ok(Box::new(rules::CheckNot::new(set))),
+            Check::Dag => Ok(Box::new(rules::CheckDag::new(match_all))),
+            Check::Not => Ok(Box::new(rules::CheckNot::new(match_all))),
             _ => panic!("{kind} is not valid in this context"),
-        }
-    }
-
-    fn compile_pattern_set(&mut self, unordered: Vec<CheckLine<'a>>) -> DiagResult<PatternSet<'a>> {
-        #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-        enum PatternSetType {
-            Unknown,
-            Literal,
-            Regex,
-            Match,
-            Mixed,
-        }
-
-        let set_type =
-            unordered
-                .iter()
-                .fold(PatternSetType::Unknown, |acc, line| match line.pattern {
-                    CheckPattern::Literal(_) => match acc {
-                        PatternSetType::Literal | PatternSetType::Regex | PatternSetType::Mixed => {
-                            acc
-                        }
-                        PatternSetType::Match => PatternSetType::Mixed,
-                        PatternSetType::Unknown => PatternSetType::Literal,
-                    },
-                    CheckPattern::Regex(_) => match acc {
-                        PatternSetType::Regex | PatternSetType::Mixed => acc,
-                        PatternSetType::Match => PatternSetType::Mixed,
-                        PatternSetType::Literal | PatternSetType::Unknown => PatternSetType::Regex,
-                    },
-                    CheckPattern::Match(_) => match acc {
-                        PatternSetType::Match | PatternSetType::Mixed => acc,
-                        PatternSetType::Regex | PatternSetType::Literal => PatternSetType::Mixed,
-                        PatternSetType::Unknown => PatternSetType::Match,
-                    },
-                    CheckPattern::Empty => {
-                        unreachable!("this pattern should never be part of a match set")
-                    }
-                });
-
-        let delayed = match set_type {
-            PatternSetType::Literal => DelayedPatternSet::Literal(
-                unordered
-                    .into_iter()
-                    .map(|line| match line.pattern {
-                        CheckPattern::Literal(s) => s.map(Cow::Borrowed),
-                        _ => unreachable!(),
-                    })
-                    .collect::<Vec<_>>(),
-            ),
-            PatternSetType::Regex => DelayedPatternSet::Regex(
-                unordered
-                    .into_iter()
-                    .map(|line| match line.pattern {
-                        p @ (CheckPattern::Literal(_) | CheckPattern::Regex(_)) => p,
-                        _ => unreachable!(),
-                    })
-                    .collect::<Vec<_>>(),
-            ),
-            PatternSetType::Match => DelayedPatternSet::Match(
-                unordered
-                    .into_iter()
-                    .map(|line| match line.pattern {
-                        CheckPattern::Match(m) => m.into_inner(),
-                        _ => unreachable!(),
-                    })
-                    .collect::<Vec<_>>(),
-            ),
-            PatternSetType::Mixed => DelayedPatternSet::Match(
-                unordered
-                    .into_iter()
-                    .filter_map(|line| match line.pattern {
-                        CheckPattern::Literal(s) => Some(vec![CheckPatternPart::Literal(s)]),
-                        CheckPattern::Regex(s) => Some(vec![CheckPatternPart::Regex(s)]),
-                        CheckPattern::Match(m) => Some(m.into_inner()),
-                        CheckPattern::Empty => None,
-                    })
-                    .collect::<Vec<_>>(),
-            ),
-            PatternSetType::Unknown => panic!("invalid empty pattern set"),
-        };
-
-        delayed.into_pattern_set()
-    }
-
-    fn compile_pattern(&mut self, pattern: CheckPattern<'a>) -> DiagResult<Pattern<'a>> {
-        match pattern {
-            CheckPattern::Literal(s) => {
-                if s.is_empty() {
-                    return Err(Report::from(InvalidCheckFileError::EmptyPattern(s.span())));
-                }
-                if s.trim().is_empty() {
-                    if s.chars().all(|c| c.is_ascii_whitespace()) {
-                        Ok(Pattern::Whitespace(AsciiWhitespaceMatcher::new(s.span())))
-                    } else {
-                        Ok(Pattern::Regex(RegexMatcher::new(Span::new(
-                            s.span(),
-                            Cow::Borrowed(r"\s+"),
-                        ))?))
-                    }
-                } else {
-                    Ok(Pattern::Substring(SubstringMatcher::new(
-                        s.map(Cow::Borrowed),
-                    )?))
-                }
-            }
-            CheckPattern::Regex(s) => Ok(Pattern::Regex(RegexMatcher::new(s.map(Cow::Borrowed))?)),
-            CheckPattern::Match(s) => {
-                let (span, parts) = s.into_parts();
-                let mut matcher = HybridMatcher::new(span);
-                let builder = matcher.builder();
-                for part in parts.into_iter() {
-                    match part {
-                        CheckPatternPart::Literal(s) => {
-                            builder.literal(s.map(Cow::Borrowed));
-                        }
-                        CheckPatternPart::Regex(s) => {
-                            builder.regex(s.map(Cow::Borrowed))?;
-                        }
-                        CheckPatternPart::Match(Match::Substitution {
-                            name,
-                            pattern: None,
-                            ..
-                        }) => {
-                            builder.substitution(Expr::Var(name));
-                        }
-                        CheckPatternPart::Match(Match::Substitution {
-                            span,
-                            name,
-                            pattern: Some(pattern),
-                        }) => {
-                            builder.capture(
-                                name.into_inner(),
-                                Span::new(span, Cow::Borrowed(pattern.into_inner())),
-                            )?;
-                        }
-                        CheckPatternPart::Match(Match::Numeric {
-                            span,
-                            format,
-                            capture: None,
-                            expr: None,
-                            ..
-                        }) => {
-                            builder.numeric(span, format);
-                        }
-                        CheckPatternPart::Match(Match::Numeric {
-                            format,
-                            capture: None,
-                            expr: Some(expr),
-                            ..
-                        }) => {
-                            builder.substitution_with_format(expr, ValueType::Number(format));
-                        }
-                        CheckPatternPart::Match(Match::Numeric {
-                            span,
-                            format,
-                            capture: Some(name),
-                            expr: None,
-                            ..
-                        }) => {
-                            builder.capture_numeric(span, name.into_inner(), format);
-                        }
-                        CheckPatternPart::Match(Match::Numeric {
-                            span,
-                            format,
-                            capture: Some(name),
-                            constraint,
-                            expr: Some(expr),
-                        }) => {
-                            builder.capture_numeric_with_constraint(
-                                span,
-                                name.into_inner(),
-                                format,
-                                constraint,
-                                expr,
-                            );
-                        }
-                    }
-                }
-
-                Ok(Pattern::Hybrid(matcher))
-            }
-            CheckPattern::Empty => unreachable!(
-                "{pattern:?} is only valid for CHECK-EMPTY, and is not an actual pattern"
-            ),
-        }
-    }
-
-    fn compile_literal_pattern(&mut self, pattern: CheckPattern<'a>) -> DiagResult<Pattern<'a>> {
-        match pattern {
-            CheckPattern::Literal(lit) => Ok(Pattern::Substring(SubstringMatcher::new(
-                lit.map(Cow::Borrowed),
-            )?)),
-            CheckPattern::Regex(_) | CheckPattern::Match(_) => {
-                unreachable!("the lexer will never emit tokens for these non-terminals")
-            }
-            CheckPattern::Empty => unreachable!(
-                "{pattern:?} is only valid for CHECK-EMPTY, and is not an actual pattern"
-            ),
         }
     }
 

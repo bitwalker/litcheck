@@ -23,11 +23,36 @@ impl AsciiWhitespaceMatcher {
         Self { span }
     }
 }
+impl MatcherMut for AsciiWhitespaceMatcher {
+    fn try_match_mut<'input, 'context, C>(
+        &self,
+        input: Input<'input>,
+        context: &mut C,
+    ) -> DiagResult<MatchResult<'input>>
+    where
+        C: Context<'input, 'context> + ?Sized,
+    {
+        self.try_match(input, context)
+    }
+}
 impl Matcher for AsciiWhitespaceMatcher {
-    fn try_match<'input>(&self, input: Input<'input>) -> Option<MatchInfo<'input>> {
+    fn try_match<'input, 'context, C>(
+        &self,
+        input: Input<'input>,
+        context: &C,
+    ) -> DiagResult<MatchResult<'input>>
+    where
+        C: Context<'input, 'context> + ?Sized,
+    {
         let buffer = input.as_slice();
         if input.is_empty() || !buffer[0].is_ascii_whitespace() {
-            return None;
+            return Ok(MatchResult::failed(
+                CheckFailedError::MatchNoneButExpected {
+                    span: self.span,
+                    match_file: context.match_file(),
+                    note: None,
+                },
+            ));
         }
 
         let start = input.start();
@@ -39,10 +64,10 @@ impl Matcher for AsciiWhitespaceMatcher {
             len += 1;
         }
 
-        Some(MatchInfo::new(
-            SourceSpan::from(start..(start + len)),
+        Ok(MatchResult::ok(MatchInfo::new(
+            start..(start + len),
             self.span,
-        ))
+        )))
     }
 }
 impl Spanned for AsciiWhitespaceMatcher {
@@ -54,9 +79,10 @@ impl Spanned for AsciiWhitespaceMatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::TestContext;
 
     #[test]
-    fn test_whitespace_matcher() {
+    fn test_whitespace_matcher() -> DiagResult<()> {
         let mut input = String::new();
         input.push('\t');
         input.push('\r');
@@ -65,12 +91,18 @@ mod tests {
         input.push_str("abc");
         input.push('\n');
 
+        let mut context = TestContext::new();
+        context.with_checks("").with_input(input.clone());
+
+        let mctx = context.match_context();
+
         let matcher = AsciiWhitespaceMatcher::new(SourceSpan::from(0..0));
         let bytes = input.as_bytes();
         let input = Input::new(bytes, false).span(0..);
-        let result = matcher.try_match(input);
-        let info = result.expect("expected match");
+        let result = matcher.try_match(input, &mctx)?;
+        let info = result.info.expect("expected match");
         assert_eq!(info.span.offset(), 0);
         assert_eq!(info.span.len(), 4);
+        Ok(())
     }
 }

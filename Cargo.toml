@@ -30,6 +30,7 @@ memchr = "2.7"
 miette = { version = "5.10", default-features = false }
 rayon = "1.8"
 regex = "1.10"
+regex-syntax = "0.8"
 rustc-hash = "1.1"
 serde = { version = "1.0", features = ["derive", "rc"] }
 smallvec = { version = "1.9", features = ["union", "const_generics", "const_new"] }

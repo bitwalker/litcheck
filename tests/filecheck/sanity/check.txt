@@ -5,6 +5,7 @@ Some random
 ; CHECK-EMPTY:
 ; CHECK-EMPTY:
 
+
 ; CHECK: content to
 ; CHECK-SAME: show output
 ; CHECK-NEXT: and some rules

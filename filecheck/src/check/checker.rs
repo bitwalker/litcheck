@@ -7,11 +7,15 @@ use litcheck::{
 use smallvec::SmallVec;
 use std::fmt;
 
-use crate::{check::matchers::Matcher, Config};
-
-use super::{
-    bytecode::*, matchers::MatchContext, CheckFailedError, RelatedCheckError, RelatedError,
+use crate::{
+    check::{
+        matchers::{Context, MatchContext, Matcher},
+        Rule,
+    },
+    Config,
 };
+
+use super::{bytecode::*, CheckFailedError, RelatedCheckError, RelatedError};
 
 #[derive(Diagnostic, Debug, thiserror::Error)]
 #[error("{test_from} failed")]
@@ -85,7 +89,7 @@ impl<'a> Checker<'a> {
 
     pub fn check_all(&mut self, input_file: ArcSource) -> Result<(), TestFailed> {
         // Initialize context
-        let buffer = input_file.as_bytes();
+        let buffer = input_file.source_bytes();
         let buffer_len = buffer.len();
 
         let mut context = MatchContext::new(
@@ -129,48 +133,66 @@ impl<'a> Checker<'a> {
                 //
                 // If no match is found, record the error,
                 // and skip ahead in the instruction stream
-                let buffer = context.search_range(context.block.start..);
-                if let Some(info) = pattern.try_match(buffer) {
-                    // We must compute the indices for the end of the previous block,
-                    // and the start of the current block, by looking forwards/backwards
-                    // for the nearest newlines in those directions.
-                    let match_start = info.span.offset();
-                    context.eol = context.next_newline_from(match_start).unwrap_or(buffer_len);
-                    let prev_block_end = context.prev_newline_from(match_start).unwrap_or(0);
-                    // Start subsequent searches at the newline, to ensure that rules which
-                    // match on next lines can eat the first newline, but prevent any further
-                    // matching of rules on this line
-                    context.block.start = context.eol;
-                    // Update the block info for this CHECK-LABEL to record the start index
-                    blocks[block_id].start = Some(context.block.start);
-                    // Update the block info for the most recent CHECK-LABEL to record its end index,
-                    // if one is present
-                    if let Some(prev_block) = blocks[..block_id]
-                        .iter_mut()
-                        .rev()
-                        .find(|bi| bi.start.is_some())
-                    {
-                        prev_block.end = Some(prev_block_end);
+                let buffer = context.search_to_end();
+                match pattern.try_match(buffer, &context) {
+                    Ok(result) => {
+                        match result.info {
+                            Some(info) => {
+                                // We must compute the indices for the end of the previous block,
+                                // and the start of the current block, by looking forwards/backwards
+                                // for the nearest newlines in those directions.
+                                let match_start = info.span.offset();
+                                let cursor = context.cursor_mut();
+                                let eol =
+                                    cursor.next_newline_from(match_start).unwrap_or(buffer_len);
+                                let prev_block_end =
+                                    cursor.prev_newline_from(match_start).unwrap_or(0);
+                                // Start subsequent searches at the newline, to ensure that rules which
+                                // match on next lines can eat the first newline, but prevent any further
+                                // matching of rules on this line
+                                cursor.set_start(eol);
+                                // Update the block info for this CHECK-LABEL to record the start index
+                                blocks[block_id].start = Some(cursor.start());
+                                // Update the block info for the most recent CHECK-LABEL to record its end index,
+                                // if one is present
+                                if let Some(prev_block) = blocks[..block_id]
+                                    .iter_mut()
+                                    .rev()
+                                    .find(|bi| bi.start.is_some())
+                                {
+                                    prev_block.end = Some(prev_block_end);
+                                }
+                            }
+                            None => {
+                                // The current block could not be found, so record an error
+                                let span = pattern.span();
+                                let msg = format!(
+                                    "Unable to find a match for this pattern in the input.\
+                                Search started at byte {}, ending at {buffer_len}",
+                                    context.cursor().start()
+                                );
+                                self.errors.push(CheckFailedError::MatchNoneButExpected {
+                                    span,
+                                    match_file: self.match_file.clone(),
+                                    note: Some(msg),
+                                });
+                            }
+                        }
                     }
-                } else {
-                    // The current block could not be found, so record an error
-                    let span = pattern.span();
-                    let msg = format!(
-                        "Unable to find a match for this pattern in the input.\
-                         Search started at byte {}, ending at {buffer_len}",
-                        context.block.start
-                    );
-                    self.errors.push(CheckFailedError::MatchNoneButExpected {
-                        span,
-                        match_file: self.match_file.clone(),
-                        note: Some(msg),
-                    });
+                    Err(err) => {
+                        self.errors
+                            .push(CheckFailedError::MatchNoneForInvalidPattern {
+                                span: pattern.span(),
+                                match_file: context.match_file.clone(),
+                                error: Some(RelatedError::new(err)),
+                            });
+                    }
                 }
             }
         }
 
         // Reset the context bounds
-        context.reset();
+        context.cursor_mut().reset();
 
         // Execute compiled check program now that we have the blocks identified.
         //
@@ -221,35 +243,42 @@ impl<'a> Checker<'a> {
                         }
                     },
                     CheckOp::ApplyRulePrecededBy(rule, preceded_by) => {
-                        let cursor = context.cursor();
-                        match preceded_by.apply(&mut context) {
+                        let initial_cursor = context.cursor().position();
+                        let mut rule_context = context.protect();
+                        match preceded_by.apply(&mut rule_context) {
                             Ok(result) if result.is_ok() => {
-                                let next_cursor = context.cursor();
-                                context.reset_to_cursor(cursor);
-                                match rule.apply(&mut context) {
+                                let next_cursor = rule_context.cursor().position();
+                                rule_context.move_to(initial_cursor);
+                                match rule.apply(&mut rule_context) {
                                     Ok(next_result) if next_result.is_ok() => {
                                         let offset =
-                                            next_result.info.as_ref().unwrap().span.offset();
-                                        let skipped = cursor.at()..next_cursor.at();
+                                            next_result.info.as_ref().unwrap().span.start();
+                                        let skipped =
+                                            initial_cursor.range.start..next_cursor.range.start;
                                         if skipped.contains(&offset) {
                                             // The matches in the preceded by rule passed by `rule`,
                                             // which is not allowed, so we reject those matches and
                                             // treat it as a failure
                                             self.errors.push(CheckFailedError::MatchFoundButDiscarded {
                                                 span: result.info.unwrap().span,
-                                                input_file: context.input_file.clone(),
+                                                input_file: rule_context.input_file(),
                                                 pattern: Some(RelatedCheckError {
                                                     span: preceded_by.span(),
                                                     match_file: self.match_file.clone(),
                                                 }),
                                                 note: Some(format!("match was found after {} rule it was expected to precede", rule.kind())),
                                             });
-                                            context.block.start = context.block.end;
+                                            drop(rule_context);
+                                            context.cursor_mut().move_to_end();
+                                            continue;
                                         }
+                                        // Persist changes to the context and drop the guard
+                                        rule_context.save();
                                     }
                                     Ok(next_result) => {
                                         self.errors.push(next_result.unwrap_err());
-                                        context.block.start = context.block.end;
+                                        drop(rule_context);
+                                        context.cursor_mut().move_to_end();
                                     }
                                     Err(err) => {
                                         self.errors.push(
@@ -259,13 +288,15 @@ impl<'a> Checker<'a> {
                                                 error: Some(RelatedError::new(err)),
                                             },
                                         );
-                                        context.block.start = context.block.end;
+                                        drop(rule_context);
+                                        context.cursor_mut().move_to_end();
                                     }
                                 }
                             }
                             Ok(result) => {
                                 self.errors.push(result.unwrap_err());
-                                context.block.start = context.block.end;
+                                drop(rule_context);
+                                context.cursor_mut().move_to_end();
                             }
                             Err(err) => {
                                 self.errors
@@ -274,7 +305,8 @@ impl<'a> Checker<'a> {
                                         match_file: self.match_file.clone(),
                                         error: Some(RelatedError::new(err)),
                                     });
-                                context.block.start = context.block.end;
+                                drop(rule_context);
+                                context.cursor_mut().move_to_end();
                             }
                         }
                     }
@@ -282,7 +314,7 @@ impl<'a> Checker<'a> {
                     CheckOp::RepeatRulePrecededBy(_rule, _count, _preceded_by) => todo!(),
                 }
 
-                if context.block.is_empty() {
+                if context.cursor().is_empty() {
                     block_id += 1;
                     continue 'next_block;
                 }

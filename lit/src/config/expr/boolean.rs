@@ -381,8 +381,7 @@ impl<'a> BooleanExprParser<'a> {
                                 acc
                             }
                             Token::Ident(raw) => {
-                                let escaped = regex::escape(raw);
-                                acc.push_str(&escaped);
+                                regex_syntax::escape_into(raw, &mut acc);
                                 acc
                             }
                             _ => unsafe { core::hint::unreachable_unchecked() },
