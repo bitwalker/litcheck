@@ -9,13 +9,14 @@ impl CheckEmpty {
         Self { span }
     }
 }
+impl Spanned for CheckEmpty {
+    fn span(&self) -> SourceSpan {
+        self.span
+    }
+}
 impl Rule for CheckEmpty {
     fn kind(&self) -> Check {
         Check::Empty
-    }
-
-    fn span(&self) -> SourceSpan {
-        self.span
     }
 
     fn apply<'input, 'context, C>(&self, context: &mut C) -> DiagResult<Matches<'input>>

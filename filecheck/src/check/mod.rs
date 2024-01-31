@@ -189,7 +189,7 @@ pub fn analyze_blocks<'input, 'context: 'input>(
 /// Evaluate all check operations in the given blocks
 pub fn check_blocks<'input, 'a: 'input, I>(
     blocks: I,
-    program: &CheckProgram<'a>,
+    program: &'input CheckProgram<'a>,
     context: &mut MatchContext<'input, 'a>,
 ) -> TestResult
 where
@@ -227,7 +227,7 @@ where
 /// Evaluate a block of check operations with the given context,
 /// gathering any errors encountered into `errors`.
 pub fn check_block<'input, 'a: 'input>(
-    code: &[CheckOp<'a>],
+    code: &'input [CheckOp<'a>],
     test_result: &mut TestResult,
     context: &mut MatchContext<'input, 'a>,
 ) {
@@ -244,11 +244,11 @@ pub fn check_block<'input, 'a: 'input>(
 
 /// Evaluate a single check operation with the given context
 pub fn check_op<'input, 'a: 'input>(
-    op: &CheckOp<'a>,
+    op: &'input CheckOp<'a>,
     test_result: &mut TestResult,
     context: &mut MatchContext<'input, 'a>,
 ) -> ControlFlow<()> {
-    match dbg!(op) {
+    match op {
         CheckOp::BlockStart(_) => {
             // We have reached the end of the current CHECK-LABEL block,
             // move to the next block where we will handle updating the
@@ -267,96 +267,143 @@ pub fn check_op<'input, 'a: 'input>(
                 });
             }
         },
-        CheckOp::ApplyRulePrecededBy(rule, preceded_by) => {
-            let initial_cursor = context.cursor().position();
-            let mut rule_context = context.protect();
-            match preceded_by.apply(&mut rule_context) {
-                Ok(preceding_matches) if preceding_matches.is_ok() => {
-                    let next_cursor = rule_context.cursor().position();
-                    rule_context.move_to(initial_cursor);
-                    match rule.apply(&mut rule_context) {
-                        Ok(matches) if matches.is_ok() => {
-                            // Find the set of preceded-by matches which overlap with `matches`
-                            let boundary = matches
-                                .iter()
-                                .filter_map(|mr| mr.info.as_ref())
-                                .map(|info| info.span.start())
-                                .min()
-                                .unwrap_or(next_cursor.range.start);
-                            let mut is_ok = true;
-                            for result in preceding_matches.into_iter() {
-                                if let Some(info) = result.unwrap() {
-                                    // The matches in the preceded by rule passed by `rule`,
-                                    // which is not allowed, so we reject those matches and
-                                    // treat it as a failure
-                                    if info.span.start() >= boundary {
-                                        is_ok = false;
-                                        test_result.failed(CheckFailedError::MatchFoundButDiscarded {
-                                            span: info.span,
-                                            input_file: rule_context.input_file(),
-                                            pattern: Some(RelatedCheckError {
-                                                span: preceded_by.span(),
-                                                match_file: rule_context.match_file(),
-                                            }),
-                                            note: Some(format!(
-                                                "match was found after {} rule it was expected to precede",
-                                                rule.kind()
-                                            )),
-                                        });
-                                    } else {
-                                        test_result.matched(info);
-                                    }
-                                } else {
-                                    test_result.passed();
-                                }
-                            }
-                            test_result.append(matches);
-                            if is_ok {
-                                // Persist changes to the context and drop the guard
-                                rule_context.save();
-                            } else {
-                                drop(rule_context);
-                                context.cursor_mut().move_to_end();
-                            }
-                        }
-                        Ok(matches) => {
-                            test_result.append(preceding_matches);
-                            test_result.append(matches);
-                            drop(rule_context);
-                            context.cursor_mut().move_to_end();
-                        }
-                        Err(err) => {
-                            drop(rule_context);
-                            test_result.failed(CheckFailedError::MatchNoneForInvalidPattern {
-                                span: rule.span(),
-                                match_file: context.match_file(),
-                                error: Some(RelatedError::new(err)),
-                            });
-                            context.cursor_mut().move_to_end();
-                        }
+        CheckOp::ApplyRulePrecededBy(ref rule, ref preceded_by) => {
+            apply_preceded_by(preceded_by, rule, 1, test_result, context);
+        }
+        CheckOp::RepeatRule(rule, count) => {
+            for _ in 0..*count {
+                match rule.apply(context) {
+                    Ok(matches) => {
+                        test_result.append(matches);
                     }
-                }
-                Ok(preceding_matches) => {
-                    drop(rule_context);
-                    context.cursor_mut().move_to_end();
-                    test_result.append(preceding_matches);
-                }
-                Err(err) => {
-                    drop(rule_context);
-                    context.cursor_mut().move_to_end();
-                    test_result.failed(CheckFailedError::MatchNoneForInvalidPattern {
-                        span: preceded_by.span(),
-                        match_file: context.match_file(),
-                        error: Some(RelatedError::new(err)),
-                    });
+                    Err(err) => {
+                        test_result.failed(CheckFailedError::MatchNoneForInvalidPattern {
+                            span: rule.span(),
+                            match_file: context.match_file(),
+                            error: Some(RelatedError::new(err)),
+                        });
+                    }
                 }
             }
         }
-        CheckOp::RepeatRule(_rule, _count) => todo!(),
-        CheckOp::RepeatRulePrecededBy(_rule, _count, _preceded_by) => todo!(),
+        CheckOp::RepeatRulePrecededBy(ref rule, count, ref preceded_by) => {
+            apply_preceded_by(preceded_by, &rule, *count, test_result, context)
+        }
     }
 
     ControlFlow::Continue(())
+}
+
+fn apply_preceded_by<'input, 'a: 'input>(
+    preceded_by: &dyn DynRule,
+    rule: &dyn DynRule,
+    mut count: usize,
+    test_result: &mut TestResult,
+    context: &mut MatchContext<'input, 'a>,
+) {
+    let initial_cursor = context.cursor().position();
+    let mut rule_context = context.protect();
+    match preceded_by.apply(&mut rule_context) {
+        Ok(preceding_matches) if preceding_matches.is_ok() => {
+            let next_cursor = rule_context.cursor().position();
+            rule_context.move_to(initial_cursor);
+            match rule.apply(&mut rule_context) {
+                Ok(matches) if matches.is_ok() => {
+                    // Find the set of preceded-by matches which overlap with `matches`
+                    let boundary = matches
+                        .iter()
+                        .filter_map(|mr| mr.info.as_ref())
+                        .map(|info| info.span.start())
+                        .min()
+                        .unwrap_or(next_cursor.range.start);
+                    let mut is_ok = true;
+                    for result in preceding_matches.into_iter() {
+                        if let Some(info) = result.unwrap() {
+                            // The matches in the preceded by rule passed by `rule`,
+                            // which is not allowed, so we reject those matches and
+                            // treat it as a failure
+                            if info.span.start() >= boundary {
+                                is_ok = false;
+                                test_result.failed(CheckFailedError::MatchFoundButDiscarded {
+                                    span: info.span,
+                                    input_file: rule_context.input_file(),
+                                    pattern: Some(RelatedCheckError {
+                                        span: preceded_by.span(),
+                                        match_file: rule_context.match_file(),
+                                    }),
+                                    note: Some(format!(
+                                        "match was found after {} rule it was expected to precede",
+                                        rule.kind()
+                                    )),
+                                });
+                            } else {
+                                test_result.matched(info);
+                            }
+                        } else {
+                            test_result.passed();
+                        }
+                    }
+                    test_result.append(matches);
+                    if is_ok {
+                        // Persist changes to the context and drop the guard
+                        rule_context.save();
+                    } else {
+                        drop(rule_context);
+                        context.cursor_mut().move_to_end();
+                        return;
+                    }
+                }
+                Ok(matches) => {
+                    test_result.append(preceding_matches);
+                    test_result.append(matches);
+                    drop(rule_context);
+                    context.cursor_mut().move_to_end();
+                    return;
+                }
+                Err(err) => {
+                    drop(rule_context);
+                    test_result.failed(CheckFailedError::MatchNoneForInvalidPattern {
+                        span: rule.span(),
+                        match_file: context.match_file(),
+                        error: Some(RelatedError::new(err)),
+                    });
+                    context.cursor_mut().move_to_end();
+                    return;
+                }
+            }
+
+            // Apply any remaining iterations of `rule`
+            count -= 1;
+            for _ in 0..count {
+                match rule.apply(context) {
+                    Ok(matches) => {
+                        test_result.append(matches);
+                    }
+                    Err(err) => {
+                        test_result.failed(CheckFailedError::MatchNoneForInvalidPattern {
+                            span: rule.span(),
+                            match_file: context.match_file(),
+                            error: Some(RelatedError::new(err)),
+                        });
+                    }
+                }
+            }
+        }
+        Ok(preceding_matches) => {
+            drop(rule_context);
+            context.cursor_mut().move_to_end();
+            test_result.append(preceding_matches);
+        }
+        Err(err) => {
+            drop(rule_context);
+            context.cursor_mut().move_to_end();
+            test_result.failed(CheckFailedError::MatchNoneForInvalidPattern {
+                span: preceded_by.span(),
+                match_file: context.match_file(),
+                error: Some(RelatedError::new(err)),
+            });
+        }
+    }
 }
 
 #[derive(Debug)]

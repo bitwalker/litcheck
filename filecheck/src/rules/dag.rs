@@ -241,7 +241,7 @@ impl<'a, S: PatternSetSearcher> SubPatternVisitor<'a, S> {
         loop {
             // Introduce a new binding scope that will be persisted to when a match is found
             let mut prefix_context = context.protect();
-            match dbg!(self.next_prefix(&mut prefix_context))? {
+            match self.next_prefix(&mut prefix_context)? {
                 // We found a match for the prefix
                 ControlFlow::Continue(prefix_id) => {
                     let prefix_id = prefix_id.into_inner();
@@ -265,13 +265,6 @@ impl<'a, S: PatternSetSearcher> SubPatternVisitor<'a, S> {
                         }
 
                         let pattern_offset = self.prefix_pattern_offsets[prefix_id] + index;
-                        dbg!(
-                            index,
-                            pattern_offset,
-                            prefix_id,
-                            searcher_snapshot,
-                            &pattern
-                        );
                         match self.match_pattern(pattern, &mut pattern_context)? {
                             // A match was successful
                             Ok(info) => {
@@ -378,8 +371,7 @@ impl<'a, S: PatternSetSearcher> SubPatternVisitor<'a, S> {
         let input = Input::new(context.cursor().buffer(), false)
             .anchored(true)
             .span(input.range());
-        dbg!(input.bounds());
-        match dbg!(pattern.try_match_mut(input, context))? {
+        match pattern.try_match_mut(input, context)? {
             MatchResult {
                 ty: MatchType::Failed(error),
                 ..
@@ -444,11 +436,9 @@ impl<'a, S: PatternSetSearcher> SubPatternVisitor<'a, S> {
                 (Some(_), None) => Ordering::Greater,
                 (Some(x), Some(y)) => x.cmp(y),
             });
-        dbg!(&longest_match);
         if let Some((index, longest_match)) =
             longest_match.and_then(|(id, lm)| lm.take().map(|lm| (id, lm)))
         {
-            dbg!(prefix_id, index);
             self.patterns_matched[prefix_id].push(Span::new(longest_match.info.span, index));
             // Restore the matched bindings, and save them to the overall match binding scope
             context.extend_locals(longest_match.bindings);
@@ -473,13 +463,14 @@ impl<'a> CheckDag<'a> {
         Self { patterns }
     }
 }
+impl<'check> Spanned for CheckDag<'check> {
+    fn span(&self) -> SourceSpan {
+        self.patterns.span()
+    }
+}
 impl<'check> Rule for CheckDag<'check> {
     fn kind(&self) -> Check {
         Check::Dag
-    }
-
-    fn span(&self) -> SourceSpan {
-        self.patterns.span()
     }
 
     fn apply<'input, 'context, C>(&self, context: &mut C) -> DiagResult<Matches<'input>>

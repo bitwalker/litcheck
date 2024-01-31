@@ -12,16 +12,20 @@ where
         Self { pattern }
     }
 }
+impl<M> Spanned for CheckSame<M>
+where
+    M: MatcherMut,
+{
+    fn span(&self) -> SourceSpan {
+        self.pattern.span()
+    }
+}
 impl<M> Rule for CheckSame<M>
 where
     M: MatcherMut,
 {
     fn kind(&self) -> Check {
         Check::Same
-    }
-
-    fn span(&self) -> SourceSpan {
-        self.pattern.span()
     }
 
     fn apply<'input, 'context, C>(&self, context: &mut C) -> DiagResult<Matches<'input>>

@@ -13,20 +13,25 @@ impl<'a> CheckNot<'a> {
         Self { patterns }
     }
 }
+impl<'check> Spanned for CheckNot<'check> {
+    fn span(&self) -> SourceSpan {
+        self.patterns.span()
+    }
+}
 impl<'check> Rule for CheckNot<'check> {
     fn kind(&self) -> Check {
         Check::Not
-    }
-
-    fn span(&self) -> SourceSpan {
-        self.patterns.span()
     }
 
     fn apply<'input, 'context, C>(&self, _context: &mut C) -> DiagResult<Matches<'input>>
     where
         C: Context<'input, 'context> + ?Sized,
     {
-        todo!()
+        // TODO: Implement support for CHECK-NOT
+        let diag = Diag::new("support for CHECK-NOT has not yet been implemented").and_labels([
+            LabeledSpan::new_with_span(Some("not supported".to_string()), self.span()),
+        ]);
+        Err(Report::from(diag))
     }
 }
 

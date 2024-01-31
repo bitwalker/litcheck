@@ -21,8 +21,7 @@ impl<'input> Operand<'input> {
     ) -> Result<Number, InvalidNumericCastError> {
         match self.as_value() {
             Value::Undef => Err(InvalidNumericCastError {
-                // TODO
-                span: None,
+                span: Some(span),
                 kind: std::num::IntErrorKind::Empty,
                 specific_span: None,
                 match_file: context.match_file(),
@@ -57,7 +56,6 @@ impl<'input> Operand<'input> {
                             } else {
                                 return Err(InvalidNumericCastError {
                                     span: Some(span),
-                                    // TODO
                                     kind: std::num::IntErrorKind::InvalidDigit,
                                     specific_span: None,
                                     match_file: context.match_file(),

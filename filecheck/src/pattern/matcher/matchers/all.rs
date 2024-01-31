@@ -175,7 +175,28 @@ impl<'a> MatchAll<'a> {
                         patterns,
                     })
                 } else {
-                    todo!()
+                    // TODO: Implement support for dynamic prefixes
+                    let labels =
+                        prefixes
+                            .iter()
+                            .zip(patterns.iter())
+                            .filter_map(|(prefix, patterns)| {
+                                if let PatternPrefix::Dynamic { .. } = prefix {
+                                    Some(LabeledSpan::new_with_span(
+                                        Some(
+                                            "this pattern has a non-static (string/regex) prefix"
+                                                .to_string(),
+                                        ),
+                                        patterns[0].span(),
+                                    ))
+                                } else {
+                                    None
+                                }
+                            });
+                    let diag = Diag::new("support for consecutive CHECK-DAG/NOT patterns with leading match blocks is unsupported")
+                        .and_labels(labels)
+                        .with_help("see diagnostics for information on which patterns triggered this error");
+                    Err(Report::from(diag))
                 }
             }
             PatternSetType::Unknown => panic!("invalid empty pattern set"),

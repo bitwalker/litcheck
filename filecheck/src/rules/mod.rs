@@ -14,11 +14,10 @@ pub use self::same::CheckSame;
 
 use std::fmt;
 
-use crate::common::{Check, Context, DiagResult, Matches, SourceSpan};
+use crate::common::{Check, Context, DiagResult, Matches, Spanned};
 
-pub trait Rule: fmt::Debug {
+pub trait Rule: fmt::Debug + Spanned {
     fn kind(&self) -> Check;
-    fn span(&self) -> SourceSpan;
     fn apply<'input, 'context, C>(&self, context: &mut C) -> DiagResult<Matches<'input>>
     where
         C: Context<'input, 'context> + ?Sized;
@@ -32,10 +31,6 @@ where
         <R as Rule>::kind(self)
     }
     #[inline(always)]
-    fn span(&self) -> SourceSpan {
-        <R as Rule>::span(self)
-    }
-    #[inline(always)]
     fn apply<'input, 'context, C>(&self, context: &mut C) -> DiagResult<Matches<'input>>
     where
         C: Context<'input, 'context> + ?Sized,
@@ -45,15 +40,11 @@ where
 }
 impl<R> Rule for Box<R>
 where
-    R: Rule,
+    R: Rule + ?Sized,
 {
     #[inline(always)]
     fn kind(&self) -> Check {
         (**self).kind()
-    }
-    #[inline(always)]
-    fn span(&self) -> SourceSpan {
-        (**self).span()
     }
     #[inline(always)]
     fn apply<'input, 'context, C>(&self, context: &mut C) -> DiagResult<Matches<'input>>
@@ -64,9 +55,8 @@ where
     }
 }
 
-pub trait DynRule: fmt::Debug {
+pub trait DynRule: fmt::Debug + Spanned {
     fn kind(&self) -> Check;
-    fn span(&self) -> SourceSpan;
     fn apply_dyn<'input>(
         &self,
         context: &mut dyn Context<'input, '_>,
@@ -76,10 +66,6 @@ impl<'context> Rule for (dyn DynRule + 'context) {
     #[inline(always)]
     fn kind(&self) -> Check {
         Self::kind(self)
-    }
-    #[inline(always)]
-    fn span(&self) -> SourceSpan {
-        Self::span(self)
     }
     #[inline(always)]
     fn apply<'input, 'ctx, C>(&self, context: &mut C) -> DiagResult<Matches<'input>>
@@ -95,15 +81,11 @@ impl<'context> Rule for (dyn DynRule + 'context) {
 
 impl<R> DynRule for R
 where
-    R: Rule,
+    R: Rule + ?Sized,
 {
     #[inline(always)]
     fn kind(&self) -> Check {
         <R as Rule>::kind(self)
-    }
-    #[inline(always)]
-    fn span(&self) -> SourceSpan {
-        <R as Rule>::span(self)
     }
     #[inline(always)]
     fn apply_dyn<'input>(

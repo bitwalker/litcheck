@@ -76,31 +76,19 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
         mut guard: ContextGuard<'_, 'input, 'context>,
     ) -> std::ops::ControlFlow<DiagResult<()>> {
         let anchored = self.cursor.is_anchored();
-        //dbg!(&prefix, self.cursor.bounds());
         let result = match self.match_part(prefix, &guard) {
             Ok(result) => result,
             Err(err) => return ControlFlow::Break(Err(err)),
         };
-        /*
-                dbg!(
-                    &result,
-                    self.match_start,
-                    self.match_end,
-                    self.cursor.as_str(self.match_start..self.cursor.end())
-                );
-        */
         if let Some(info) = result.info.as_ref() {
-            //dbg!(info.span.range());
             self.part_matched(info.span.range());
             self.cursor.set_anchored(true);
-            //dbg!(self.cursor.bounds());
 
             let result = match self.match_parts(rest, &mut guard) {
                 Ok(result) => result,
                 Err(err) => return ControlFlow::Break(Err(err)),
             };
             self.cursor.set_anchored(anchored);
-            //dbg!(&result);
             if result.is_ok() {
                 // Match was successful, we're done!
                 guard.save();
@@ -240,7 +228,6 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
         context: &ContextGuard<'_, 'input, 'context>,
     ) -> DiagResult<MatchResult<'input>> {
         let buffer = self.cursor.as_str(self.cursor.bounds());
-        //dbg!(buffer, pattern);
         let note = if self.cursor.is_anchored() {
             if buffer.starts_with(pattern.as_ref()) {
                 let start = self.cursor.start();

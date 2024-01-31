@@ -127,7 +127,9 @@ impl<'a> Matcher for RegexSetMatcher<'a> {
                         index,
                         value: match ty {
                             ValueType::String => Value::Str(Cow::Borrowed(captured)),
-                            ValueType::Number(_) => todo!("numeric captures are unimplemented"),
+                            ValueType::Number(_) => {
+                                panic!("numeric captures are not expected here")
+                            }
                         },
                     });
                 }

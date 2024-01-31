@@ -185,6 +185,11 @@ pub struct CaptureInfo<'input> {
     /// The captured value
     pub value: Value<'input>,
 }
+impl<'input> Spanned for CaptureInfo<'input> {
+    fn span(&self) -> SourceSpan {
+        self.span
+    }
+}
 impl CaptureInfo<'_> {
     pub fn into_static(self) -> CaptureInfo<'static> {
         CaptureInfo {
