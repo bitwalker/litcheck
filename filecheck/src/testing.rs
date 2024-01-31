@@ -4,7 +4,7 @@ use litcheck::{
 };
 
 use crate::{
-    check::{CheckFile, CheckProgram, FileCheckTest, MatchContext, TestFailed},
+    check::{CheckFile, CheckProgram, FileCheckTest, MatchContext, MatchInfo, TestFailed},
     parse::{self, Lexer, ParserError, Token},
     Config,
 };
@@ -77,7 +77,7 @@ impl TestContext {
     }
 
     #[track_caller]
-    pub fn check(&self) -> DiagResult<()> {
+    pub fn check(&self) -> DiagResult<Vec<MatchInfo<'static>>> {
         self.check_input(self.input_file())
     }
 
@@ -90,7 +90,7 @@ impl TestContext {
     }
 
     #[track_caller]
-    pub fn check_input<S>(&self, input_file: S) -> DiagResult<()>
+    pub fn check_input<S>(&self, input_file: S) -> DiagResult<Vec<MatchInfo<'static>>>
     where
         ArcSource: From<S>,
     {
@@ -104,7 +104,7 @@ impl TestContext {
         &self,
         match_file: ArcSource,
         input_file: ArcSource,
-    ) -> DiagResult<()> {
+    ) -> DiagResult<Vec<MatchInfo<'static>>> {
         let mut test = FileCheckTest::new(match_file, &self.config);
         test.check(input_file)
     }
@@ -160,14 +160,8 @@ impl TestContext {
             .map_err(|err| Report::new(err).with_source_code(source.to_string()))
     }
 
-    #[allow(unused)]
     #[track_caller]
-    pub fn compile<'a, 'context: 'a>(
-        &'context mut self,
-        source: &'a str,
-    ) -> DiagResult<CheckProgram<'a>> {
-        let file = self.parse(source)?;
-
+    pub fn compile<'a>(&mut self, file: CheckFile<'a>) -> DiagResult<CheckProgram<'a>> {
         file.compile(&self.config, &mut self.interner)
     }
 }

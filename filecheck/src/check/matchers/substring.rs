@@ -230,7 +230,6 @@ impl<'a> SubstringSetBuilder<'a> {
 pub struct SubstringSetSearcher<'a, 'patterns, 'input> {
     buffer: &'input [u8],
     crlf: bool,
-    last_match_end: Option<usize>,
     /// The set of raw input patterns from which
     /// this matcher was constructed
     patterns: Cow<'patterns, Vec<Span<Cow<'a, str>>>>,
@@ -272,7 +271,6 @@ impl<'a, 'patterns, 'input> SubstringSetSearcher<'a, 'patterns, 'input> {
         Ok(Self {
             buffer,
             crlf,
-            last_match_end: None,
             patterns,
             pattern,
             searcher,
@@ -317,35 +315,33 @@ impl<'a, 'patterns, 'input> Searcher for SubstringSetSearcher<'a, 'patterns, 'in
     type Match = aho_corasick::Match;
     type MatchError = aho_corasick::MatchError;
 
+    #[inline]
     fn input(&self) -> &Self::Input {
         self.searcher.input()
     }
+    #[inline]
     fn last_match_end(&self) -> Option<usize> {
-        self.last_match_end
+        self.searcher.last_match_end()
     }
+    #[inline]
     fn set_last_match_end(&mut self, end: usize) {
-        self.last_match_end = Some(end);
         self.searcher.set_last_match_end(end);
     }
+    #[inline]
     fn set_range<R>(&mut self, range: R)
     where
         R: RangeBounds<usize>,
     {
         self.searcher.set_range(range);
     }
+    #[inline]
     fn try_advance<F>(&mut self, finder: F) -> Result<Option<Self::Match>, Self::MatchError>
     where
         F: FnMut(&Self::Input) -> Result<Option<Self::Match>, Self::MatchError>,
     {
-        self.searcher.try_advance(finder).map(|m| match m {
-            Some(m) => {
-                self.last_match_end = Some(m.end());
-                Some(m)
-            }
-            None => None,
-        })
+        self.searcher.try_advance(finder)
     }
-
+    #[inline]
     fn handle_overlapping_empty_match<F>(
         &mut self,
         m: Self::Match,

@@ -1,17 +1,21 @@
+mod always;
 mod context;
 mod cursor;
 mod env;
 mod regex;
 pub mod searcher;
+mod simple;
 mod smart;
 mod stack;
 mod substring;
 mod whitespace;
 
+pub use self::always::AlwaysMatch;
 pub use self::context::{Context, ContextExt, ContextGuard, MatchContext};
 pub use self::cursor::{Cursor, CursorGuard, CursorPosition};
 pub use self::env::{Env, LexicalScope, LexicalScopeExtend, LexicalScopeMut, ScopeGuard};
 pub use self::regex::{RegexMatcher, RegexSetMatcher, RegexSetSearcher};
+pub use self::simple::SimpleMatcher;
 pub use self::smart::SmartMatcher;
 pub use self::stack::Operand;
 pub use self::substring::{
@@ -67,20 +71,20 @@ where
 }
 
 pub trait DynMatcher: DynMatcherMut {
-    fn try_match_dyn<'input, 'context>(
+    fn try_match_dyn<'input>(
         &self,
         input: Input<'input>,
-        context: &dyn Context<'input, 'context>,
+        context: &dyn Context<'input, '_>,
     ) -> DiagResult<MatchResult<'input>>;
 }
-impl<'a, M> DynMatcher for M
+impl<M> DynMatcher for M
 where
     M: Matcher,
 {
-    fn try_match_dyn<'input, 'context>(
+    fn try_match_dyn<'input>(
         &self,
         input: Input<'input>,
-        context: &dyn Context<'input, 'context>,
+        context: &dyn Context<'input, '_>,
     ) -> DiagResult<MatchResult<'input>> {
         self.try_match(input, context)
     }
@@ -148,20 +152,20 @@ impl<'a> MatcherMut for Box<dyn DynMatcher + 'a> {
 }
 
 pub trait DynMatcherMut: fmt::Debug + Spanned {
-    fn try_match_mut_dyn<'input, 'context>(
+    fn try_match_mut_dyn<'input>(
         &self,
         input: Input<'input>,
-        context: &mut dyn Context<'input, 'context>,
+        context: &mut dyn Context<'input, '_>,
     ) -> DiagResult<MatchResult<'input>>;
 }
 impl<M> DynMatcherMut for M
 where
     M: MatcherMut,
 {
-    fn try_match_mut_dyn<'input, 'context>(
+    fn try_match_mut_dyn<'input>(
         &self,
         input: Input<'input>,
-        context: &mut dyn Context<'input, 'context>,
+        context: &mut dyn Context<'input, '_>,
     ) -> DiagResult<MatchResult<'input>> {
         self.try_match_mut(input, context)
     }
@@ -255,10 +259,33 @@ impl<'input> MatchResult<'input> {
         matches!(self.ty, MatchType::MatchNoneAndExcluded)
     }
 
+    #[inline]
+    pub fn pattern_id(&self) -> Option<usize> {
+        self.info.as_ref().map(|info| info.pattern_id)
+    }
+
+    #[inline]
+    pub fn matched_range(&self) -> Option<Range<usize>> {
+        self.info.as_ref().map(|info| info.matched_range())
+    }
+
     pub fn unwrap_err(self) -> CheckFailedError {
         match self.ty {
             MatchType::Failed(err) => err,
             ty => panic!("attempted to unwrap error from {ty}"),
+        }
+    }
+
+    pub fn into_result(self) -> Result<Option<MatchInfo<'input>>, CheckFailedError> {
+        match self {
+            Self {
+                ty: MatchType::Failed(err),
+                ..
+            } => Err(err),
+            Self {
+                info: Some(info), ..
+            } => Ok(Some(info)),
+            Self { info: None, .. } => Ok(None),
         }
     }
 }
@@ -336,6 +363,17 @@ impl<'input> MatchInfo<'input> {
         let start = self.span.offset();
         Range::new(start, start + self.span.len())
     }
+
+    pub fn into_static(self) -> MatchInfo<'static> {
+        MatchInfo {
+            captures: self
+                .captures
+                .into_iter()
+                .map(CaptureInfo::into_static)
+                .collect(),
+            ..self
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -349,97 +387,121 @@ pub struct CaptureInfo<'input> {
     /// The captured value
     pub value: Value<'input>,
 }
-
-/// A matcher which has no dynamic context (variables, etc.)
-#[derive(Debug)]
-pub enum StaticMatcher<'a> {
-    /// A literal string that must occur somewhere in the input
-    Substring(SubstringMatcher<'a>),
-    /// A regular expression that must occur somewhere in the input
-    Regex(RegexMatcher<'a>),
-}
-impl<'a> StaticMatcher<'a> {
-    pub fn into_boxed(self) -> AnyMatcher<'a> {
-        match self {
-            Self::Substring(matcher) => Box::new(matcher),
-            Self::Regex(matcher) => Box::new(matcher),
-        }
-    }
-}
-impl<'a> MatcherMut for StaticMatcher<'a> {
-    fn try_match_mut<'input, 'context, C>(
-        &self,
-        input: Input<'input>,
-        context: &mut C,
-    ) -> DiagResult<MatchResult<'input>>
-    where
-        C: Context<'input, 'context> + ?Sized,
-    {
-        self.try_match(input, context)
-    }
-}
-impl<'a> Matcher for StaticMatcher<'a> {
-    fn try_match<'input, 'context, C>(
-        &self,
-        input: Input<'input>,
-        context: &C,
-    ) -> DiagResult<MatchResult<'input>>
-    where
-        C: Context<'input, 'context> + ?Sized,
-    {
-        match self {
-            Self::Substring(ref matcher) => matcher.try_match(input, context),
-            Self::Regex(ref matcher) => matcher.try_match(input, context),
-        }
-    }
-}
-impl<'a> Spanned for StaticMatcher<'a> {
-    fn span(&self) -> SourceSpan {
-        match self {
-            Self::Substring(ref matcher) => matcher.span(),
-            Self::Regex(ref matcher) => matcher.span(),
+impl CaptureInfo<'_> {
+    pub fn into_static(self) -> CaptureInfo<'static> {
+        CaptureInfo {
+            value: match self.value {
+                Value::Undef => Value::Undef,
+                Value::Str(s) => Value::Str(s.into_owned().into()),
+                Value::Num(expr) => Value::Num(expr),
+            },
+            ..self
         }
     }
 }
 
-#[derive(Debug)]
-pub struct AlwaysMatch {
-    span: SourceSpan,
-}
-impl AlwaysMatch {
-    pub fn new(span: SourceSpan) -> Self {
-        Self { span }
+#[derive(Debug, Default)]
+pub struct Matches<'input>(smallvec::SmallVec<[MatchResult<'input>; 1]>);
+impl<'input> Matches<'input> {
+    pub fn with_capacity(cap: usize) -> Self {
+        Self(smallvec::SmallVec::with_capacity(cap))
+    }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    #[inline]
+    pub fn as_slice(&self) -> &[MatchResult<'input>] {
+        self.0.as_slice()
+    }
+
+    /// Returns true if all of the matches are successful
+    pub fn is_ok(&self) -> bool {
+        self.0.iter().all(|mr| mr.is_ok())
+    }
+
+    /// Returns true if at least one match failed
+    pub fn has_errors(&self) -> bool {
+        !self.is_ok()
+    }
+
+    #[inline]
+    pub fn iter(&self) -> impl Iterator<Item = &MatchResult<'input>> + '_ {
+        self.0.iter()
     }
 }
-impl MatcherMut for AlwaysMatch {
-    fn try_match_mut<'input, 'context, C>(
-        &self,
-        input: Input<'input>,
-        context: &mut C,
-    ) -> DiagResult<MatchResult<'input>>
+impl<'input> From<MatchResult<'input>> for Matches<'input> {
+    fn from(result: MatchResult<'input>) -> Self {
+        Self(smallvec::smallvec![result])
+    }
+}
+impl<'input> FromIterator<MatchResult<'input>> for Matches<'input> {
+    fn from_iter<T>(iter: T) -> Self
     where
-        C: Context<'input, 'context> + ?Sized,
+        T: IntoIterator<Item = MatchResult<'input>>,
     {
-        self.try_match(input, context)
+        Self(smallvec::SmallVec::from_iter(iter))
     }
 }
-impl Matcher for AlwaysMatch {
-    fn try_match<'input, 'context, C>(
-        &self,
-        input: Input<'input>,
-        _context: &C,
-    ) -> DiagResult<MatchResult<'input>>
+impl<'input> IntoIterator for Matches<'input> {
+    type Item = Result<Option<MatchInfo<'input>>, CheckFailedError>;
+    type IntoIter = MatchIter<'input>;
+
+    #[inline]
+    fn into_iter(self) -> Self::IntoIter {
+        MatchIter {
+            matches: self.0.into_iter(),
+        }
+    }
+}
+impl<'input> Matches<'input> {
+    pub fn push(&mut self, result: MatchResult<'input>) {
+        self.0.push(result);
+    }
+
+    pub fn append(&mut self, matches: &mut Self) {
+        self.0.append(&mut matches.0);
+    }
+
+    pub fn extend<I>(&mut self, iter: I)
     where
-        C: Context<'input, 'context> + ?Sized,
+        I: IntoIterator<Item = MatchResult<'input>>,
     {
-        Ok(MatchResult::ok(MatchInfo::new(
-            input.start()..input.start(),
-            self.span,
-        )))
+        self.0.extend(iter);
     }
 }
-impl<'a> Spanned for AlwaysMatch {
-    fn span(&self) -> SourceSpan {
-        self.span
+
+pub struct MatchIter<'input> {
+    matches: smallvec::IntoIter<[MatchResult<'input>; 1]>,
+}
+impl<'input> MatchIter<'input> {
+    #[inline]
+    pub fn as_slice(&self) -> &[MatchResult<'input>] {
+        self.matches.as_slice()
+    }
+}
+impl<'input> ExactSizeIterator for MatchIter<'input> {
+    fn len(&self) -> usize {
+        self.matches.len()
+    }
+}
+impl<'input> Iterator for MatchIter<'input> {
+    type Item = Result<Option<MatchInfo<'input>>, CheckFailedError>;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.matches.next().map(MatchResult::into_result)
+    }
+}
+impl<'input> DoubleEndedIterator for MatchIter<'input> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.matches.next_back().map(MatchResult::into_result)
     }
 }

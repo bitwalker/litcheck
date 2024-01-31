@@ -1,7 +1,7 @@
 use litcheck::diagnostics::{DiagResult, SourceSpan, Spanned};
 
 use crate::check::{
-    matchers::{Context, ContextExt, MatchResult, MatcherMut},
+    matchers::{Context, ContextExt, MatchResult, MatcherMut, Matches},
     Check, CheckFailedError, MatchType,
 };
 
@@ -31,7 +31,7 @@ where
         self.pattern.span()
     }
 
-    fn apply<'input, 'context, C>(&self, context: &mut C) -> DiagResult<MatchResult<'input>>
+    fn apply<'input, 'context, C>(&self, context: &mut C) -> DiagResult<Matches<'input>>
     where
         C: Context<'input, 'context> + ?Sized,
     {
@@ -42,7 +42,7 @@ where
         if start >= block_end {
             // Cannot match, since the search range would
             // overflow the current block.
-            return Ok(MatchResult {
+            return Ok(Matches::from(MatchResult {
                 ty: MatchType::Failed(CheckFailedError::MatchNoneButExpected {
                     span: self.pattern.span(),
                     match_file: context.match_file(),
@@ -56,7 +56,7 @@ where
                     },
                 }),
                 info: None,
-            });
+            }));
         }
         let input = context.search_range(start..next_eol);
         let result = self.pattern.try_match_mut(input, context)?;
@@ -69,20 +69,20 @@ where
             }
             _ => (),
         }
-        Ok(result)
+        Ok(result.into())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::check::matchers::*;
+    use crate::check::{matchers::*, TestResult};
     use crate::testing::TestContext;
-    use litcheck::diagnostics::Span;
-    use std::{assert_matches::assert_matches, borrow::Cow};
+    use litcheck::diagnostics::{DiagResult, Span};
+    use std::borrow::Cow;
 
     #[test]
-    fn check_next_test() {
+    fn check_next_test() -> DiagResult<()> {
         let mut context = TestContext::new();
         context
             .with_checks(
@@ -105,26 +105,26 @@ entry:
             SubstringMatcher::new(Span::new(SourceSpan::from(8..12), Cow::Borrowed("@inc4")))
                 .expect("expected pattern to be valid");
         let rule = CheckPlain::new(pattern);
-        let result = rule
+        let matches = rule
             .apply(&mut mctx)
             .expect("expected non-fatal application of rule");
-        assert!(result.is_ok());
+        TestResult::from_matches(matches, &mctx).into_result()?;
+
         let pattern =
             SubstringMatcher::new(Span::new(SourceSpan::from(22..30), Cow::Borrowed("entry:")))
                 .expect("expected pattern to be valid");
         let rule = CheckNext::new(pattern);
-        let result = rule
+        let matches = rule
             .apply(&mut mctx)
             .expect("expected non-fatal application of rule");
-        assert!(result.is_ok());
-        assert_matches!(result.ty, MatchType::MatchFoundAndExpected);
-        assert_eq!(result.info.as_ref().unwrap().span.offset(), 30);
-        assert_eq!(result.info.as_ref().unwrap().span.len(), 6);
+        let matched = TestResult::from_matches(matches, &mctx).into_result()?;
+        assert_eq!(matched.len(), 1);
+        assert_eq!(matched[0].span.offset(), 30);
+        assert_eq!(matched[0].span.len(), 6);
         let input = mctx.search();
-        assert_eq!(
-            input.as_str(result.info.as_ref().unwrap().matched_range()),
-            "entry:"
-        );
+        assert_eq!(input.as_str(matched[0].matched_range()), "entry:");
         assert_eq!(input.buffer()[mctx.cursor().start()], b'\n');
+
+        Ok(())
     }
 }

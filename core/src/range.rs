@@ -45,6 +45,11 @@ impl<T: fmt::Debug> fmt::Debug for Range<T> {
             .finish()
     }
 }
+impl<T: fmt::Display> fmt::Display for Range<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}..{}", &self.start, &self.end)
+    }
+}
 impl<T> core::ops::RangeBounds<T> for Range<T> {
     #[inline]
     fn start_bound(&self) -> Bound<&T> {

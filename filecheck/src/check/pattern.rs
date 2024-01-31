@@ -169,12 +169,12 @@ impl<'a> Pattern<'a> {
     pub fn compile_static(
         span: SourceSpan,
         pattern: CheckPattern<'a>,
-    ) -> DiagResult<StaticMatcher<'a>> {
+    ) -> DiagResult<SimpleMatcher<'a>> {
         match pattern {
-            CheckPattern::Literal(lit) => Ok(StaticMatcher::Substring(SubstringMatcher::new(
+            CheckPattern::Literal(lit) => Ok(SimpleMatcher::Substring(SubstringMatcher::new(
                 lit.map(Cow::Borrowed),
             )?)),
-            CheckPattern::Regex(s) => Ok(StaticMatcher::Regex(RegexMatcher::new(
+            CheckPattern::Regex(s) => Ok(SimpleMatcher::Regex(RegexMatcher::new(
                 s.map(Cow::Borrowed),
             )?)),
             CheckPattern::Match(parts) => {

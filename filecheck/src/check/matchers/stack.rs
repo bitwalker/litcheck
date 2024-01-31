@@ -116,12 +116,12 @@ impl<'input> Operand<'input> {
     }
 }
 
-fn parse_number<'input, 'context>(
+fn parse_number(
     span: SourceSpan,
     value: &str,
     precision: u8,
     signed: bool,
-    context: &dyn Context<'input, 'context>,
+    context: &dyn Context<'_, '_>,
 ) -> Result<i64, InvalidNumericCastError> {
     let precision = precision as usize;
     let value = if precision > 0 {

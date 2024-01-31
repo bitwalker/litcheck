@@ -3,7 +3,7 @@ use litcheck::{
     StringInterner,
 };
 
-use super::Checker;
+use super::{Checker, MatchInfo};
 use crate::{parse, Config};
 
 pub struct FileCheckTest<'a> {
@@ -28,7 +28,7 @@ impl<'a> FileCheckTest<'a> {
     /// First, it parses the check file for rules, post-processes them, and then
     /// applies the parsed rules to the input file, to determine if the file matches
     /// or fails to match.
-    pub fn check<'input, S>(&mut self, input_file: S) -> DiagResult<()>
+    pub fn check<'input, S>(&mut self, input_file: S) -> DiagResult<Vec<MatchInfo<'static>>>
     where
         ArcSource: From<S> + 'input,
     {
@@ -47,14 +47,16 @@ impl<'a> FileCheckTest<'a> {
         let program = match_file.compile(self.config, &mut self.strings)?;
 
         // Apply the checks
-        Checker::new(
+        let mut checker = Checker::new(
             self.config,
             &mut self.strings,
             program,
             self.match_file.clone(),
-        )
-        .check_all(ArcSource::from(input_file))
-        .map_err(Report::new)
+        );
+        checker
+            .check_input(ArcSource::from(input_file))
+            .into_result()
+            .map_err(Report::new)
     }
 }
 
@@ -66,12 +68,12 @@ mod tests {
 
     #[test]
     fn filecheck_sanity_test() -> DiagResult<()> {
-        const MATCH_FILE: &'static str = include_str!(concat!(
+        const MATCH_FILE: &str = include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../tests/filecheck/sanity/check.txt"
         ));
 
-        const INPUT_FILE: &'static str = r"
+        const INPUT_FILE: &str = r"
 Some random
 
 
@@ -81,17 +83,19 @@ and some rules
 
         let mut context = TestContext::new();
         context.with_checks(MATCH_FILE).with_input(INPUT_FILE);
-        context.check()
+        context.check()?;
+
+        Ok(())
     }
 
     #[test]
     fn filecheck_sanity_check_same_violation_test() -> DiagResult<()> {
-        const MATCH_FILE: &'static str = include_str!(concat!(
+        const MATCH_FILE: &str = include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../tests/filecheck/sanity/check.txt"
         ));
 
-        const INPUT_FILE: &'static str = r"
+        const INPUT_FILE: &str = r"
 Some random
 
 

@@ -17,14 +17,14 @@ use std::fmt;
 use litcheck::diagnostics::{DiagResult, SourceSpan};
 
 use crate::check::{
-    matchers::{Context, MatchResult},
+    matchers::{Context, Matches},
     Check,
 };
 
 pub trait Rule: fmt::Debug {
     fn kind(&self) -> Check;
     fn span(&self) -> SourceSpan;
-    fn apply<'input, 'context, C>(&self, context: &mut C) -> DiagResult<MatchResult<'input>>
+    fn apply<'input, 'context, C>(&self, context: &mut C) -> DiagResult<Matches<'input>>
     where
         C: Context<'input, 'context> + ?Sized;
 }
@@ -41,7 +41,7 @@ where
         <R as Rule>::span(self)
     }
     #[inline(always)]
-    fn apply<'input, 'context, C>(&self, context: &mut C) -> DiagResult<MatchResult<'input>>
+    fn apply<'input, 'context, C>(&self, context: &mut C) -> DiagResult<Matches<'input>>
     where
         C: Context<'input, 'context> + ?Sized,
     {
@@ -61,7 +61,7 @@ where
         (**self).span()
     }
     #[inline(always)]
-    fn apply<'input, 'context, C>(&self, context: &mut C) -> DiagResult<MatchResult<'input>>
+    fn apply<'input, 'context, C>(&self, context: &mut C) -> DiagResult<Matches<'input>>
     where
         C: Context<'input, 'context> + ?Sized,
     {
@@ -72,10 +72,10 @@ where
 pub trait DynRule: fmt::Debug {
     fn kind(&self) -> Check;
     fn span(&self) -> SourceSpan;
-    fn apply_dyn<'input, 'context>(
+    fn apply_dyn<'input>(
         &self,
-        context: &mut dyn Context<'input, 'context>,
-    ) -> DiagResult<MatchResult<'input>>;
+        context: &mut dyn Context<'input, '_>,
+    ) -> DiagResult<Matches<'input>>;
 }
 impl<'context> Rule for (dyn DynRule + 'context) {
     #[inline(always)]
@@ -87,15 +87,13 @@ impl<'context> Rule for (dyn DynRule + 'context) {
         Self::span(self)
     }
     #[inline(always)]
-    fn apply<'input, 'ctx, C>(&self, context: &mut C) -> DiagResult<MatchResult<'input>>
+    fn apply<'input, 'ctx, C>(&self, context: &mut C) -> DiagResult<Matches<'input>>
     where
         C: Context<'input, 'ctx> + ?Sized,
     {
         let mut passthrough = context.protect();
         let result = self.apply_dyn(&mut passthrough)?;
-        if result.is_ok() {
-            passthrough.save();
-        }
+        passthrough.save();
         Ok(result)
     }
 }
@@ -113,10 +111,10 @@ where
         <R as Rule>::span(self)
     }
     #[inline(always)]
-    fn apply_dyn<'input, 'context>(
+    fn apply_dyn<'input>(
         &self,
-        context: &mut dyn Context<'input, 'context>,
-    ) -> DiagResult<MatchResult<'input>> {
+        context: &mut dyn Context<'input, '_>,
+    ) -> DiagResult<Matches<'input>> {
         <R as Rule>::apply(self, context)
     }
 }

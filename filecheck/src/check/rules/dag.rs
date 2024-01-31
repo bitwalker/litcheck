@@ -9,7 +9,7 @@ use crate::{
     check::{
         matchers::{Context, ContextGuard, MatchInfo, MatchResult, MatcherMut},
         pattern::PatternIdentifier,
-        searcher::{Input as SearcherInput, Match as SearcherMatch, PatternSetSearcher, Searcher},
+        searcher::{Input as SearcherInput, Match as SearchMatch, PatternSetSearcher, Searcher},
         Check, CheckFailedError, Input, MatchAll, MatchAny, MatchType, Pattern,
     },
     expr::Value,
@@ -41,18 +41,14 @@ impl<'a> Ord for MatchState<'a> {
 
 struct PatternVisitor<'a, S: PatternSetSearcher> {
     searcher: &'a mut S,
-    visited: Vec<<<S as Searcher>::Match as SearcherMatch>::PatternID>,
     errors: Vec<Option<CheckFailedError>>,
-    first_match: Option<SourceSpan>,
 }
 #[cfg(test)]
 impl<'a, S: PatternSetSearcher + std::fmt::Debug> std::fmt::Debug for PatternVisitor<'a, S> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         f.debug_struct("PatternVisitor")
             .field("searcher", &self.searcher)
-            .field("visited", &self.visited)
             .field("errors", &self.errors)
-            .field("first_match", &self.first_match)
             .finish()
     }
 }
@@ -62,76 +58,107 @@ impl<'a, S: PatternSetSearcher> PatternVisitor<'a, S> {
 
         let mut errors = Vec::with_capacity(num_patterns);
         errors.resize_with(num_patterns, || None);
-        Self {
-            searcher,
-            visited: Vec::with_capacity(num_patterns),
-            errors,
-            first_match: None,
-        }
+        Self { searcher, errors }
     }
 
     fn patterns_len(&self) -> usize {
         self.searcher.patterns_len()
     }
 
-    fn pattern_span(&self, id: <<S as Searcher>::Match as SearcherMatch>::PatternID) -> SourceSpan {
-        self.searcher.pattern_span(id)
-    }
-
     pub fn try_match_all<'input>(
         &mut self,
         context: &mut ContextGuard<'_, 'input, '_>,
-    ) -> DiagResult<MatchResult<'input>> {
+    ) -> DiagResult<Matches<'input>> {
+        let mut matches = Matches::with_capacity(self.patterns_len());
         loop {
-            let search_guard = context.protect();
-            let result = self.searcher.try_match_next(&search_guard)?;
-            if let Some(info) = result.info.as_ref() {
-                let pid = <<<S as Searcher>::Match as SearcherMatch>::PatternID as PatternIdentifier>::new(info.pattern_id)
-                    .unwrap();
-                // Ignore this match if we have already visited this pattern
-                if self.visited.contains(&pid) {
+            let result = self.searcher.try_match_next(context)?;
+            match result {
+                MatchResult {
+                    ty,
+                    info: Some(info),
+                } if ty.is_ok() => {
+                    // Clear any previous errors for this pattern
+                    self.errors[info.pattern_id] = None;
+
+                    // Ignore this match if we have already matched this pattern
+                    if matches
+                        .iter()
+                        .any(|mr| mr.pattern_id() == Some(info.pattern_id))
+                    {
+                        continue;
+                    }
+
+                    // Ignore this match if we have already matched a pattern to it at this location
+                    let range = info.span.range();
+                    if matches
+                        .iter()
+                        .map(|mr| mr.info.as_ref().unwrap().span.range())
+                        .any(|span| span.contains(&range.start) || span.contains(&range.end))
+                    {
+                        continue;
+                    }
+
+                    // Record that we've matched this pattern
+                    matches.push(MatchResult::new(ty, Some(info)));
+
+                    // If we've matched all patterns, we're done, otherwise keep searching
+                    if self.patterns_len() == matches.len() {
+                        let pos = self.searcher.last_match_end().unwrap();
+                        context.cursor_mut().set_start(pos);
+                        break;
+                    }
+                }
+                MatchResult {
+                    ty: MatchType::Failed(err),
+                    info: Some(info),
+                } => {
+                    self.errors[info.pattern_id] = Some(err);
                     continue;
                 }
-                // Record that we've matched this pattern
-                self.visited.push(pid);
-                // Save any local bindings produced during this match
-                search_guard.save();
-                // If we've matched all patterns, we're done, otherwise keep searching
-                let first_match = *self.first_match.get_or_insert(info.span);
-                if self.patterns_len() == self.visited.len() {
-                    let start = first_match.offset();
-                    break Ok(MatchResult::ok(MatchInfo::new(
-                        start..info.span.end(),
-                        info.pattern_span,
-                    )));
-                }
-            } else {
-                // No more matches are possible
-                let mut failed = Vec::with_capacity(self.patterns_len() - self.visited.len());
-                let errors = core::mem::take(&mut self.errors);
-                for (pattern_id, mut error) in errors.into_iter().enumerate() {
-                    if let Some(error) = error.take() {
-                        failed.push(error);
-                        continue;
+                MatchResult {
+                    ty: MatchType::Failed(CheckFailedError::MatchNoneButExpected { .. }),
+                    info: None,
+                } => {
+                    // No more matches are possible
+                    let errors = core::mem::take(&mut self.errors);
+                    let num_matches = matches.len();
+                    if self.patterns_len() != num_matches {
+                        for (pattern_id, maybe_error) in errors.into_iter().enumerate() {
+                            if let Some(error) = maybe_error {
+                                matches.push(MatchResult::failed(error));
+                            }
+                            if matches.as_slice()[..num_matches]
+                                .iter()
+                                .any(|mr| mr.pattern_id() == Some(pattern_id))
+                            {
+                                continue;
+                            }
+                            let span = self.searcher.pattern_span(
+                                <<S as Searcher>::Match as SearchMatch>::PatternID::new_unchecked(
+                                    pattern_id,
+                                ),
+                            );
+                            matches.push(MatchResult::failed(
+                                CheckFailedError::MatchNoneButExpected {
+                                    span,
+                                    match_file: context.match_file(),
+                                    note: None,
+                                },
+                            ));
+                        }
+                    } else {
+                        assert!(errors.iter().all(|e| e.is_none()));
                     }
-                    let pid = <<<S as Searcher>::Match as SearcherMatch>::PatternID as PatternIdentifier>::new_unchecked(
-                        pattern_id,
-                    );
-                    if self.visited.contains(&pid) {
-                        continue;
-                    }
-                    let span = self.pattern_span(pid);
-                    failed.push(CheckFailedError::MatchNoneButExpected {
-                        span,
-                        match_file: context.match_file(),
-                        note: None,
-                    });
+                    break;
                 }
-                break Ok(MatchResult::failed(CheckFailedError::MatchAllFailed {
-                    failed,
-                }));
+                result => {
+                    matches.push(result);
+                    break;
+                }
             }
         }
+
+        Ok(matches)
     }
 }
 
@@ -189,22 +216,6 @@ impl<'a, S: PatternSetSearcher> SubPatternVisitor<'a, S> {
         }
     }
 
-    fn pattern_span(&self) -> SourceSpan {
-        let start = self
-            .subpatterns
-            .iter()
-            .flat_map(|p| p.iter().map(|p| p.start()))
-            .min()
-            .unwrap();
-        let end = self
-            .subpatterns
-            .iter()
-            .flat_map(|p| p.iter().map(|p| p.end()))
-            .max()
-            .unwrap();
-        SourceSpan::from(start..end)
-    }
-
     fn all_prefixes_visited(&self) -> bool {
         self.subpatterns
             .iter()
@@ -219,7 +230,7 @@ impl<'a, S: PatternSetSearcher> SubPatternVisitor<'a, S> {
     pub fn try_match_all<'guard, 'input, 'context>(
         &mut self,
         context: &mut ContextGuard<'guard, 'input, 'context>,
-    ) -> DiagResult<MatchResult<'input>> {
+    ) -> DiagResult<Matches<'input>> {
         // Until we have matched all patterns in the set:
         //
         // 1. For each unvisited prefix
@@ -235,6 +246,7 @@ impl<'a, S: PatternSetSearcher> SubPatternVisitor<'a, S> {
         let mut match_states =
             Vec::<Option<MatchState<'input>>>::with_capacity(self.max_subpatterns);
         match_states.resize_with(self.max_subpatterns, || None);
+        let mut matched = Matches::with_capacity(self.num_patterns);
         loop {
             // Introduce a new binding scope that will be persisted to when a match is found
             let mut prefix_context = context.protect();
@@ -302,27 +314,14 @@ impl<'a, S: PatternSetSearcher> SubPatternVisitor<'a, S> {
                         &mut prefix_context,
                     ) {
                         // Pattern matched, and all patterns have been matched, so we're done
-                        ControlFlow::Break(_) => {
+                        ControlFlow::Break(info) => {
                             prefix_context.save();
-                            let start = self
-                                .patterns_matched
-                                .iter()
-                                .map(|sp| sp.iter().map(|span| span.start()).min().unwrap())
-                                .min()
-                                .unwrap();
-                            let end = self
-                                .patterns_matched
-                                .iter()
-                                .map(|sp| sp.iter().map(|span| span.end()).max().unwrap())
-                                .max()
-                                .unwrap();
-                            return Ok(MatchResult::ok(MatchInfo::new(
-                                start..end,
-                                self.pattern_span(),
-                            )));
+                            matched.push(MatchResult::ok(info));
+                            return Ok(matched);
                         }
                         // Pattern matched, but not all patterns have been matched yet
-                        ControlFlow::Continue(Some(_)) => {
+                        ControlFlow::Continue(Some(info)) => {
+                            matched.push(MatchResult::ok(info));
                             continue;
                         }
                         // No match at this prefix, try again
@@ -346,14 +345,6 @@ impl<'a, S: PatternSetSearcher> SubPatternVisitor<'a, S> {
         }
 
         // No more matches are possible
-        let mut failed = Vec::with_capacity(
-            self.num_patterns
-                - self
-                    .patterns_matched
-                    .iter()
-                    .map(|sp| sp.len())
-                    .sum::<usize>(),
-        );
         for ((prefix_id, subpatterns), visited) in self
             .subpatterns
             .iter()
@@ -368,23 +359,23 @@ impl<'a, S: PatternSetSearcher> SubPatternVisitor<'a, S> {
             {
                 let pattern_id = pattern_offset + index;
                 if let Some(error) = error.take() {
-                    failed.push(error);
+                    matched.push(MatchResult::failed(error));
                     continue;
                 }
                 if visited.iter().any(|id| id == &pattern_id) {
                     continue;
                 }
                 let span = pattern.span();
-                failed.push(CheckFailedError::MatchNoneButExpected {
-                    span,
-                    match_file: context.match_file(),
-                    note: None,
-                });
+                matched.push(MatchResult::failed(
+                    CheckFailedError::MatchNoneButExpected {
+                        span,
+                        match_file: context.match_file(),
+                        note: None,
+                    },
+                ));
             }
         }
-        Ok(MatchResult::failed(CheckFailedError::MatchAllFailed {
-            failed,
-        }))
+        Ok(matched)
     }
 
     fn match_pattern<'guard, 'input, 'context>(
@@ -500,7 +491,7 @@ impl<'check> Rule for CheckDag<'check> {
         self.patterns.span()
     }
 
-    fn apply<'input, 'context, C>(&self, context: &mut C) -> DiagResult<MatchResult<'input>>
+    fn apply<'input, 'context, C>(&self, context: &mut C) -> DiagResult<Matches<'input>>
     where
         C: Context<'input, 'context> + ?Sized,
     {
@@ -566,10 +557,9 @@ impl<'check> Rule for CheckDag<'check> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::check::matchers::*;
-    use crate::check::CheckFailedError;
+    use crate::check::{self, *};
     use crate::testing::TestContext;
-    use litcheck::diagnostics::Report;
+    use smallvec::SmallVec;
     use std::collections::VecDeque;
 
     /// This test ensures that the ordering of CHECK-DAG patterns is not
@@ -621,17 +611,9 @@ block3(v11):
         let result = rule
             .apply(&mut mctx)
             .expect("expected non-fatal application of rule");
-        match result {
-            MatchResult {
-                ty: MatchType::Failed(err),
-                ..
-            } => {
-                return Err(Report::new(err));
-            }
-            result => {
-                assert!(result.is_ok());
-            }
-        }
+
+        let test_result = TestResult::from_matches(result, &mctx);
+        test_result.into_result()?;
 
         Ok(())
     }
@@ -652,7 +634,7 @@ block3(v11):
 CHECK-LABEL: block0:
 CHECK-DAG: v[[#]] = {{[a-z]+[.][a-z]+}}
 CHECK-DAG: v[[#]] = const.i32 0
-CHECK-LABEL: block1:
+CHECK-LABEL: block1(
 CHECK: br block2(v[[#]], v[[#]])
 ",
             )
@@ -695,30 +677,25 @@ block3(v11):
         let result = rule
             .apply(&mut mctx)
             .expect("expected non-fatal application of rule");
-        match result {
-            MatchResult {
-                ty: MatchType::Failed(err),
-                ..
-            } => {
-                return Err(Report::new(err));
-            }
-            result => {
-                assert!(result.is_ok());
-            }
-        }
+        let test_result = TestResult::from_matches(result, &mctx);
+        test_result.into_result()?;
 
         Ok(())
     }
 
+    /// This test ensures that a CHECK-DAG does not consider matches successful
+    /// outside the current block
     #[test]
-    #[ignore]
-    fn check_dag_check_label_boundaries_test() -> DiagResult<()> {
+    fn check_dag_does_not_search_beyond_check_label_boundaries_test() -> DiagResult<()> {
         let mut context = TestContext::new();
         context
             .with_checks(
                 "
-CHECK-DAG: v[[#]] = add v9, v0
-CHECK-DAG: v[[#]] = add v6, v7
+CHECK-LABEL: block0(
+CHECK-DAG: v1 = const.i32 1
+CHECK-DAG: v8 = add v6, v7
+CHECK-LABEL: block1(
+CHECK-DAG: v8 = add v6, v7
 ",
             )
             .with_input(
@@ -747,34 +724,109 @@ block3(v11):
         let match_file = context.match_file();
         let match_file_source = match_file.as_ref();
         let check_file = context.parse(match_file_source)?;
-
-        let lines = check_file.into_lines();
+        let program = context.compile(check_file)?;
 
         let mut mctx = context.match_context();
-        let match_all = MatchAll::compile(lines, mctx.env_mut().interner())?;
-        let rule = CheckDag::new(match_all);
-        let result = rule
-            .apply(&mut mctx)
-            .expect("expected non-fatal application of rule");
-        match result {
-            MatchResult {
-                ty: MatchType::Failed(err),
-                ..
-            } => Err(Report::new(err)),
-            result => {
-                dbg!(&result);
-                assert!(result.is_ok());
-                let info = result.info.unwrap();
-                Err(Report::new(CheckFailedError::MatchFoundErrorNote {
-                    span: info.span,
-                    input_file: mctx.input_file(),
-                    pattern: Some(crate::check::RelatedCheckError {
-                        span: info.pattern_span,
-                        match_file: mctx.match_file(),
-                    }),
-                    help: None,
-                }))
-            }
+        let blocks = check::checker::analyze_blocks(&program, &mut mctx)?;
+        assert_eq!(blocks.len(), 2);
+
+        let block = &blocks[0];
+        assert!(block.start.is_some());
+        assert!(block.code_start.is_some());
+        assert!(!block.range().is_empty());
+
+        mctx.enter_block(block.range());
+        let ops = &program.code.as_slice()[block.code_start()..];
+        let mut test_result = TestResult::new(&mctx);
+        check::checker::check_block(ops, &mut test_result, &mut mctx);
+        dbg!(&test_result);
+        assert!(test_result.is_failed());
+        if let [CheckFailedError::MatchNoneButExpected { .. }] = test_result.errors() {
+            Ok(())
+        } else {
+            Ok(test_result.into_result().map(|_| ())?)
         }
+    }
+
+    /// This test ensures that all of the successful matches are contained within
+    /// their respective blocks.
+    #[test]
+    fn check_dag_check_label_boundaries_test() -> DiagResult<()> {
+        let mut context = TestContext::new();
+        context
+            .with_checks(
+                "
+CHECK-LABEL: block0(
+CHECK-DAG: v1 = const.i32 1
+CHECK-DAG: v2 = const.i32 0
+CHECK-LABEL: block1(
+CHECK-DAG: v8 = add v6, v7
+",
+            )
+            .with_input(
+                "
+function foo(i32) -> i32 {
+block0(v0: i32):
+  v2 = const.i32 0
+  v1 = const.i32 1
+  br block2(v1, v2)
+
+block1(v6: i32, v7: i32):
+  v8 = add v6, v7
+  v9 = const.i32 0
+  v10 = add v9, v0
+  br block3(v8, v10)
+
+block2(v3: i32, v4: i32):
+  v5 = mul v3, v4
+  br block1
+
+block3(v11):
+  ret v11
+}
+",
+            );
+        let match_file = context.match_file();
+        let match_file_source = match_file.as_ref();
+        let check_file = context.parse(match_file_source)?;
+        let program = context.compile(check_file)?;
+
+        let mut mctx = context.match_context();
+        let blocks = check::checker::analyze_blocks(&program, &mut mctx)?;
+        assert_eq!(blocks.len(), 2);
+
+        let block = &blocks[0];
+        assert!(block.start.is_some());
+        assert!(block.code_start.is_some());
+        assert!(!block.range().is_empty());
+
+        mctx.enter_block(block.range());
+        let block_ranges = blocks
+            .iter()
+            .map(|blk| blk.range())
+            .collect::<SmallVec<[_; 2]>>();
+        let matches = check::checker::check_blocks(blocks, &program, &mut mctx).into_result()?;
+
+        assert_eq!(matches.len(), 5);
+        assert!(matches[0].span.end() <= block_ranges[0].start); // CHECK-LABEL
+        assert!(matches[1].span.end() <= block_ranges[0].end);
+        assert!(matches[2].span.end() <= block_ranges[0].end);
+        let match3_span = matches[3].span; // CHECK-LABEL
+        assert!(
+            match3_span.start() >= block_ranges[0].end
+                && match3_span.end() <= block_ranges[1].start
+        );
+        let match4_span = matches[4].span;
+        assert!(
+            match4_span.start() >= block_ranges[1].start
+                && match4_span.end() <= block_ranges[1].end
+        );
+        let match5_span = matches[4].span;
+        assert!(
+            match5_span.start() >= block_ranges[1].start
+                && match5_span.end() <= block_ranges[1].end
+        );
+
+        Ok(())
     }
 }

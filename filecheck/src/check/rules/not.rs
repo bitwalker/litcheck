@@ -3,7 +3,7 @@
 use litcheck::diagnostics::{DiagResult, SourceSpan, Spanned};
 
 use crate::check::{
-    matchers::{self, AnyMatcherMut, Context, MatchInfo, MatchResult, MatcherMut},
+    matchers::{self, AnyMatcherMut, Context, MatchInfo, MatchResult, MatcherMut, Matches},
     Check, CheckFailedError, MatchAll, MatchAny, MatchType, Pattern, PatternPrefix,
     RelatedCheckError,
 };
@@ -28,7 +28,7 @@ impl<'check> Rule for CheckNot<'check> {
         self.patterns.span()
     }
 
-    fn apply<'input, 'context, C>(&self, _context: &mut C) -> DiagResult<MatchResult<'input>>
+    fn apply<'input, 'context, C>(&self, _context: &mut C) -> DiagResult<Matches<'input>>
     where
         C: Context<'input, 'context> + ?Sized,
     {

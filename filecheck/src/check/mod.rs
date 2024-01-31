@@ -1,5 +1,5 @@
 pub mod bytecode;
-mod checker;
+pub(crate) mod checker;
 mod errors;
 mod input;
 pub mod matchers;
@@ -8,13 +8,13 @@ mod rules;
 mod test;
 
 pub use self::bytecode::CheckProgram;
-pub use self::checker::{Checker, TestFailed};
+pub use self::checker::{Checker, TestFailed, TestResult};
 pub use self::errors::*;
 pub use self::input::Input;
 use self::matchers::*;
 pub use self::matchers::{
     Context, ContextGuard, LexicalScope, LexicalScopeExtend, LexicalScopeMut, MatchContext,
-    MatchInfo, MatchResult, ScopeGuard,
+    MatchInfo, MatchResult, Matches, ScopeGuard,
 };
 pub use self::pattern::{MatchAll, MatchAny, Pattern, PatternIdentifier, PatternPrefix};
 pub use self::rules::{DynRule, Rule};
@@ -59,7 +59,7 @@ impl<'a> CheckFile<'a> {
 
     pub fn compile(
         self,
-        config: &'a Config,
+        config: &Config,
         interner: &mut StringInterner,
     ) -> DiagResult<CheckProgram<'a>> {
         CheckProgram::compile(self, config, interner)

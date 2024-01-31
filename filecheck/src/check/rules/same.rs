@@ -1,7 +1,7 @@
 use litcheck::diagnostics::{DiagResult, SourceSpan, Spanned};
 
 use crate::check::{
-    matchers::{Context, MatchResult, MatcherMut},
+    matchers::{Context, MatchResult, MatcherMut, Matches},
     Check, CheckFailedError, MatchType, RelatedCheckError,
 };
 
@@ -31,7 +31,7 @@ where
         self.pattern.span()
     }
 
-    fn apply<'input, 'context, C>(&self, context: &mut C) -> DiagResult<MatchResult<'input>>
+    fn apply<'input, 'context, C>(&self, context: &mut C) -> DiagResult<Matches<'input>>
     where
         C: Context<'input, 'context> + ?Sized,
     {
@@ -45,9 +45,9 @@ where
                 let cursor = context.cursor_mut();
                 assert!(info.span.offset() < cursor.end_of_line());
                 cursor.set_start(info.span.end());
-                Ok(MatchResult::new(ty, Some(info)))
+                Ok(MatchResult::new(ty, Some(info)).into())
             }
-            result @ MatchResult { info: Some(_), .. } => Ok(result),
+            result @ MatchResult { info: Some(_), .. } => Ok(result.into()),
             result => {
                 // For better diagnostics, extend our search to the end
                 // of the block, just in case there is a match, just in the wrong place
@@ -55,7 +55,7 @@ where
                     .pattern
                     .try_match_mut(context.search_block(), context)?;
                 if let Some(info) = extended_result.info {
-                    Ok(MatchResult {
+                    Ok(Matches::from(MatchResult {
                         ty: MatchType::Failed(CheckFailedError::MatchFoundButWrongLine {
                             span: info.span,
                             input_file: context.input_file(),
@@ -65,9 +65,9 @@ where
                             }),
                         }),
                         info: Some(info),
-                    })
+                    }))
                 } else {
-                    Ok(result)
+                    Ok(result.into())
                 }
             }
         }
@@ -77,13 +77,13 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::check::matchers::*;
+    use crate::check::{matchers::*, TestResult};
     use crate::testing::TestContext;
-    use litcheck::diagnostics::Span;
-    use std::{assert_matches::assert_matches, borrow::Cow};
+    use litcheck::diagnostics::{DiagResult, Span};
+    use std::borrow::Cow;
 
     #[test]
-    fn check_same_test() {
+    fn check_same_test() -> DiagResult<()> {
         let mut context = TestContext::new();
         context
             .with_checks(
@@ -108,28 +108,30 @@ entry:
         ))
         .expect("expected pattern to be valid");
         let rule = CheckPlain::new(pattern);
-        let result = rule
+        let matches = rule
             .apply(&mut mctx)
             .expect("expected non-fatal application of rule");
-        assert!(result.is_ok());
+        TestResult::from_matches(matches, &mctx).into_result()?;
+
         let pattern = SubstringMatcher::new(Span::new(
             SourceSpan::from(26..50),
             Cow::Borrowed("@llvm.atomic.load.add.i64"),
         ))
         .expect("expected pattern to be valid");
         let rule = CheckSame::new(pattern);
-        let result = rule
+        let matches = rule
             .apply(&mut mctx)
             .expect("expected non-fatal application of rule");
-        assert!(result.is_ok());
-        assert_matches!(result.ty, MatchType::MatchFoundAndExpected);
-        assert_eq!(result.info.as_ref().unwrap().span.offset(), 64);
-        assert_eq!(result.info.as_ref().unwrap().span.len(), 25);
+        let matched = TestResult::from_matches(matches, &mctx).into_result()?;
+        assert_eq!(matched[0].span.offset(), 64);
+        assert_eq!(matched[0].span.len(), 25);
         let input = mctx.search();
         assert_eq!(
-            input.as_str(result.info.as_ref().unwrap().matched_range()),
+            input.as_str(matched[0].matched_range()),
             "@llvm.atomic.load.add.i64"
         );
         assert_eq!(input.buffer()[mctx.cursor().start()], b'.');
+
+        Ok(())
     }
 }

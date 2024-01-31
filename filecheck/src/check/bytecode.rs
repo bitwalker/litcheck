@@ -16,7 +16,7 @@ pub enum CheckOp<'a> {
     ///
     /// When evaluated, the checker will see if there are remaining blocks
     /// in the program, and if so, find the index of the next BlockStart
-    BlockStart(StaticMatcher<'a>),
+    BlockStart(SimpleMatcher<'a>),
     ApplyRule(Box<dyn DynRule + 'a>),
     ApplyRulePrecededBy(Box<dyn DynRule + 'a>, Box<dyn DynRule + 'a>),
     RepeatRule(Box<dyn DynRule + 'a>, usize),
@@ -30,7 +30,7 @@ pub struct CheckProgram<'a> {
 impl<'a> CheckProgram<'a> {
     pub fn compile(
         check_file: CheckFile<'a>,
-        _config: &'a Config,
+        _config: &Config,
         interner: &mut StringInterner,
     ) -> DiagResult<Self> {
         // 1. Identify and split lines into blocks

@@ -43,7 +43,7 @@ pub trait LexicalScope {
     /// Resolve an interned [Symbol] to its string value
     fn resolve(&self, symbol: Symbol) -> &str;
 }
-impl<'a, S> LexicalScope for &S
+impl<S> LexicalScope for &S
 where
     S: LexicalScope + ?Sized,
 {

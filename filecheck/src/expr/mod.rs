@@ -363,7 +363,7 @@ impl NumberFormat {
     }
 
     pub fn pattern(&self) -> String {
-        const I64_MAX: &'static str = "9223372036854775807";
+        const I64_MAX: &str = "9223372036854775807";
         const MAX_DIGITS: usize = I64_MAX.len();
 
         match self {

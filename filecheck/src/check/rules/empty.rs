@@ -1,6 +1,6 @@
 use litcheck::diagnostics::{DiagResult, SourceSpan};
 
-use crate::check::{Check, CheckFailedError, Context, MatchInfo, MatchResult, MatchType};
+use crate::check::{Check, CheckFailedError, Context, MatchInfo, MatchResult, MatchType, Matches};
 
 use super::*;
 
@@ -22,7 +22,7 @@ impl Rule for CheckEmpty {
         self.span
     }
 
-    fn apply<'input, 'context, C>(&self, context: &mut C) -> DiagResult<MatchResult<'input>>
+    fn apply<'input, 'context, C>(&self, context: &mut C) -> DiagResult<Matches<'input>>
     where
         C: Context<'input, 'context> + ?Sized,
     {
@@ -40,7 +40,8 @@ impl Rule for CheckEmpty {
             Ok(MatchResult {
                 ty: MatchType::MatchFoundAndExpected,
                 info: Some(MatchInfo::new(span, self.span)),
-            })
+            }
+            .into())
         } else {
             Ok(MatchResult {
                 ty: MatchType::Failed(CheckFailedError::MatchNoneButExpected {
@@ -49,7 +50,8 @@ impl Rule for CheckEmpty {
                     note: None,
                 }),
                 info: None,
-            })
+            }
+            .into())
         }
     }
 }
@@ -57,12 +59,12 @@ impl Rule for CheckEmpty {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::check::Context;
+    use crate::check::{Context, TestResult};
     use crate::testing::TestContext;
-    use std::assert_matches::assert_matches;
+    use litcheck::diagnostics::Report;
 
     #[test]
-    fn check_empty_test() {
+    fn check_empty_test() -> DiagResult<()> {
         let mut context = TestContext::new();
         context.with_checks("CHECK-EMPTY:").with_input(
             "
@@ -73,28 +75,34 @@ def",
         );
         let mut mctx = context.match_context();
         let rule = CheckEmpty::new(SourceSpan::from(0..12));
-        let result = rule
+        let matches = rule
             .apply(&mut mctx)
             .expect("expected non-fatal application of rule");
-        assert!(!result.is_ok());
-        assert_matches!(
-            result.ty,
-            MatchType::Failed(CheckFailedError::MatchNoneButExpected { .. })
-        );
+        let test_result = TestResult::from_matches(matches, &mctx);
+        assert!(test_result.is_failed());
+        match test_result.errors() {
+            [CheckFailedError::MatchNoneButExpected { .. }] => (),
+            _ => return test_result.into_result().map(|_| ()).map_err(Report::new),
+        }
 
         // Move to the 'abc' line
         mctx.cursor_mut().set_start(5);
 
-        let result = rule
+        let matches = rule
             .apply(&mut mctx)
             .expect("expected non-fatal application of rule");
-        assert!(result.is_ok());
-        assert_matches!(result.ty, MatchType::MatchFoundAndExpected);
-        assert_eq!(result.info.as_ref().unwrap().span.offset(), 6);
+        let test_result = TestResult::from_matches(matches, &mctx);
+        assert!(test_result.is_ok());
+        assert_eq!(test_result.num_matched(), 1);
+
+        let matched = test_result.into_result()?;
+        assert_eq!(matched[0].span.offset(), 6);
         let buffer = mctx.cursor().buffer();
         assert_eq!(buffer[5], b'\n');
         assert_eq!(buffer[6], b'\n');
         assert_eq!(buffer[7], b'd');
-        assert_eq!(result.info.as_ref().unwrap().span.len(), 0);
+        assert_eq!(matched[0].span.len(), 0);
+
+        Ok(())
     }
 }
