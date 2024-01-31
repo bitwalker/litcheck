@@ -4,6 +4,7 @@ pub mod matcher;
 mod matches;
 mod prefix;
 pub mod search;
+pub(crate) mod visitors;
 
 pub use self::id::PatternIdentifier;
 pub use self::matcher::*;
