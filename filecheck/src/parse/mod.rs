@@ -1,8 +1,9 @@
-pub mod ast;
 mod lexer;
 mod parser;
+#[cfg(test)]
+mod tests;
 
-use litcheck::diagnostics::{Diagnostic, SourceFile, SourceSpan};
+use crate::common::*;
 
 pub use self::lexer::{Lexed, Lexer, LexerError, Token};
 pub use self::parser::CheckFileParser;

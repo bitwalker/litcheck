@@ -20,9 +20,7 @@ use litcheck::{
 };
 
 use super::{Lexed, Lexer, ParseError, ParseResult, ParserError, Token};
-use crate::check::{
-    Check, CheckFile, CheckLine, CheckModifier, CheckPattern, CheckPatternPart, CheckType, Match,
-};
+use crate::ast::*;
 
 macro_rules! lex {
     ($lexer:ident) => {

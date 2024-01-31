@@ -1,7 +1,7 @@
 use std::process::ExitCode;
 
 use clap::Parser;
-use filecheck::FileCheckTest;
+use filecheck::Test;
 use litcheck::{
     diagnostics::{DiagResult, IntoDiagnostic},
     Input,
@@ -49,7 +49,7 @@ impl Command for FileCheck {
             .input_file
             .into_source(config.strict_whitespace)
             .into_diagnostic()?;
-        let mut test = FileCheckTest::new(match_file, &config);
-        test.check(input_file).map(|_| ExitCode::SUCCESS)
+        let mut test = Test::new(match_file, &config);
+        test.verify(input_file).map(|_| ExitCode::SUCCESS)
     }
 }

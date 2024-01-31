@@ -3,22 +3,13 @@ mod error;
 mod patterns;
 mod token;
 
-use std::borrow::Cow;
 use std::collections::VecDeque;
 
-use litcheck::{
-    diagnostics::{SourceFile, SourceSpan, Span, Spanned},
-    range::Range,
-};
-use regex_automata::meta::Regex;
-
 use crate::{
-    check::{
-        self,
-        matchers::searcher::{AhoCorasickSearcher, RegexSearcher, Searcher},
-        CheckModifier, Input,
-    },
+    ast::{self, CheckModifier},
+    common::*,
     parse::ParserError,
+    pattern::search::{AhoCorasickSearcher, RegexSearcher},
 };
 
 pub use self::error::LexerError;
@@ -240,7 +231,7 @@ impl<'input> Lexer<'input> {
             Ok(count) => {
                 self.buffer.push_back(Ok((
                     prefix_range.start,
-                    Token::Check(check::Check::Plain),
+                    Token::Check(ast::Check::Plain),
                     count_span.end,
                 )));
                 self.buffer.push_back(Ok((

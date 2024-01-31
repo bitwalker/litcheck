@@ -1,6 +1,6 @@
 use std::{borrow::Cow, fmt};
 
-use crate::check::{Check, CheckModifier};
+use crate::ast::{Check, CheckModifier};
 
 use super::LexerError;
 

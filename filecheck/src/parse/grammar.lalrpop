@@ -1,10 +1,10 @@
 use either::Either;
 use either::Either::*;
-use litcheck::{StringInterner, Symbol, diagnostics::{Span, Spanned}};
 
-use crate::check::*;
+use crate::common::{Spanned, Span, Symbol, StringInterner};
+use crate::ast::*;
 use crate::expr::*;
-use crate::parse::{ast::*, LexerError, Token, ParserError, ParseError};
+use crate::parse::{LexerError, Token, ParserError, ParseError};
 
 grammar<'input, 'parser>(_source: &'input str, interner: &'parser mut StringInterner);
 

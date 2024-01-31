@@ -1,15 +1,63 @@
 #![cfg_attr(test, feature(assert_matches))]
+pub mod ast;
 pub mod check;
+mod context;
+mod cursor;
+mod env;
+pub mod errors;
 pub mod expr;
+mod input;
 pub mod parse;
-#[cfg(test)]
-mod testing;
-#[cfg(test)]
-mod tests;
+pub mod pattern;
+pub mod rules;
+mod test;
 
-pub use self::check::FileCheckTest;
+pub use self::errors::{CheckFailedError, RelatedCheckError, RelatedError, TestFailed};
+#[cfg(test)]
+pub use self::test::TestContext;
+pub use self::test::{Test, TestResult};
 
 use clap::{builder::ValueParser, ArgAction, Args, ColorChoice, ValueEnum};
+
+pub(crate) mod common {
+    pub use std::{
+        borrow::Cow,
+        fmt,
+        ops::{ControlFlow, RangeBounds},
+    };
+
+    pub use litcheck::{
+        diagnostics::{
+            ArcSource, Diag, DiagResult, Diagnostic, LabeledSpan, NamedSourceFile, Report, Source,
+            SourceFile, SourceSpan, Span, Spanned,
+        },
+        range::{self, Range},
+        text::{self, Newline},
+        StringInterner, Symbol,
+    };
+    pub use regex_automata::{meta::Regex, util::look::LookMatcher};
+    pub use smallvec::{smallvec, SmallVec};
+
+    pub use crate::ast::{Check, Constraint};
+    pub use crate::context::{Context, ContextExt, ContextGuard, MatchContext};
+    pub use crate::cursor::{Cursor, CursorGuard, CursorPosition};
+    pub use crate::env::{Env, LexicalScope, LexicalScopeExtend, LexicalScopeMut, ScopeGuard};
+    pub use crate::errors::{CheckFailedError, RelatedCheckError, RelatedError, TestFailed};
+    pub use crate::expr::{BinaryOp, Expr, Number, NumberFormat, Value, VariableName};
+    pub use crate::input::Input;
+    pub use crate::pattern::{
+        AnyMatcher, CaptureInfo, MatchInfo, MatchResult, MatchType, Matcher, MatcherMut, Matches,
+        Pattern, PatternIdentifier, PatternSetSearcher, Searcher,
+    };
+    pub use crate::rules::{DynRule, Rule};
+    #[cfg(test)]
+    pub(crate) use crate::test::TestContext;
+    pub use crate::test::TestResult;
+    pub use crate::Config;
+}
+
+pub const DEFAULT_CHECK_PREFIXES: &[&str] = &["CHECK"];
+pub const DEFAULT_COMMENT_PREFIXES: &[&str] = &["COM", "RUN"];
 
 /// FileCheck reads two files, one from standard input, and one specified on
 /// the command line; and uses one to verify the other.
@@ -147,9 +195,9 @@ impl Default for Config {
             match_full_lines: false,
             ignore_case: false,
             implicit_check_not: vec![],
-            dump_input: Dump::Fail,
-            dump_input_filter: DumpFilter::Error,
-            enable_var_scope: false,
+            dump_input: Default::default(),
+            dump_input_filter: Default::default(),
+            enable_var_scope: true,
             variables: vec![],
             verbose: 0,
             color: Default::default(),

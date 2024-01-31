@@ -5,8 +5,6 @@ use either::{
     Either::{Left, Right},
 };
 
-use crate::check;
-
 #[derive(Debug)]
 pub struct Pattern {
     pub raw: String,
@@ -154,7 +152,7 @@ impl Check {
         }
     }
 }
-impl TryFrom<Check> for check::Check {
+impl TryFrom<Check> for crate::ast::Check {
     type Error = ();
 
     fn try_from(check: Check) -> Result<Self, Self::Error> {

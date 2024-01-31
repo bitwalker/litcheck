@@ -1,663 +1,396 @@
-pub mod bytecode;
-pub(crate) mod checker;
-mod errors;
-mod input;
-pub mod matchers;
-mod pattern;
-mod rules;
-mod test;
+mod program;
 
-pub use self::bytecode::CheckProgram;
-pub use self::checker::{Checker, TestFailed, TestResult};
-pub use self::errors::*;
-pub use self::input::Input;
-use self::matchers::*;
-pub use self::matchers::{
-    Context, ContextGuard, LexicalScope, LexicalScopeExtend, LexicalScopeMut, MatchContext,
-    MatchInfo, MatchResult, Matches, ScopeGuard,
-};
-pub use self::pattern::{MatchAll, MatchAny, Pattern, PatternIdentifier, PatternPrefix};
-pub use self::rules::{DynRule, Rule};
-pub use self::test::FileCheckTest;
+pub use self::program::{CheckOp, CheckProgram};
 
-use std::{borrow::Cow, fmt, str::FromStr};
+use crate::common::*;
 
-use litcheck::{
-    diagnostics::{DiagResult, SourceSpan, Span, Spanned},
-    StringInterner,
-};
-
-use crate::{expr::*, Config};
-
-pub const DEFAULT_CHECK_PREFIXES: &[&str] = &["CHECK"];
-pub const DEFAULT_COMMENT_PREFIXES: &[&str] = &["COM", "RUN"];
-
-/// A check file is the source file we're going to check matches some set of rules.
-///
-/// The rules to check are found by parsing the file into lines, and recognizing
-/// certain special patterns that indicate what checks are expected to be performed.
-///
-/// Once checks are parsed from a file, the file is checked line-by-line, using the
-/// parsed checks to determine if the file passes or not.
-#[derive(Debug)]
-pub struct CheckFile<'a> {
-    /// There should be an entry in this vector for every line in the source file
-    lines: Vec<CheckLine<'a>>,
+pub struct Checker<'a> {
+    config: &'a Config,
+    interner: &'a mut StringInterner,
+    program: CheckProgram<'a>,
+    match_file: ArcSource,
 }
-impl<'a> CheckFile<'a> {
-    pub fn new(lines: Vec<CheckLine<'a>>) -> Self {
-        Self { lines }
-    }
-
-    pub fn lines(&self) -> &[CheckLine<'a>] {
-        self.lines.as_slice()
-    }
-
-    pub fn into_lines(self) -> Vec<CheckLine<'a>> {
-        self.lines
-    }
-
-    pub fn compile(
-        self,
-        config: &Config,
-        interner: &mut StringInterner,
-    ) -> DiagResult<CheckProgram<'a>> {
-        CheckProgram::compile(self, config, interner)
-    }
-}
-
-/// A check line represents a line in a check file, and is associated with some
-/// check type and pattern.
-#[derive(Debug)]
-pub struct CheckLine<'a> {
-    /// Where in the source file that the check was specified
-    pub span: SourceSpan,
-    /// Any comment lines preceding this check in the sourrce file
-    pub comment: Vec<Cow<'a, str>>,
-    /// The type of check represented
-    pub ty: CheckType,
-    /// The pattern to match
-    pub pattern: CheckPattern<'a>,
-}
-impl<'a> CheckLine<'a> {
-    pub fn new(span: SourceSpan, ty: CheckType, pattern: CheckPattern<'a>) -> Self {
+impl<'a> Checker<'a> {
+    pub fn new(
+        config: &'a Config,
+        interner: &'a mut StringInterner,
+        program: CheckProgram<'a>,
+        match_file: ArcSource,
+    ) -> Self {
         Self {
-            span,
-            comment: vec![],
-            ty,
-            pattern,
+            config,
+            interner,
+            program,
+            match_file,
         }
     }
 
-    #[inline(always)]
-    pub fn kind(&self) -> Check {
-        self.ty.kind
+    /// Check `source` against the rules in this [Checker]
+    pub fn check<S>(&mut self, source: &S) -> TestResult
+    where
+        S: NamedSourceFile + ?Sized,
+    {
+        let source = ArcSource::new(Source::new(source.name(), source.source().to_string()));
+        self.check_input(source)
     }
 
-    pub fn has_variable(&self) -> Option<&CheckPatternPart<'a>> {
-        self.pattern.has_variable()
+    /// Check `input` against the rules in this [Checker]
+    pub fn check_str<S>(&mut self, input: &S) -> TestResult
+    where
+        S: AsRef<str>,
+    {
+        let source = ArcSource::new(Source::from(input.as_ref().to_string()));
+        self.check_input(source)
     }
 
-    pub fn with_comment(mut self, comment: Cow<'a, str>) -> Self {
-        if comment.is_empty() {
-            return self;
+    /// Check `source` against the rules in this [Checker]
+    pub fn check_input(&mut self, source: ArcSource) -> TestResult {
+        let buffer = source.source_bytes();
+        let mut context = MatchContext::new(
+            self.config,
+            self.interner,
+            self.match_file.clone(),
+            source.clone(),
+            buffer,
+        );
+        match analyze_blocks(&self.program, &mut context) {
+            Ok(blocks) => check_blocks(blocks, &self.program, &mut context),
+            Err(failed) => TestResult::from_error(failed),
         }
-        self.comment.push(comment);
-        self
+    }
+}
+
+/// Analyze `program` to identify distinct "blocks" of checks, which
+/// are implicitly delimited by CHECK-LABEL directives.
+///
+/// This will evaluate the CHECK-LABEL patterns, and construct block
+/// metadata for each bounded set of checks to be used during evaluation
+/// of the remaining directives in the file.
+pub fn analyze_blocks<'input, 'context: 'input>(
+    program: &CheckProgram<'context>,
+    context: &mut MatchContext<'input, 'context>,
+) -> Result<SmallVec<[BlockInfo; 2]>, TestFailed> {
+    // Traverse the code of the program and try to identify
+    // the byte ranges corresponding to block starts of the
+    // program. Once the block starts are recorded, we can
+    // properly constrain the search bounds of the matchers
+    let mut blocks = SmallVec::<[BlockInfo; 2]>::default();
+    let mut errors = Vec::<CheckFailedError>::new();
+    // We must push an implicit block for ops that come before the first CHECK-LABEL,
+    // if such ops exist
+    let eof = context.cursor().end_of_file();
+    if !matches!(program.code.first(), Some(CheckOp::BlockStart(_))) {
+        blocks.push(BlockInfo {
+            label_info: None,
+            code_start: Some(0),
+            start: Some(0),
+            end: None,
+            eof,
+        });
     }
 
-    pub fn into_comment(mut self) -> Cow<'a, str> {
-        match self.comment.len() {
-            0 => Cow::Borrowed(""),
-            1 => self.comment.pop().unwrap(),
-            n => {
-                let len = self.comment.iter().map(|c| c.len()).sum::<usize>() + n;
-                Cow::Owned(self.comment.into_iter().fold(
-                    String::with_capacity(len),
-                    |mut buf, c| {
-                        if !buf.is_empty() {
-                            buf.push('\n');
+    for (i, op) in program.code.iter().enumerate() {
+        if let CheckOp::BlockStart(ref pattern) = op {
+            // Push a block for this CHECK-LABEL
+            let ix = match program.code.get(i + 1) {
+                Some(CheckOp::BlockStart(_)) | None => None,
+                Some(_) => Some(i + 1),
+            };
+            // Find the starting index of this pattern
+            //
+            // If no match is found, record the error,
+            // and skip ahead in the instruction stream
+            let buffer = context.search_to_end();
+            match pattern.try_match(buffer, context) {
+                Ok(result) => {
+                    match result.info {
+                        Some(info) => {
+                            // We must compute the indices for the end of the previous block,
+                            // and the start of the current block, by looking forwards/backwards
+                            // for the nearest newlines in those directions.
+                            let match_start = info.span.offset();
+                            let cursor = context.cursor_mut();
+                            let eol = cursor.next_newline_from(match_start).unwrap_or(eof);
+                            let prev_block_end = cursor.prev_newline_from(match_start).unwrap_or(0);
+                            // Start subsequent searches at the newline, to ensure that rules which
+                            // match on next lines can eat the first newline, but prevent any further
+                            // matching of rules on this line
+                            cursor.set_start(eol);
+                            // Create the block info for this CHECK-LABEL to record the start index
+                            let block_id = blocks.len();
+                            blocks.push(BlockInfo {
+                                label_info: Some(info.into_static()),
+                                code_start: ix,
+                                start: Some(cursor.start()),
+                                end: None,
+                                eof,
+                            });
+                            // Update the block info for the most recent CHECK-LABEL to record its end index,
+                            // if one is present
+                            if let Some(prev_block) = blocks[..block_id]
+                                .iter_mut()
+                                .rev()
+                                .find(|bi| bi.start.is_some())
+                            {
+                                prev_block.end = Some(prev_block_end);
+                            }
                         }
-                        buf.push_str(&c);
-                        buf
-                    },
-                ))
-            }
-        }
-    }
-
-    pub fn prepend_comment(&mut self, comment: Cow<'a, str>) {
-        if comment.is_empty() {
-            return;
-        }
-        self.comment.insert(0, comment);
-    }
-}
-impl<'a> Spanned for CheckLine<'a> {
-    fn span(&self) -> SourceSpan {
-        self.span
-    }
-}
-impl<'a> Eq for CheckLine<'a> {}
-impl<'a> PartialEq for CheckLine<'a> {
-    fn eq(&self, other: &Self) -> bool {
-        self.ty == other.ty && self.pattern == other.pattern && self.comment == other.comment
-    }
-}
-
-#[derive(Debug)]
-pub struct CheckType {
-    span: SourceSpan,
-    pub kind: Check,
-    pub modifiers: Span<CheckModifier>,
-}
-impl Default for CheckType {
-    fn default() -> Self {
-        Self::new(SourceSpan::from(0..0), Default::default())
-    }
-}
-impl Spanned for CheckType {
-    fn span(&self) -> SourceSpan {
-        self.span
-    }
-}
-impl CheckType {
-    pub fn new(span: SourceSpan, kind: Check) -> Self {
-        Self {
-            span,
-            kind,
-            modifiers: Span::new(span, Default::default()),
-        }
-    }
-
-    pub fn with_modifiers(mut self, modifiers: Span<CheckModifier>) -> Self {
-        self.modifiers = modifiers;
-        self
-    }
-
-    pub fn is_literal_match(&self) -> bool {
-        self.modifiers.contains(CheckModifier::LITERAL)
-    }
-
-    pub fn count(&self) -> usize {
-        self.modifiers.count()
-    }
-}
-impl Eq for CheckType {}
-impl PartialEq for CheckType {
-    fn eq(&self, other: &Self) -> bool {
-        self.kind == other.kind && self.modifiers == other.modifiers
-    }
-}
-
-#[derive(Debug)]
-pub enum InvalidCheckTypeError {
-    Unrecognized,
-    InvalidCount(core::num::ParseIntError),
-}
-
-#[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
-pub enum Check {
-    #[default]
-    None,
-    Plain,
-    Next,
-    Same,
-    Not,
-    Dag,
-    Label,
-    Empty,
-    Count(usize),
-    Comment,
-}
-impl Check {
-    pub fn suffix(&self) -> Option<&'static str> {
-        match self {
-            Self::Plain => Some(""),
-            Self::Next => Some("-NEXT"),
-            Self::Same => Some("-SAME"),
-            Self::Not => Some("-NOT"),
-            Self::Dag => Some("-DAG"),
-            Self::Label => Some("-LABEL"),
-            Self::Empty => Some("-EMPTY"),
-            Self::Count(_) => Some("-COUNT"),
-            Self::Comment | Self::None => None,
-        }
-    }
-}
-impl fmt::Display for Check {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::None => f.write_str("CHECK-NONE"),
-            Self::Plain => f.write_str("CHECK"),
-            Self::Next => f.write_str("CHECK-NEXT"),
-            Self::Same => f.write_str("CHECK-SAME"),
-            Self::Not => f.write_str("CHECK-NOT"),
-            Self::Dag => f.write_str("CHECK-DAG"),
-            Self::Label => f.write_str("CHECK-LABEL"),
-            Self::Empty => f.write_str("CHECK-EMPTY"),
-            Self::Count(n) => write!(f, "CHECK-COUNT-{n}"),
-            Self::Comment => f.write_str("COM"),
-        }
-    }
-}
-impl FromStr for Check {
-    type Err = InvalidCheckTypeError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "" => Ok(Self::Plain),
-            "NEXT" | "next" => Ok(Self::Next),
-            "SAME" | "same" => Ok(Self::Same),
-            "NOT" | "not" => Ok(Self::Not),
-            "DAG" | "dag" => Ok(Self::Dag),
-            "LABEL" | "label" => Ok(Self::Label),
-            "EMPTY" | "empty" => Ok(Self::Empty),
-            _ => match s
-                .strip_prefix("COUNT-")
-                .or_else(|| s.strip_prefix("count-"))
-            {
-                None => Err(InvalidCheckTypeError::Unrecognized),
-                Some(count) => count
-                    .parse::<usize>()
-                    .map_err(InvalidCheckTypeError::InvalidCount)
-                    .map(Self::Count),
-            },
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct InvalidCheckModifierError;
-
-bitflags::bitflags! {
-    #[derive(Copy, Clone)]
-    pub struct CheckModifier: u16 {
-        const LITERAL = 1;
-        const COUNT = 2;
-    }
-}
-impl Default for CheckModifier {
-    fn default() -> Self {
-        Self::empty()
-    }
-}
-impl FromStr for CheckModifier {
-    type Err = InvalidCheckModifierError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "LITERAL" | "literal" => Ok(Self::LITERAL),
-            _ => Err(InvalidCheckModifierError),
-        }
-    }
-}
-impl fmt::Debug for CheckModifier {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use std::fmt::Write;
-        f.write_str("CheckModifier(")?;
-        let mut mods = 0;
-        if self.contains(Self::LITERAL) {
-            mods += 1;
-            f.write_str("LITERAL")?;
-        }
-        if self.contains(Self::COUNT) {
-            if mods > 0 {
-                f.write_str(" | ")?;
-            }
-            write!(f, "COUNT({})", self.count())?;
-        }
-        f.write_char(')')
-    }
-}
-impl CheckModifier {
-    pub fn is_literal(&self) -> bool {
-        self.contains(Self::LITERAL)
-    }
-
-    pub fn from_count(count: u8) -> Self {
-        let count = (count as u16) << 2;
-        Self::COUNT | CheckModifier::from_bits_retain(count)
-    }
-
-    pub fn count(&self) -> usize {
-        if self.contains(Self::COUNT) {
-            (self.bits() >> 2) as usize
-        } else {
-            1
-        }
-    }
-}
-impl Eq for CheckModifier {}
-impl PartialEq for CheckModifier {
-    fn eq(&self, other: &Self) -> bool {
-        self.count() == other.count() && self.is_literal() == other.is_literal()
-    }
-}
-
-/// A check pattern is the part of a check line which must match in the check file somewhere
-#[derive(Debug)]
-pub enum CheckPattern<'a> {
-    /// There is no content, we're at the end of line
-    Empty(SourceSpan),
-    /// The entire pattern is a single raw string
-    Literal(Span<&'a str>),
-    /// The entire pattern is a single regex string
-    Regex(Span<&'a str>),
-    /// The pattern is some mix of literal parts and match rules
-    Match(Span<Vec<CheckPatternPart<'a>>>),
-}
-impl<'a> PartialEq for CheckPattern<'a> {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Empty(_), Self::Empty(_)) => true,
-            (Self::Literal(l), Self::Literal(r)) => l == r,
-            (Self::Regex(l), Self::Regex(r)) => l == r,
-            (Self::Match(l), Self::Match(r)) => l == r,
-            _ => false,
-        }
-    }
-}
-impl<'a> CheckPattern<'a> {
-    pub fn is_empty(&self) -> bool {
-        match self {
-            Self::Empty(_) => true,
-            Self::Literal(ref spanned) => spanned.is_empty(),
-            Self::Regex(_) | Self::Match(_) => false,
-        }
-    }
-
-    pub fn prefix(&self) -> Option<(Span<Cow<'a, str>>, bool)> {
-        match self {
-            Self::Literal(literal) => Some((literal.map(Cow::Borrowed), true)),
-            Self::Regex(pattern) => Some((pattern.map(Cow::Borrowed), false)),
-            Self::Match(parts) => match &parts[0] {
-                CheckPatternPart::Literal(literal) => Some((literal.map(Cow::Borrowed), true)),
-                CheckPatternPart::Regex(pattern) => Some((pattern.map(Cow::Borrowed), false)),
-                CheckPatternPart::Match(Match::Numeric {
-                    span,
-                    format,
-                    capture: None,
-                    expr: None,
-                    ..
-                }) => Some((Span::new(*span, Cow::Owned(format.pattern())), false)),
-                CheckPatternPart::Match(_) => None,
-            },
-            Self::Empty(_) => None,
-        }
-    }
-
-    pub fn pop_prefix(&mut self) -> Option<(Span<Cow<'a, str>>, bool)> {
-        use std::collections::VecDeque;
-
-        match self {
-            Self::Literal(literal) => {
-                let span = literal.span();
-                let result = Some((literal.map(Cow::Borrowed), true));
-                *self = Self::Empty(span);
-                result
-            }
-            Self::Regex(pattern) => {
-                let span = pattern.span();
-                let result = Some((pattern.map(Cow::Borrowed), false));
-                *self = Self::Empty(span);
-                result
-            }
-            Self::Match(ref mut parts) => {
-                let span = parts.span();
-                let mut ps = VecDeque::<CheckPatternPart<'a>>::from(core::mem::take(&mut **parts));
-                let prefix = match ps.pop_front().unwrap() {
-                    CheckPatternPart::Literal(literal) => Some((literal.map(Cow::Borrowed), true)),
-                    CheckPatternPart::Regex(pattern) => Some((pattern.map(Cow::Borrowed), false)),
-                    CheckPatternPart::Match(Match::Numeric {
-                        span,
-                        format,
-                        capture: None,
-                        expr: None,
-                        ..
-                    }) => Some((Span::new(span, Cow::Owned(format.pattern())), false)),
-                    part @ CheckPatternPart::Match(_) => {
-                        ps.push_front(part);
-                        None
-                    }
-                };
-                if prefix.is_some() {
-                    if ps.is_empty() {
-                        *self = Self::Empty(span);
-                    } else {
-                        *parts = Span::new(span, ps.into());
+                        None => {
+                            // The current block could not be found, so record an error
+                            blocks.push(BlockInfo {
+                                label_info: None,
+                                code_start: ix,
+                                start: None,
+                                end: None,
+                                eof,
+                            });
+                            let span = pattern.span();
+                            let msg = format!(
+                                "Unable to find a match for this pattern in the input.\
+                            Search started at byte {}, ending at {eof}",
+                                context.cursor().start()
+                            );
+                            errors.push(CheckFailedError::MatchNoneButExpected {
+                                span,
+                                match_file: context.match_file(),
+                                note: Some(msg),
+                            });
+                        }
                     }
                 }
-                prefix
-            }
-            Self::Empty(_) => None,
-        }
-    }
-
-    pub fn has_variable(&self) -> Option<&CheckPatternPart<'a>> {
-        match self {
-            Self::Empty(_) | Self::Literal(_) | Self::Regex(_) => None,
-            Self::Match(ref parts) => parts.iter().find(|p| p.has_variable()),
-        }
-    }
-}
-impl<'a> Spanned for CheckPattern<'a> {
-    fn span(&self) -> SourceSpan {
-        match self {
-            Self::Empty(span) => *span,
-            Self::Literal(ref spanned) => spanned.span(),
-            Self::Regex(ref spanned) => spanned.span(),
-            Self::Match(ref spanned) => spanned.span(),
-        }
-    }
-}
-impl<'a> From<Vec<CheckPatternPart<'a>>> for CheckPattern<'a> {
-    fn from(mut parts: Vec<CheckPatternPart<'a>>) -> Self {
-        match parts.len() {
-            0 => CheckPattern::Empty(SourceSpan::from(0..0)),
-            1 => match parts.pop().unwrap() {
-                CheckPatternPart::Literal(lit) => Self::Literal(lit),
-                CheckPatternPart::Regex(re) => Self::Regex(re),
-                part @ CheckPatternPart::Match(_) => {
-                    Self::Match(Span::new(part.span(), vec![part]))
+                Err(err) => {
+                    blocks.push(BlockInfo {
+                        label_info: None,
+                        code_start: ix,
+                        start: None,
+                        end: None,
+                        eof,
+                    });
+                    errors.push(CheckFailedError::MatchNoneForInvalidPattern {
+                        span: pattern.span(),
+                        match_file: context.match_file(),
+                        error: Some(RelatedError::new(err)),
+                    });
                 }
-            },
-            _ => {
-                let start = parts.first().unwrap().span().offset();
-                let last_span = parts.last().unwrap().span();
-                let end = last_span.offset() + last_span.len();
-                Self::Match(Span::new(SourceSpan::from(start..end), parts))
             }
         }
     }
-}
 
-/// A check line is broken up into segments when either `[[` `]]`,
-/// or `{{` `}}` is encountered, for substitutions/captures and regex
-/// matches respectively; with the before and after parts being literal
-/// (and optional). As such we have three types of segments/parts that
-/// we can observe on a line
-#[derive(Debug, PartialEq, Eq)]
-pub enum CheckPatternPart<'a> {
-    /// This part consists of a match rule to be evaluated while matching
-    Match(Match<'a>),
-    /// This part is a raw literal string
-    Literal(Span<&'a str>),
-    /// This part is a regex pattern
-    Regex(Span<&'a str>),
-}
-impl<'a> CheckPatternPart<'a> {
-    pub fn has_variable(&self) -> bool {
-        match self {
-            Self::Literal(_) | Self::Regex(_) => false,
-            Self::Match(_) => true,
-        }
-    }
-}
-impl<'a> Spanned for CheckPatternPart<'a> {
-    fn span(&self) -> SourceSpan {
-        match self {
-            Self::Match(m) => m.span(),
-            Self::Literal(spanned) => spanned.span(),
-            Self::Regex(spanned) => spanned.span(),
-        }
+    // Reset the context bounds
+    context.cursor_mut().reset();
+
+    if errors.is_empty() {
+        Ok(blocks)
+    } else {
+        Err(TestFailed::new(errors, context))
     }
 }
 
-/// This type represents a match rule wrapped in `[[` `]]`
+/// Evaluate all check operations in the given blocks
+pub fn check_blocks<'input, 'a: 'input, I>(
+    blocks: I,
+    program: &CheckProgram<'a>,
+    context: &mut MatchContext<'input, 'a>,
+) -> TestResult
+where
+    I: IntoIterator<Item = BlockInfo>,
+{
+    // Execute compiled check program now that we have the blocks identified.
+    //
+    // If we encounter a block which was not found in the check file, all ops
+    // up to the next CHECK-LABEL are skipped.
+    //
+    // Each time a CHECK-LABEL is found, we set the search bounds of the match
+    // context to stay within that region. If --enable-var-scopes is set, the
+    // locals bound so far will be cleared
+    let mut test_result = TestResult::new(context);
+    for mut block in blocks.into_iter() {
+        if let Some(label_info) = block.label_info.take() {
+            test_result.matched(label_info);
+        }
+        if block.start.is_none() {
+            continue;
+        }
+        if block.code_start.is_none() {
+            continue;
+        }
+
+        // Update the match context cursor
+        context.enter_block(block.range());
+        let code = &program.code[unsafe { block.code_start.unwrap_unchecked() }..];
+        check_block(code, &mut test_result, context);
+    }
+
+    test_result
+}
+
+/// Evaluate a block of check operations with the given context,
+/// gathering any errors encountered into `errors`.
+pub fn check_block<'input, 'a: 'input>(
+    code: &[CheckOp<'a>],
+    test_result: &mut TestResult,
+    context: &mut MatchContext<'input, 'a>,
+) {
+    for op in code.iter() {
+        if let ControlFlow::Break(_) = check_op(op, test_result, context) {
+            break;
+        }
+
+        if context.cursor().is_empty() {
+            break;
+        }
+    }
+}
+
+/// Evaluate a single check operation with the given context
+pub fn check_op<'input, 'a: 'input>(
+    op: &CheckOp<'a>,
+    test_result: &mut TestResult,
+    context: &mut MatchContext<'input, 'a>,
+) -> ControlFlow<()> {
+    match dbg!(op) {
+        CheckOp::BlockStart(_) => {
+            // We have reached the end of the current CHECK-LABEL block,
+            // move to the next block where we will handle updating the
+            // context as appropriate
+            return ControlFlow::Break(());
+        }
+        CheckOp::ApplyRule(rule) => match rule.apply(context) {
+            Ok(matches) => {
+                test_result.append(matches);
+            }
+            Err(err) => {
+                test_result.failed(CheckFailedError::MatchNoneForInvalidPattern {
+                    span: rule.span(),
+                    match_file: context.match_file(),
+                    error: Some(RelatedError::new(err)),
+                });
+            }
+        },
+        CheckOp::ApplyRulePrecededBy(rule, preceded_by) => {
+            let initial_cursor = context.cursor().position();
+            let mut rule_context = context.protect();
+            match preceded_by.apply(&mut rule_context) {
+                Ok(preceding_matches) if preceding_matches.is_ok() => {
+                    let next_cursor = rule_context.cursor().position();
+                    rule_context.move_to(initial_cursor);
+                    match rule.apply(&mut rule_context) {
+                        Ok(matches) if matches.is_ok() => {
+                            // Find the set of preceded-by matches which overlap with `matches`
+                            let boundary = matches
+                                .iter()
+                                .filter_map(|mr| mr.info.as_ref())
+                                .map(|info| info.span.start())
+                                .min()
+                                .unwrap_or(next_cursor.range.start);
+                            let mut is_ok = true;
+                            for result in preceding_matches.into_iter() {
+                                if let Some(info) = result.unwrap() {
+                                    // The matches in the preceded by rule passed by `rule`,
+                                    // which is not allowed, so we reject those matches and
+                                    // treat it as a failure
+                                    if info.span.start() >= boundary {
+                                        is_ok = false;
+                                        test_result.failed(CheckFailedError::MatchFoundButDiscarded {
+                                            span: info.span,
+                                            input_file: rule_context.input_file(),
+                                            pattern: Some(RelatedCheckError {
+                                                span: preceded_by.span(),
+                                                match_file: rule_context.match_file(),
+                                            }),
+                                            note: Some(format!(
+                                                "match was found after {} rule it was expected to precede",
+                                                rule.kind()
+                                            )),
+                                        });
+                                    } else {
+                                        test_result.matched(info);
+                                    }
+                                } else {
+                                    test_result.passed();
+                                }
+                            }
+                            test_result.append(matches);
+                            if is_ok {
+                                // Persist changes to the context and drop the guard
+                                rule_context.save();
+                            } else {
+                                drop(rule_context);
+                                context.cursor_mut().move_to_end();
+                            }
+                        }
+                        Ok(matches) => {
+                            test_result.append(preceding_matches);
+                            test_result.append(matches);
+                            drop(rule_context);
+                            context.cursor_mut().move_to_end();
+                        }
+                        Err(err) => {
+                            drop(rule_context);
+                            test_result.failed(CheckFailedError::MatchNoneForInvalidPattern {
+                                span: rule.span(),
+                                match_file: context.match_file(),
+                                error: Some(RelatedError::new(err)),
+                            });
+                            context.cursor_mut().move_to_end();
+                        }
+                    }
+                }
+                Ok(preceding_matches) => {
+                    drop(rule_context);
+                    context.cursor_mut().move_to_end();
+                    test_result.append(preceding_matches);
+                }
+                Err(err) => {
+                    drop(rule_context);
+                    context.cursor_mut().move_to_end();
+                    test_result.failed(CheckFailedError::MatchNoneForInvalidPattern {
+                        span: preceded_by.span(),
+                        match_file: context.match_file(),
+                        error: Some(RelatedError::new(err)),
+                    });
+                }
+            }
+        }
+        CheckOp::RepeatRule(_rule, _count) => todo!(),
+        CheckOp::RepeatRulePrecededBy(_rule, _count, _preceded_by) => todo!(),
+    }
+
+    ControlFlow::Continue(())
+}
+
 #[derive(Debug)]
-pub enum Match<'a> {
-    /// Match the given regular expression pattern, optionally binding `name`
-    /// to the matched value.
+pub struct BlockInfo {
+    /// The span of the CHECK-LABEL span which started this block, if applicable
+    #[allow(unused)]
+    pub label_info: Option<MatchInfo<'static>>,
+    /// The instruction index in the check program code for the first non-CHECK-LABEL
+    /// instruction in the block, if any.
+    pub code_start: Option<usize>,
+    /// The starting byte index of the block, if known.
     ///
-    /// Corresponds to expressions such as `[[REG]]` and `[[REG:r[0-9]+]]`.
+    /// The index begins at the start of the next line following the CHECK-LABEL line
     ///
-    /// The precise format of this match type is `[[<name>:<pattern>]]`, where:
+    /// If None, the CHECK-LABEL pattern was never found; `end` must also be None
+    /// in that case
+    pub start: Option<usize>,
+    /// The ending byte index of the block, if known.
     ///
-    /// * `<name>` is a local variable name of the form `[A-Za-z_][A-Za-z0-9_]*`,
-    /// or a global variable name (prefixed with `$`). However, you are not permitted
-    /// to (re)bind global variables.
+    /// The index ends at the last byte of the line preceding a subsequent CHECK-LABEL.
     ///
-    /// * `:<pattern>`, is any valid, non-empty, regular expression pattern. When present,
-    /// it changes the semantics of this match type from string substitution to string
-    /// capture - i.e. `name` will be bound to the matched input string.
-    ///
-    /// If `:<pattern>` is not present, then the entire `[[<name>]]` block will be
-    /// substituted with the value of `<name>` as a literal pattern. The value will
-    /// be formatted according to its type.
-    ///
-    /// Variables bound using this syntax are available immediately on the same line, you
-    /// can do things like `CHECK: op [[REG:r[0-9]+]], [[REG]]` to bind `REG` to the register
-    /// name of the first operand of `op`, e.g., `r1`; and verify that the same register is
-    /// used as the second operand.
-    ///
-    /// NOTE: You should prefer the standard regular expression pattern matching syntax,
-    /// i.e. `{{<pattern>}}` if you don't need to bind a variable.
-    Substitution {
-        span: SourceSpan,
-        name: VariableName,
-        pattern: Option<Span<&'a str>>,
-    },
-    /// Match the given numeric pattern, and optionally defines a variable if the
-    /// match succeeds.
-    ///
-    /// Corresponds to expressions such as `[[#]]` or `[[#%.8X]]` or `[[#REG + 1]]`,
-    /// as well as `[[#REG:]]` and `[[#%X,OFFSET:12]]`. The former are matches,
-    /// while the latter both match and define the given variable.
-    ///
-    /// The unified format is `[[#%<fmtspec>,<NUMVAR>: <constraint> <expr]]` where:
-    ///
-    /// * `%<fmtspec>` is the same format specifier as used for defining a variable, but
-    /// in this context it indicates how the numeric value should be matched. It is optional,
-    /// and if not present, both components of the format spec are inferred from the matching
-    /// format of the numeric variables used by the expression constraint (if any), and
-    /// defaults to `%u` (unsigned, no leading zeros) if no numeric variable is used. In
-    /// case of conflict between format specifiers of several numeric variables, the
-    /// conversion specifier becomes mandatory, but the precision specifier remains optional.
-    ///
-    /// * `<NUMVAR>:`, when present, indicates that `NUMVAR` will be (re)bound to the matched
-    /// value, if the match succeeds. If not present, no variable is defined.
-    ///
-    /// * `<constraint>` describes how the value to match must relate to the value of the
-    /// given expression. Currently, the only constraint type is `==` for equality. If present,
-    /// `<expr>` is mandatory; however the inverse is not true, `<expr>` can be provided
-    /// without `<constraint>`, implying a default equality constraint.
-    ///
-    /// * `<expr>` is an expression. An expression is in turn recursively defined as:
-    ///
-    ///   - A numeric operand
-    ///   - An expression followed by an operator and a numeric operand
-    ///
-    ///   A numeric operand is a previously defined numeric variable, an integer literal,
-    ///   or one of a set of built-in functions. Whitespace are allowed around these elements.
-    ///   Numeric operands are 64-bit values. Overflow and underflow are rejected. The original
-    ///   `lit` does not support operator precedence, but `litcheck` supports the standard precedence
-    ///   of the supported operators, and parentheses can be used to manually manage precedence.
-    ///
-    ///   The operators supported are:
-    ///
-    ///   - `+`, addition
-    ///   - `-`, subtraction
-    ///
-    ///   The built-in functions supported are:
-    ///
-    ///   - `add`, addition
-    ///   - `sub`, subtraction
-    ///   - `mul`, multiplication
-    ///   - `div`, integer division
-    ///   - `min`, minimum
-    ///   - `max`, maximum
-    ///
-    /// All components can be omitted except the `#`, i.e. `[[#]]` is a valid numeric match,
-    /// which defaults to matching an unsigned integer, with no leading zeros, of up to 64
-    /// bit precision.
-    Numeric {
-        span: SourceSpan,
-        /// The format of the value to match.
-        ///
-        /// If not specified, it is implied by the format
-        /// of any numeric operands in `expr`, otherwise it
-        /// defaults to an unsigned integer with no leading zeros.
-        format: NumberFormat,
-        /// If set, contains the name of the variable to bind to
-        /// the matched value if the match succeeds.
-        capture: Option<VariableName>,
-        /// If specified, this changes the meaning of `expr`
-        /// in relation to the matched value.
-        constraint: Constraint,
-        /// The numeric expression to evaluate
-        ///
-        /// If `constraint` is not set, this expression
-        /// produces a value which must match the input.
-        expr: Option<Expr>,
-    },
+    /// If subsequent blocks with start indices are recorded, this must be Some with
+    /// an end index relative to the next start index in ascending order.
+    pub end: Option<usize>,
+    /// The end-of-file index
+    pub eof: usize,
 }
-impl<'a> Spanned for Match<'a> {
-    fn span(&self) -> SourceSpan {
-        match self {
-            Self::Numeric { span, .. } | Self::Substitution { span, .. } => *span,
-        }
+impl BlockInfo {
+    pub fn range(&self) -> Range<usize> {
+        Range::new(self.start.unwrap_or(0), self.end.unwrap_or(self.eof))
     }
-}
-impl<'a> Eq for Match<'a> {}
-impl<'a> PartialEq for Match<'a> {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (
-                Self::Substitution {
-                    name: an,
-                    pattern: ap,
-                    ..
-                },
-                Self::Substitution {
-                    name: bn,
-                    pattern: bp,
-                    ..
-                },
-            ) => an == bn && ap == bp,
-            (
-                Self::Numeric {
-                    format: af,
-                    capture: acap,
-                    constraint: ac,
-                    expr: aexpr,
-                    ..
-                },
-                Self::Numeric {
-                    format: bf,
-                    capture: bcap,
-                    constraint: bc,
-                    expr: bexpr,
-                    ..
-                },
-            ) => af == bf && acap == bcap && ac == bc && aexpr == bexpr,
-            _ => false,
-        }
-    }
-}
 
-/// Describes available constraints that can be expressed on numeric values
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum Constraint {
-    Eq,
+    #[cfg(test)]
+    pub fn code_start(&self) -> usize {
+        self.code_start.unwrap_or(0)
+    }
 }
