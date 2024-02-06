@@ -1,6 +1,6 @@
 use crate::{check::CheckProgram, common::*};
 
-use super::{CheckPattern, CheckPatternPart, CheckType};
+use super::{CheckPattern, CheckType};
 
 /// A check file is the source file we're going to check matches some set of rules.
 ///
@@ -64,8 +64,8 @@ impl<'a> CheckLine<'a> {
         self.ty.kind
     }
 
-    pub fn has_variable(&self) -> Option<&CheckPatternPart<'a>> {
-        self.pattern.has_variable()
+    pub fn is_regex_compatible(&self) -> bool {
+        self.pattern.is_regex_compatible()
     }
 
     pub fn with_comment(mut self, comment: Cow<'a, str>) -> Self {

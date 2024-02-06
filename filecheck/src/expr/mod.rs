@@ -22,6 +22,12 @@ pub(crate) struct Var<'a> {
     pub value: Value<'a>,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct TypedVariable {
+    pub name: VariableName,
+    pub ty: ValueType,
+}
+
 #[derive(Debug, Clone)]
 pub enum Expr {
     Num(Number),
@@ -110,8 +116,43 @@ impl PartialEq for Expr {
         }
     }
 }
+impl PartialOrd for Expr {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for Expr {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        use core::cmp::Ordering;
+        match (self, other) {
+            (Self::Num(l), Self::Num(r)) => l.cmp(r),
+            (Self::Num(_), _) => Ordering::Less,
+            (_, Self::Num(_)) => Ordering::Greater,
+            (Self::Var(l), Self::Var(r)) => l.cmp(r),
+            (Self::Var(_), _) => Ordering::Less,
+            (_, Self::Var(_)) => Ordering::Greater,
+            (
+                Self::Binary {
+                    op: lop,
+                    lhs: ll,
+                    rhs: lr,
+                    ..
+                },
+                Self::Binary {
+                    op: rop,
+                    lhs: rl,
+                    rhs: rr,
+                    ..
+                },
+            ) => lop
+                .cmp(rop)
+                .then_with(|| ll.cmp(rl))
+                .then_with(|| lr.cmp(rr)),
+        }
+    }
+}
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum BinaryOp {
     Eq,
     Add,

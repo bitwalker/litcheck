@@ -6,7 +6,9 @@ mod pattern;
 pub use self::directive::{Check, CheckType};
 pub use self::file::{CheckFile, CheckLine};
 pub use self::modifier::CheckModifier;
-pub use self::pattern::{CheckPattern, CheckPatternPart, Constraint, Match};
+pub use self::pattern::{
+    Capture, CheckPattern, CheckPatternPart, Constraint, Match, Prefix, RegexPattern,
+};
 
 use crate::expr::{BinaryOp, Expr, VariableName};
 

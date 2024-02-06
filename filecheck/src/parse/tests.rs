@@ -15,6 +15,39 @@ macro_rules! empty_span {
     };
 }
 
+macro_rules! literal {
+    ($s:literal) => {
+        CheckPattern::Literal(Span::new(empty_span!(), Cow::Borrowed($s)))
+    };
+
+    ($s:expr) => {
+        CheckPattern::Literal(Span::new(empty_span!(), $s.into()))
+    };
+}
+
+macro_rules! regex {
+    ($s:literal) => {
+        CheckPattern::Regex(RegexPattern::new(Span::new(
+            empty_span!(),
+            Cow::Borrowed($s),
+        )))
+    };
+
+    ($s:expr) => {
+        CheckPattern::Regex(RegexPattern::new(Span::new(empty_span!(), $s.into())))
+    };
+}
+
+macro_rules! literal_part {
+    ($s:literal) => {
+        CheckPatternPart::Literal(Span::new(empty_span!(), Cow::Borrowed($s)))
+    };
+
+    ($s:expr) => {
+        CheckPatternPart::Literal(Span::new(empty_span!(), $s.into()))
+    };
+}
+
 #[test]
 fn check_line_expression_lexer_test() -> DiagResult<()> {
     let input = r#"
@@ -78,7 +111,7 @@ int main() {
 
     let check_line = &lines[0];
     let pattern_parts = vec![
-        CheckPatternPart::Literal(Span::new(empty_span!(), "Hello from line ")),
+        literal_part!("Hello from line "),
         CheckPatternPart::Match(Match::Numeric {
             span: empty_span!(),
             format: Default::default(),
@@ -144,7 +177,7 @@ fn main() -> i32 { std::process::exit(); }
         &CheckLine::new(
             empty_span!(),
             CheckType::new(empty_span!(), Check::Plain),
-            CheckPattern::Literal(Span::new(empty_span!(), "main"))
+            literal!("main"),
         )
     );
 }
@@ -192,7 +225,7 @@ fn main() -> i32 { std::process::exit(); }
         &CheckLine::new(
             empty_span!(),
             CheckType::new(empty_span!(), Check::Plain),
-            CheckPattern::Regex(Span::new(empty_span!(), "main.*[[:space:]]i32[[:space:]]"))
+            regex!("main.*[[:space:]]i32[[:space:]]")
         )
     );
 }
@@ -258,7 +291,10 @@ fn main() -> i32 { foo(); }
                 vec![CheckPatternPart::Match(Match::Substitution {
                     span: empty_span!(),
                     name: VariableName::User(Span::new(empty_span!(), fun)),
-                    pattern: Some(Span::new(empty_span!(), "fn [a-z][a-zA-Z0-9_]+")),
+                    pattern: Some(Span::new(
+                        empty_span!(),
+                        Cow::Borrowed("fn [a-z][a-zA-Z0-9_]+")
+                    )),
                 })]
             ))
         )
@@ -278,7 +314,7 @@ fn main() -> i32 { foo(); }
                         name: VariableName::User(Span::new(empty_span!(), fun)),
                         pattern: None,
                     }),
-                    CheckPatternPart::Literal(Span::new(empty_span!(), "(")),
+                    literal_part!("("),
                 ]
             ))
         )
@@ -348,7 +384,7 @@ fn main() -> i64 { foo(); }
         CheckPattern::Match(Span::new(
             empty_span!(),
             vec![
-                CheckPatternPart::Literal(Span::new(empty_span!(), "i")),
+                literal_part!("i"),
                 CheckPatternPart::Match(Match::Numeric {
                     span: empty_span!(),
                     format: NumberFormat::Unsigned { precision: 0 },
@@ -371,7 +407,7 @@ fn main() -> i64 { foo(); }
             CheckPattern::Match(Span::new(
                 empty_span!(),
                 vec![
-                    CheckPatternPart::Literal(Span::new(empty_span!(), "i")),
+                    literal_part!("i"),
                     CheckPatternPart::Match(Match::Numeric {
                         span: empty_span!(),
                         format: NumberFormat::Unsigned { precision: 0 },
@@ -461,7 +497,7 @@ fn main() -> i64 { foo(); }
         CheckPattern::Match(Span::new(
             empty_span!(),
             vec![
-                CheckPatternPart::Literal(Span::new(empty_span!(), "i")),
+                literal_part!("i"),
                 CheckPatternPart::Match(Match::Numeric {
                     span: empty_span!(),
                     format: NumberFormat::Unsigned { precision: 2 },
@@ -484,7 +520,7 @@ fn main() -> i64 { foo(); }
             CheckPattern::Match(Span::new(
                 empty_span!(),
                 vec![
-                    CheckPatternPart::Literal(Span::new(empty_span!(), "i")),
+                    literal_part!("i"),
                     CheckPatternPart::Match(Match::Numeric {
                         span: empty_span!(),
                         format: NumberFormat::Unsigned { precision: 2 },
@@ -562,7 +598,7 @@ Output %r10: [[30, 40]]
         empty_span!(),
         CheckType::new(empty_span!(), Check::Plain)
             .with_modifiers(Span::new(empty_span!(), CheckModifier::LITERAL)),
-        CheckPattern::Literal(Span::new(empty_span!(), "[[[10, 20]], [[30, 40]]]")),
+        literal!("[[[10, 20]], [[30, 40]]]"),
     );
     assert_eq!(line, &expected);
 
@@ -571,7 +607,7 @@ Output %r10: [[30, 40]]
         empty_span!(),
         CheckType::new(empty_span!(), Check::Dag)
             .with_modifiers(Span::new(empty_span!(), CheckModifier::LITERAL)),
-        CheckPattern::Literal(Span::new(empty_span!(), "[[30, 40]]")),
+        literal!("[[30, 40]]"),
     );
     assert_eq!(line, &expected);
 
@@ -580,7 +616,7 @@ Output %r10: [[30, 40]]
         empty_span!(),
         CheckType::new(empty_span!(), Check::Dag)
             .with_modifiers(Span::new(empty_span!(), CheckModifier::LITERAL)),
-        CheckPattern::Literal(Span::new(empty_span!(), "[[10, 20]]")),
+        literal!("[[10, 20]]"),
     );
     assert_eq!(line, &expected);
 }
@@ -637,7 +673,7 @@ Output %r10: [[30, 40]]
         empty_span!(),
         CheckType::new(empty_span!(), Check::Dag)
             .with_modifiers(Span::new(empty_span!(), CheckModifier::LITERAL)),
-        CheckPattern::Literal(Span::new(empty_span!(), "[[30, 40]]")),
+        literal!("[[30, 40]]"),
     )
     .with_comment(Cow::Borrowed("CHECK{LITERAL}: [[[10, 20]], [[30, 40]]]"));
     assert_eq!(line, &expected);
@@ -764,7 +800,7 @@ fn parser_sanity_test() -> DiagResult<()> {
     let expected = CheckLine::new(
         empty_span!(),
         CheckType::new(empty_span!(), Check::Label),
-        CheckPattern::Literal(Span::new(empty_span!(), "Some random")),
+        literal!("Some random"),
     )
     .with_comment(Cow::Borrowed(
         "awk '/^;/ { next }; /.*/ { print }' %s | filecheck %s",
@@ -782,21 +818,21 @@ fn parser_sanity_test() -> DiagResult<()> {
     let expected = CheckLine::new(
         empty_span!(),
         CheckType::new(empty_span!(), Check::Plain),
-        CheckPattern::Literal(Span::new(empty_span!(), "content to")),
+        literal!("content to"),
     );
     assert_eq!(&lines[3], &expected);
 
     let expected = CheckLine::new(
         empty_span!(),
         CheckType::new(empty_span!(), Check::Same),
-        CheckPattern::Literal(Span::new(empty_span!(), "show output")),
+        literal!("show output"),
     );
     assert_eq!(&lines[4], &expected);
 
     let expected = CheckLine::new(
         empty_span!(),
         CheckType::new(empty_span!(), Check::Next),
-        CheckPattern::Literal(Span::new(empty_span!(), "and some rules")),
+        literal!("and some rules"),
     );
     assert_eq!(&lines[5], &expected);
 

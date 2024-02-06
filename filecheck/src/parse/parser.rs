@@ -18,6 +18,7 @@ use litcheck::{
     diagnostics::{SourceFile, SourceSpan, Span, Spanned},
     StringInterner,
 };
+use std::borrow::Cow;
 
 use super::{Lexed, Lexer, ParseError, ParseResult, ParserError, Token};
 use crate::ast::*;
@@ -195,7 +196,7 @@ impl<'config> CheckFileParser<'config> {
                     Ok(CheckLine::new(
                         SourceSpan::from(line_start..end),
                         ty,
-                        CheckPattern::Literal(pattern),
+                        CheckPattern::Literal(pattern.map(Cow::Borrowed)),
                     ))
                 }
                 (_, _, end) if matches!(ty.kind, Check::Empty) => Ok(CheckLine::new(
@@ -221,12 +222,14 @@ impl<'config> CheckFileParser<'config> {
                     Some(Token::RegexStart) => {
                         expect_ignore!(lexer, Token::RegexStart);
                         let pattern = expect_literal!(lexer);
-                        parts.push(CheckPatternPart::Regex(pattern));
+                        parts.push(CheckPatternPart::Regex(RegexPattern::new(
+                            pattern.map(Cow::Borrowed),
+                        )));
                         expect_ignore!(lexer, Token::RegexEnd);
                     }
                     Some(Token::Raw(_)) => {
                         let pattern = expect_literal!(lexer);
-                        parts.push(CheckPatternPart::Literal(pattern));
+                        parts.push(CheckPatternPart::Literal(pattern.map(Cow::Borrowed)));
                     }
                     Some(Token::Lf) => {
                         expect_ignore!(lexer, Token::Lf);

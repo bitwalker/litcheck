@@ -29,6 +29,16 @@ impl PartialEq for Number {
         self.value == other.value && self.format == other.format
     }
 }
+impl PartialOrd for Number {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.value.cmp(&other.value))
+    }
+}
+impl Ord for Number {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        self.value.cmp(&other.value)
+    }
+}
 impl Spanned for Number {
     fn span(&self) -> SourceSpan {
         self.span

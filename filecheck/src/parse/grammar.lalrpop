@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use either::Either;
 use either::Either::*;
 
@@ -71,7 +73,7 @@ Comma<T>: Vec<T> = {
 pub Match: Match<'input> = {
     <l:@L> "[[" <name:Var> "]]" <r:@R> => Match::Substitution { span: span!(l, r), name, pattern: None },
 
-    <l:@L> "[[" <name:Var> ":" <pattern:String>  "]]" <r:@R> => Match::Substitution { span: span!(l, r), name, pattern: Some(pattern) },
+    <l:@L> "[[" <name:Var> ":" <pattern:String>  "]]" <r:@R> => Match::Substitution { span: span!(l, r), name, pattern: Some(pattern.map(Cow::Borrowed)) },
 
     <l:@L> "[[" "#" <format:(<NumberFormat> ",")?> <capture:CaptureNumericOrExpr?> "]]" <r:@R> => {
         let format = format.unwrap_or_default();
@@ -106,7 +108,7 @@ pub Match: Match<'input> = {
 MatchPatternInner: Match<'input> = {
     <name:PatternVar> => Match::Substitution { span: name.span(), name, pattern: None },
 
-    <l:@L> <name:Var> ":" <pattern:String>  <r:@R> => Match::Substitution { span: span!(l, r), name, pattern: Some(pattern) },
+    <l:@L> <name:Var> ":" <pattern:String>  <r:@R> => Match::Substitution { span: span!(l, r), name, pattern: Some(pattern.map(Cow::Borrowed)) },
 
     <l:@L> "#" <format:(<NumberFormat> ",")?> <capture:CaptureNumericOrExpr?> <r:@R> => {
         let format = format.unwrap_or_default();
