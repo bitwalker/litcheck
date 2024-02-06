@@ -236,7 +236,7 @@ impl<'a> SubstringSetBuilder<'a> {
                 let labels = self
                     .patterns
                     .iter()
-                    .map(|s| LabeledSpan::new_with_span(Some(err.to_string()), s.span()));
+                    .map(|s| Label::new(s.span(), err.to_string()).into());
                 let diag = Diag::new("failed to build multi-substring aho-corasick searcher")
                     .and_labels(labels)
                     .with_help(format!(

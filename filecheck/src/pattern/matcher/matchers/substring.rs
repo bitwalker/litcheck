@@ -41,7 +41,7 @@ impl<'a> SubstringMatcher<'a> {
                 let diag = Diag::new("failed to build aho-corasick searcher")
                     .with_help("this pattern was constructed as a DFA, with leftmost-longest match semantics, \
                                 it is possible a less restrictive configuration would succeed")
-                    .and_label(LabeledSpan::new_with_span(Some(err.to_string()), span));
+                    .and_label(Label::new(span, err.to_string()));
                 Report::from(diag)
             })?;
         Ok(Self {

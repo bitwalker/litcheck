@@ -28,7 +28,7 @@ pub(crate) mod common {
 
     pub use litcheck::{
         diagnostics::{
-            ArcSource, Diag, DiagResult, Diagnostic, LabeledSpan, NamedSourceFile, Report, Source,
+            ArcSource, Diag, DiagResult, Diagnostic, Label, NamedSourceFile, Report, Source,
             SourceFile, SourceSpan, Span, Spanned,
         },
         range::{self, Range},
@@ -42,7 +42,9 @@ pub(crate) mod common {
     pub use crate::context::{Context, ContextExt, ContextGuard, MatchContext};
     pub use crate::cursor::{Cursor, CursorGuard, CursorPosition};
     pub use crate::env::{Env, LexicalScope, LexicalScopeExtend, LexicalScopeMut, ScopeGuard};
-    pub use crate::errors::{CheckFailedError, RelatedCheckError, RelatedError, TestFailed};
+    pub use crate::errors::{
+        CheckFailedError, RelatedCheckError, RelatedError, RelatedLabel, TestFailed,
+    };
     pub use crate::expr::{BinaryOp, Expr, Number, NumberFormat, Value, VariableName};
     pub use crate::input::Input;
     pub use crate::pattern::{

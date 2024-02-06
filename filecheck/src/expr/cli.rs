@@ -53,10 +53,7 @@ impl TypedVariable for CliVariable {
             }
             if !variables::is_valid_variable_name(k) {
                 return Err(VariableError::Name(miette::miette!(
-                    labels = vec![LabeledSpan::new_with_span(
-                        None,
-                        SourceSpan::from(0..k.as_bytes().len())
-                    )],
+                    labels = vec![Label::at(0..k.as_bytes().len()).into()],
                     help = "must be non-empty, and match the pattern `[A-Za-z_][A-Za-z0-9_]*`",
                     "invalid variable name"
                 )));

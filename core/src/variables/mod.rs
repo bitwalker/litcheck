@@ -5,9 +5,7 @@ use std::{
     fmt,
 };
 
-use crate::diagnostics::{
-    self, DiagResult, Diagnostic, LabeledSpan, Report, SourceSpan, Span, Spanned,
-};
+use crate::diagnostics::{self, DiagResult, Diagnostic, Label, Report, SourceSpan, Span, Spanned};
 
 pub trait ValueParser {
     type Value<'a>;
@@ -53,10 +51,7 @@ impl ValueParser for i64 {
     fn try_parse(s: Span<&str>) -> DiagResult<Self::Value<'_>> {
         let (span, s) = s.into_parts();
         s.parse::<i64>().map_err(|err| {
-            Report::new(
-                diagnostics::Diag::new(format!("{err}"))
-                    .with_label(LabeledSpan::new_with_span(None, span)),
-            )
+            Report::new(diagnostics::Diag::new(format!("{err}")).with_label(Label::at(span)))
         })
     }
 }
@@ -145,10 +140,7 @@ where
         if !is_valid_variable_name(unprefixed) {
             let offset = prefix.is_some() as usize;
             return Err(miette::miette!(
-                labels = vec![LabeledSpan::new_with_span(
-                    None,
-                    SourceSpan::from(offset..len)
-                )],
+                labels = vec![Label::at(offset..len).into()],
                 help = "must be non-empty, and match the pattern `[A-Za-z_][A-Za-z0-9_]*`",
                 "invalid variable name"
             ));
@@ -289,7 +281,7 @@ where
             let key_span = SourceSpan::from(0..key_len);
             if !is_valid_variable_name(k) {
                 return Err(VariableError::Name(miette::miette!(
-                    labels = vec![LabeledSpan::new_with_span(None, key_span)],
+                    labels = vec![Label::at(key_span).into()],
                     help = "variable names must match the pattern `[A-Za-z_][A-Za-z0-9_]*`",
                     "name contains invalid characters",
                 )));

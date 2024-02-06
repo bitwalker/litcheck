@@ -216,6 +216,80 @@ pub struct RelatedCheckError {
     pub match_file: litcheck::diagnostics::ArcSource,
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("see also")]
+pub struct RelatedLabel {
+    pub severity: litcheck::diagnostics::Severity,
+    pub labels: SmallVec<[Label; 1]>,
+    pub file: litcheck::diagnostics::ArcSource,
+}
+impl RelatedLabel {
+    pub fn error(label: Label, file: litcheck::diagnostics::ArcSource) -> Self {
+        Self {
+            severity: litcheck::diagnostics::Severity::Error,
+            labels: smallvec![label],
+            file,
+        }
+    }
+
+    pub fn warn(label: Label, file: litcheck::diagnostics::ArcSource) -> Self {
+        Self {
+            severity: litcheck::diagnostics::Severity::Warning,
+            labels: smallvec![label],
+            file,
+        }
+    }
+
+    pub fn note(label: Label, file: litcheck::diagnostics::ArcSource) -> Self {
+        Self {
+            severity: litcheck::diagnostics::Severity::Advice,
+            labels: smallvec![label],
+            file,
+        }
+    }
+
+    pub fn notes(
+        label: impl IntoIterator<Item = Label>,
+        file: litcheck::diagnostics::ArcSource,
+    ) -> Self {
+        Self {
+            severity: litcheck::diagnostics::Severity::Advice,
+            labels: label.into_iter().collect(),
+            file,
+        }
+    }
+}
+impl Diagnostic for RelatedLabel {
+    fn code<'a>(&'a self) -> Option<Box<dyn fmt::Display + 'a>> {
+        None
+    }
+    fn severity(&self) -> Option<litcheck::diagnostics::Severity> {
+        Some(self.severity)
+    }
+    fn help<'a>(&'a self) -> Option<Box<dyn fmt::Display + 'a>> {
+        None
+    }
+    fn url<'a>(&'a self) -> Option<Box<dyn fmt::Display + 'a>> {
+        None
+    }
+    fn source_code(&self) -> Option<&dyn litcheck::diagnostics::SourceCode> {
+        Some(&self.file)
+    }
+    fn labels(&self) -> Option<Box<dyn Iterator<Item = litcheck::diagnostics::LabeledSpan> + '_>> {
+        if self.labels.is_empty() {
+            None
+        } else {
+            Some(Box::new(self.labels.iter().cloned().map(|l| l.into())))
+        }
+    }
+    fn related<'a>(&'a self) -> Option<Box<dyn Iterator<Item = &'a dyn Diagnostic> + 'a>> {
+        None
+    }
+    fn diagnostic_source(&self) -> Option<&dyn Diagnostic> {
+        None
+    }
+}
+
 /// This type wraps related diagnostics for use with [CheckFailedError]
 #[derive(Debug)]
 pub struct RelatedError(Report);

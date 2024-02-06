@@ -28,9 +28,8 @@ impl<'check> Rule for CheckNot<'check> {
         C: Context<'input, 'context> + ?Sized,
     {
         // TODO: Implement support for CHECK-NOT
-        let diag = Diag::new("support for CHECK-NOT has not yet been implemented").and_labels([
-            LabeledSpan::new_with_span(Some("not supported".to_string()), self.span()),
-        ]);
+        let diag = Diag::new("support for CHECK-NOT has not yet been implemented")
+            .with_label(Label::new(self.span(), "not supported"));
         Err(Report::from(diag))
     }
 }

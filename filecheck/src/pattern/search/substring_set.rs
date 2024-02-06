@@ -32,7 +32,7 @@ impl<'a, 'patterns, 'input> SubstringSetSearcher<'a, 'patterns, 'input> {
             .map_err(|err| {
                 let labels = patterns
                     .iter()
-                    .map(|s| LabeledSpan::new_with_span(Some(err.to_string()), s.span()));
+                    .map(|s| Label::new(s.span(), err.to_string()).into());
                 let diag = Diag::new("failed to build substring set searcher")
                     .and_labels(labels)
                     .with_help(format!(

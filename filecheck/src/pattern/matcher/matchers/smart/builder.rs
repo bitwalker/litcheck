@@ -189,7 +189,7 @@ impl<'a, 'config> SmartMatcherBuilder<'a, 'config> {
                         Entry::Occupied(_) => {
                             let label = format!("the capturing group '{group_name}' conflicts with another in the same pattern");
                             return Err(Report::new(Diag::new("invalid regular expression pattern")
-                                .with_label(LabeledSpan::at(span, label))
+                                .with_label(Label::new(span, label))
                                 .with_help("try using a different group name, or removing the explicit name if not needed")));
                         }
                         Entry::Vacant(entry) => {

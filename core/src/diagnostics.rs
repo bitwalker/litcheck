@@ -1,5 +1,3 @@
-use std::hash::{Hash, Hasher};
-
 pub use miette::{
     bail, diagnostic, ByteOffset, Diagnostic, IntoDiagnostic, LabeledSpan, Report, Severity,
     SourceCode, SourceOffset, SourceSpan, WrapErr,
@@ -87,6 +85,7 @@ use std::{
     borrow::{Borrow, Cow},
     convert::{AsMut, AsRef},
     fmt,
+    hash::{Hash, Hasher},
     ops::{Deref, DerefMut},
     path::Path,
     sync::Arc,
@@ -95,6 +94,56 @@ use std::{
 use miette::{MietteError, SpanContents};
 
 use crate::{range::Range, StaticCow};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Label {
+    span: SourceSpan,
+    label: Option<StaticCow<str>>,
+}
+impl Label {
+    pub fn at<R>(range: R) -> Self
+    where
+        Range<usize>: From<R>,
+    {
+        let range = Range::<usize>::from(range);
+        Self {
+            span: range.into(),
+            label: None,
+        }
+    }
+
+    pub fn new<R, L>(range: R, label: L) -> Self
+    where
+        Range<usize>: From<R>,
+        StaticCow<str>: From<L>,
+    {
+        let range = Range::<usize>::from(range);
+        Self {
+            span: range.into(),
+            label: Some(Cow::from(label)),
+        }
+    }
+
+    pub fn label(&self) -> Option<&str> {
+        self.label.as_deref()
+    }
+}
+impl From<Label> for SourceSpan {
+    #[inline(always)]
+    fn from(label: Label) -> SourceSpan {
+        label.span
+    }
+}
+impl From<Label> for LabeledSpan {
+    #[inline]
+    fn from(label: Label) -> LabeledSpan {
+        if let Some(message) = label.label {
+            LabeledSpan::at(label.span, message)
+        } else {
+            LabeledSpan::underline(label.span)
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FileName {
