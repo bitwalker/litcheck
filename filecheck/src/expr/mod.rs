@@ -6,7 +6,7 @@ mod value;
 
 pub use self::cli::CliVariable;
 pub use self::error::*;
-pub use self::num::{FormatSpecifier, Number, NumberFormat};
+pub use self::num::{FormatSpecifier, Number, NumberFormat, ParseNumberError};
 pub use self::value::{Value, ValueType};
 
 use litcheck::variables;
