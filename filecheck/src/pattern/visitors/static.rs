@@ -1,4 +1,4 @@
-use crate::{common::*, pattern::search::Match as SearchMatch};
+use crate::common::*;
 
 /// This type is used to visit a set of N unordered patterns,
 /// such as those associated with CHECK-DAG/CHECK-NOT. It finds
@@ -113,9 +113,7 @@ impl<'a, S: PatternSetSearcher> StaticPatternSetVisitor<'a, S> {
                                 continue;
                             }
                             let span = self.searcher.pattern_span(
-                                <<S as Searcher>::Match as SearchMatch>::PatternID::new_unchecked(
-                                    pattern_id,
-                                ),
+                                <S as PatternSetSearcher>::PatternID::new_unchecked(pattern_id),
                             );
                             matches.push(MatchResult::failed(
                                 CheckFailedError::MatchNoneButExpected {

@@ -135,6 +135,17 @@ impl<'a> Default for SubstringSetBuilder<'a> {
 }
 impl<'a> SubstringSetBuilder<'a> {
     #[inline]
+    pub fn new() -> Self {
+        Self {
+            patterns: vec![],
+            start_kind: None,
+            match_kind: None,
+            case_insensitive: false,
+            support_overlapping_matches: false,
+        }
+    }
+
+    #[inline]
     pub fn new_with_patterns(patterns: Vec<Span<Cow<'a, str>>>) -> Self {
         Self {
             patterns,

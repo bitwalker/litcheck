@@ -31,7 +31,7 @@ pub trait Context<'input, 'context> {
 
     fn symbolize(&mut self, value: &str) -> Symbol;
 
-    fn resolve(&mut self, value: Symbol) -> &str;
+    fn resolve(&self, value: Symbol) -> &str;
 
     /// Compute the value of `@LINE` for a given offset in the match file
     fn pseudo_line_for_offset(&self, offset: usize) -> usize {
@@ -180,7 +180,7 @@ impl<'guard, 'input: 'guard, 'context> Context<'input, 'context>
     }
 
     #[inline]
-    fn resolve(&mut self, value: Symbol) -> &str {
+    fn resolve(&self, value: Symbol) -> &str {
         self.scope.resolve(value)
     }
 }
@@ -286,7 +286,7 @@ impl<'input, 'context: 'input> Context<'input, 'context> for MatchContext<'input
     }
 
     #[inline]
-    fn resolve(&mut self, value: Symbol) -> &str {
+    fn resolve(&self, value: Symbol) -> &str {
         self.env.resolve(value)
     }
 }

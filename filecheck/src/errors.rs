@@ -87,6 +87,19 @@ pub struct UndefinedVariableError {
 
 #[derive(Diagnostic, Debug, thiserror::Error)]
 pub enum CheckFailedError {
+    /// Indicates an error while processing a potential match
+    #[error("an error occurred while processing a potential match")]
+    #[diagnostic()]
+    MatchError {
+        #[label("when matching against this input")]
+        span: SourceSpan,
+        #[source_code]
+        input_file: litcheck::diagnostics::ArcSource,
+        #[related]
+        labels: Vec<RelatedLabel>,
+        #[help]
+        help: Option<String>,
+    },
     /// Indicates a match for an excluded pattern.
     #[error("match found, but was excluded")]
     #[diagnostic()]

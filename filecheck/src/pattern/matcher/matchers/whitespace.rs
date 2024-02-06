@@ -3,22 +3,17 @@ use crate::common::*;
 /// This matcher accepts only ASCII whitespace characters,
 /// and is always anchored, i.e. it will never match input
 /// that starts with a non-ASCII whitespace character.
+#[derive(Debug)]
 pub struct AsciiWhitespaceMatcher {
     span: SourceSpan,
 }
-impl fmt::Debug for AsciiWhitespaceMatcher {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("AsciiWhitespaceMatcher")
-            .field("span", &self.span)
-            .finish()
-    }
-}
 impl AsciiWhitespaceMatcher {
-    pub fn new(span: SourceSpan) -> Self {
+    pub const fn new(span: SourceSpan) -> Self {
         Self { span }
     }
 }
 impl MatcherMut for AsciiWhitespaceMatcher {
+    #[inline]
     fn try_match_mut<'input, 'context, C>(
         &self,
         input: Input<'input>,
@@ -31,6 +26,7 @@ impl MatcherMut for AsciiWhitespaceMatcher {
     }
 }
 impl Matcher for AsciiWhitespaceMatcher {
+    #[inline]
     fn try_match<'input, 'context, C>(
         &self,
         input: Input<'input>,
@@ -53,10 +49,13 @@ impl Matcher for AsciiWhitespaceMatcher {
         let start = input.start();
         let mut len = 0;
         for c in buffer.iter() {
-            if !c.is_ascii_whitespace() {
-                break;
+            match c {
+                b'\n' => break,
+                c if !c.is_ascii_whitespace() => break,
+                _ => {
+                    len += 1;
+                }
             }
-            len += 1;
         }
 
         Ok(MatchResult::ok(MatchInfo::new(
@@ -66,6 +65,7 @@ impl Matcher for AsciiWhitespaceMatcher {
     }
 }
 impl Spanned for AsciiWhitespaceMatcher {
+    #[inline(always)]
     fn span(&self) -> SourceSpan {
         self.span
     }
@@ -96,7 +96,7 @@ mod tests {
         let result = matcher.try_match(input, &mctx)?;
         let info = result.info.expect("expected match");
         assert_eq!(info.span.offset(), 0);
-        assert_eq!(info.span.len(), 4);
+        assert_eq!(info.span.len(), 3);
         Ok(())
     }
 }

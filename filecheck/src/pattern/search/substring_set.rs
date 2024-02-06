@@ -87,57 +87,23 @@ impl<'a, 'patterns, 'input> Spanned for SubstringSetSearcher<'a, 'patterns, 'inp
         SourceSpan::from(start..end)
     }
 }
-impl<'a, 'patterns, 'input> Searcher for SubstringSetSearcher<'a, 'patterns, 'input> {
-    type Input = aho_corasick::Input<'input>;
-    type Match = aho_corasick::Match;
-    type MatchError = aho_corasick::MatchError;
+impl<'a, 'patterns, 'b> PatternSetSearcher for SubstringSetSearcher<'a, 'patterns, 'b> {
+    type Input = aho_corasick::Input<'b>;
+    type PatternID = aho_corasick::PatternID;
 
-    #[inline]
     fn input(&self) -> &Self::Input {
         self.searcher.input()
     }
-    #[inline]
     fn last_match_end(&self) -> Option<usize> {
         self.searcher.last_match_end()
     }
-    #[inline]
     fn set_last_match_end(&mut self, end: usize) {
         self.searcher.set_last_match_end(end);
     }
-    #[inline]
-    fn set_range<R>(&mut self, range: R)
-    where
-        R: RangeBounds<usize>,
-    {
-        self.searcher.set_range(range);
-    }
-    #[inline]
-    fn try_advance<F>(&mut self, finder: F) -> Result<Option<Self::Match>, Self::MatchError>
-    where
-        F: FnMut(&Self::Input) -> Result<Option<Self::Match>, Self::MatchError>,
-    {
-        self.searcher.try_advance(finder)
-    }
-    #[inline]
-    fn handle_overlapping_empty_match<F>(
-        &mut self,
-        m: Self::Match,
-        finder: F,
-    ) -> Result<Option<Self::Match>, Self::MatchError>
-    where
-        F: FnMut(&Self::Input) -> Result<Option<Self::Match>, Self::MatchError>,
-    {
-        self.searcher.handle_overlapping_empty_match(m, finder)
-    }
-}
-impl<'a, 'patterns, 'b> PatternSetSearcher for SubstringSetSearcher<'a, 'patterns, 'b> {
     fn patterns_len(&self) -> usize {
         self.num_patterns()
     }
-    fn pattern_span(
-        &self,
-        id: <<Self as Searcher>::Match as super::Match>::PatternID,
-    ) -> SourceSpan {
+    fn pattern_span(&self, id: Self::PatternID) -> SourceSpan {
         SubstringSetSearcher::pattern_span(self, id.as_usize())
     }
     fn try_match_next<'input, 'context, C>(

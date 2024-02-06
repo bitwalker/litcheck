@@ -1,14 +1,13 @@
 mod aho_corasick;
 mod r#default;
 mod regex;
-mod regex_set;
 mod substring_set;
 
 pub use self::aho_corasick::AhoCorasickSearcher;
 pub use self::r#default::DefaultSearcher;
 pub use self::regex::RegexSearcher;
-pub use self::regex_set::RegexSetSearcher;
 pub use self::substring_set::SubstringSetSearcher;
+pub use crate::pattern::matcher::RegexSetSearcher;
 
 use std::{fmt, ops::RangeBounds};
 
@@ -47,9 +46,15 @@ pub trait Searcher {
         F: FnMut(&Self::Input) -> Result<Option<Self::Match>, Self::MatchError>;
 }
 
-pub trait PatternSetSearcher: Searcher {
+pub trait PatternSetSearcher {
+    type Input: Input;
+    type PatternID: PatternIdentifier;
+
+    fn input(&self) -> &Self::Input;
+    fn last_match_end(&self) -> Option<usize>;
+    fn set_last_match_end(&mut self, end: usize);
     fn patterns_len(&self) -> usize;
-    fn pattern_span(&self, id: <<Self as Searcher>::Match as Match>::PatternID) -> SourceSpan;
+    fn pattern_span(&self, id: Self::PatternID) -> SourceSpan;
     fn try_match_next<'input, 'context, C>(
         &mut self,
         context: &C,

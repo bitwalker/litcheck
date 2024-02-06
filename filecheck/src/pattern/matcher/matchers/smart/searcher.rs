@@ -8,6 +8,7 @@ use regex_automata::{
 };
 
 use crate::{
+    ast::Capture,
     common::*,
     errors::{InvalidNumericCastError, UndefinedVariableError},
     expr::{Number, ValueType},
@@ -204,14 +205,16 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
             MatchOp::Regex {
                 source,
                 pattern,
-                capture: None,
+                captures,
                 ..
-            } => self.match_regex(source.span(), pattern, context),
+            } if captures.is_empty() => self.match_regex(source.span(), pattern, context),
             MatchOp::Regex {
                 source,
                 pattern,
-                capture: Some(capture),
-            } => self.match_regex_with_captures(source.span(), pattern, *capture, context),
+                captures,
+            } => {
+                self.match_regex_with_captures(source.span(), pattern, captures.as_slice(), context)
+            }
             MatchOp::Numeric {
                 span,
                 format,
@@ -289,7 +292,7 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
         &mut self,
         pattern_span: SourceSpan,
         pattern: &Regex,
-        capture: CaptureGroup,
+        capture_groups: &[CaptureGroup],
         context: &ContextGuard<'_, 'input, 'context>,
     ) -> DiagResult<MatchResult<'input>> {
         let input = self.cursor.into();
@@ -300,48 +303,45 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
             let range = matched.range();
             self.part_matched(..range.end);
             // Record local captures of this pattern in the global captures
-            let group_infos = pattern.group_info();
-            let num_groups = group_infos.group_len(PatternID::ZERO);
-            let mut captured = None;
-            for group_id in 0..num_groups {
+            let mut captured = Vec::with_capacity(capture_groups.len());
+            for capture_group in capture_groups.iter() {
                 let (start_slot, end_slot) = self
                     .captures
                     .group_info()
-                    .slots(capture.pattern_id, group_id)
+                    .slots(capture_group.pattern_id, capture_group.group_id)
                     .expect("invalid group id");
                 let slots = self.captures.slots_mut();
-                match captures.get_group(group_id) {
-                    None => {
-                        slots[start_slot] = None;
-                        slots[end_slot] = None;
-                    }
-                    Some(span) => {
-                        if group_id == capture.group_id {
-                            captured = Some(span);
+                if let Some(capture_span) = captures.get_group(capture_group.group_id) {
+                    slots[start_slot] = Some(NonMaxUsize::new(capture_span.start).unwrap());
+                    slots[end_slot] = Some(NonMaxUsize::new(capture_span.end).unwrap());
+
+                    let content = self.cursor.as_str(capture_span.range());
+                    match capture_group.info {
+                        Capture::Ignore(_) => continue,
+                        capture => {
+                            let captured_info = CaptureInfo {
+                                span: capture_span.range().into(),
+                                index: capture_group.group_id,
+                                pattern_span,
+                                value: Value::Str(Cow::Borrowed(content)),
+                                capture,
+                            };
+                            self.stack.push(Operand(captured_info.clone()));
+                            captured.push(captured_info);
                         }
-                        slots[start_slot] = Some(NonMaxUsize::new(span.start).unwrap());
-                        slots[end_slot] = Some(NonMaxUsize::new(span.end).unwrap());
                     }
+                } else {
+                    slots[start_slot] = None;
+                    slots[end_slot] = None;
                 }
             }
-            // Collect the contents of the specified capture group, and push
-            // it on the operand stack
-            let span = captured.expect("no match for capturing group that was expected");
-            let content = self.cursor.as_str(span.range());
-            let captured = CaptureInfo {
-                span: span.range().into(),
-                index: capture.group_id,
-                pattern_span,
-                value: Value::Str(Cow::Borrowed(content)),
-            };
-            self.stack.push(Operand(captured.clone()));
             Ok(MatchResult::ok(
                 MatchInfo::new_with_pattern(
-                    span.range(),
+                    range,
                     pattern_span,
-                    capture.pattern_id.as_usize(),
+                    captures.pattern().unwrap().as_usize(),
                 )
-                .with_captures(vec![captured]),
+                .with_captures(captured),
             ))
         } else {
             Ok(MatchResult::failed(
@@ -358,7 +358,7 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
         &mut self,
         span: SourceSpan,
         format: NumberFormat,
-        capture: Option<CaptureGroup>,
+        capture_group: Option<CaptureGroup>,
         context: &ContextGuard<'_, 'input, 'context>,
     ) -> DiagResult<MatchResult<'input>> {
         if self.cursor.as_slice().is_empty() {
@@ -374,25 +374,30 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
             ));
         }
 
-        let pattern = Regex::new(&format.pattern()).expect("syntax error in numeric regex");
+        let group_name = capture_group.as_ref().and_then(|cg| cg.info.group_name());
+        let source = if let Some(group_name) = group_name {
+            let group_name = context.resolve(group_name);
+            format.pattern(Some(group_name))
+        } else {
+            format.pattern_nocapture()
+        };
+        let pattern = Regex::new(&source).expect("syntax error in numeric regex");
 
         let input = self.cursor.into();
-        if let Some(capture) = capture {
+        if let Some(capture_group) = capture_group {
             let mut captures = pattern.create_captures();
             pattern.search_captures(&input, &mut captures);
             if let Some(matched) = captures.get_match() {
                 let range = Range::from(matched.range());
                 let pattern_span = span;
                 let span = SourceSpan::from(range);
-                let (_, [digits]) = captures.extract(self.cursor.as_str(0..));
-
-                let radix = if format.is_hex() { 16 } else { 10 };
-                match i64::from_str_radix(digits, radix) {
-                    Ok(value) => {
+                let raw = self.cursor.as_str(matched.range());
+                match Number::parse_with_format(Span::new(span, raw), format) {
+                    Ok(parsed) => {
                         let (start_slot, end_slot) = self
                             .captures
                             .group_info()
-                            .slots(capture.pattern_id, capture.group_id)
+                            .slots(capture_group.pattern_id, capture_group.group_id)
                             .expect("invalid capture group");
                         let slots = self.captures.slots_mut();
                         slots[start_slot] = Some(NonMaxUsize::new(range.start).unwrap());
@@ -400,27 +405,27 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
                         let captured = CaptureInfo {
                             span,
                             pattern_span,
-                            index: capture.group_id,
-                            value: Value::Num(Expr::Num(Number::new_with_format(
-                                range.into(),
-                                value,
-                                format,
-                            ))),
+                            index: capture_group.group_id,
+                            value: Value::Num(Expr::Num(parsed)),
+                            capture: capture_group.info,
                         };
                         self.stack.push(Operand(captured.clone()));
                         Ok(MatchResult::ok(
                             MatchInfo::new(span, pattern_span).with_captures(vec![captured]),
                         ))
                     }
-                    Err(error) => Ok(MatchResult::failed(CheckFailedError::MatchFoundErrorNote {
-                        span,
-                        input_file: context.input_file(),
-                        pattern: Some(RelatedCheckError {
+                    Err(error) => Ok(MatchResult::failed(
+                        CheckFailedError::MatchFoundConstraintFailed {
                             span,
-                            match_file: context.match_file(),
-                        }),
-                        help: Some(format!("unable to parse matched value: {error}")),
-                    })),
+                            input_file: context.input_file(),
+                            pattern: Some(RelatedCheckError {
+                                span,
+                                match_file: context.match_file(),
+                            }),
+                            error: Some(RelatedError::new(Report::new(error))),
+                            help: None,
+                        },
+                    )),
                 }
             } else {
                 Ok(MatchResult::failed(

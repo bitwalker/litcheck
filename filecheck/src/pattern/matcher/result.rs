@@ -1,4 +1,4 @@
-use crate::common::*;
+use crate::{ast::Capture, common::*};
 
 #[derive(Debug)]
 pub struct MatchResult<'input> {
@@ -162,6 +162,17 @@ impl<'input> MatchInfo<'input> {
         Range::new(start, start + self.span.len())
     }
 
+    /// Extract the value of a variable binding that was captured by this match
+    pub fn extract(&self, name: Symbol) -> Option<&Value<'input>> {
+        self.captures.iter().find_map(|cap| {
+            if cap.capture.name().filter(|v| *v == name).is_some() {
+                Some(&cap.value)
+            } else {
+                None
+            }
+        })
+    }
+
     pub fn into_static(self) -> MatchInfo<'static> {
         MatchInfo {
             captures: self
@@ -184,6 +195,8 @@ pub struct CaptureInfo<'input> {
     pub index: usize,
     /// The captured value
     pub value: Value<'input>,
+    /// The original capture metadata, or the default "ignore"
+    pub capture: Capture,
 }
 impl<'input> Spanned for CaptureInfo<'input> {
     fn span(&self) -> SourceSpan {

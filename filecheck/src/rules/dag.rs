@@ -82,6 +82,12 @@ impl<'check> Rule for CheckDag<'check> {
                     Err(error) => Err(error),
                 }
             }
+            MatchAll::Prefix {
+                prefixes: ref _prefixes,
+                suffixes: ref _suffixes,
+            } => {
+                todo!()
+            }
         }
     }
 }
@@ -103,6 +109,58 @@ mod tests {
                 "
 CHECK-DAG: v[[#]] = add v9, v0
 CHECK-DAG: v[[#]] = add v6, v7
+",
+            )
+            .with_input(
+                "
+function foo(i32) -> i32 {
+block0(v0: i32):
+  v2 = const.i32 0
+  v1 = const.i32 1
+  br block2(v1, v2)
+
+block1(v6: i32, v7: i32):
+  v8 = add v6, v7
+  v9 = const.i32 0
+  v10 = add v9, v0
+  br block3(v8, v10)
+
+block2(v3: i32, v4: i32):
+  v5 = mul v3, v4
+  br block1
+
+block3(v11):
+  ret v11
+}
+",
+            );
+        let match_file = context.match_file();
+        let match_file_source = match_file.as_ref();
+        let check_file = context.parse(match_file_source)?;
+
+        let lines = check_file.into_lines();
+
+        let mut mctx = context.match_context();
+        let match_all = MatchAll::compile(lines, mctx.env_mut().interner())?;
+        let rule = CheckDag::new(match_all);
+        let result = rule
+            .apply(&mut mctx)
+            .expect("expected non-fatal application of rule");
+
+        let test_result = TestResult::from_matches(result, &mctx);
+        test_result.into_result()?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn check_dag_common_prefix_regex_non_overlapping_patterns_test() -> DiagResult<()> {
+        let mut context = TestContext::new();
+        context
+            .with_checks(
+                r"
+CHECK-DAG: {{v[\d]+}} = add v9, v0
+CHECK-DAG: {{v[\d]+}} = add v6, v7
 ",
             )
             .with_input(

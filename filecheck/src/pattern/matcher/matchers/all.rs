@@ -1,206 +1,210 @@
 use crate::{
-    ast::{CheckLine, CheckPattern},
+    ast::{CheckLine, CheckPattern, Prefix},
     common::*,
-    pattern::PatternPrefix,
+    pattern::{matcher::AlwaysMatch, PatternPrefix},
 };
 
 use super::{MatchAny, RegexSetMatcher, SubstringSetBuilder, SubstringSetMatcher};
 
 #[derive(Debug)]
 pub enum MatchAll<'a> {
+    /// A matcher for a set of literal strings
     Literal(SubstringSetMatcher<'a>),
+    /// A matcher for a set of regular expressions
     Regex(RegexSetMatcher<'a>),
+    /// A matcher capable of handling some degree of dynamism
+    /// in patterns while optimizing the search for matches
+    /// by combining overlapping pattern prefixes into a single
+    /// linear search.
     Smart {
+        /// The matcher used to search for matching prefixes
         searcher: MatchAny<'a>,
-        prefixes: Vec<PatternPrefix<'a>>,
+        /// The suffix patterns to match when a prefix matches
         patterns: Vec<Vec<Pattern<'a>>>,
+    },
+    /// A highly dynamic pattern matcher, but less efficient, as
+    /// it is forced to perform some number of redundant searches
+    /// of the input in order to check for all patterns. This is
+    /// the only searcher which can match multiple patterns with
+    /// match/blocks substitutions in at least one of the pattern
+    /// prefixes
+    Prefix {
+        /// The prefix patterns to search for
+        prefixes: Vec<Pattern<'a>>,
+        /// The suffix patterns corresponding to each prefix
+        suffixes: Vec<Vec<Pattern<'a>>>,
     },
 }
 impl<'a> MatchAll<'a> {
     pub fn pattern_len(&self) -> usize {
         match self {
             Self::Literal(ref matcher) => matcher.pattern_len(),
-            Self::Regex(ref matcher) => matcher.pattern_len(),
+            Self::Regex(ref matcher) => matcher.patterns_len(),
             Self::Smart { patterns, .. } => patterns.iter().map(|ps| ps.len()).sum(),
+            Self::Prefix { suffixes, .. } => suffixes.iter().map(|ps| ps.len()).sum(),
         }
     }
 
     pub fn compile(
-        unordered: Vec<CheckLine<'a>>,
+        mut unordered: Vec<CheckLine<'a>>,
         interner: &mut StringInterner,
     ) -> DiagResult<Self> {
-        #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-        enum PatternSetType {
-            Unknown,
-            Literal,
-            Regex,
-            Mixed,
-        }
+        use std::collections::BTreeMap;
 
-        let set_type =
-            unordered
-                .iter()
-                .fold(PatternSetType::Unknown, |acc, line| match line.pattern {
-                    CheckPattern::Literal(_) => match acc {
-                        PatternSetType::Literal | PatternSetType::Regex | PatternSetType::Mixed => {
-                            acc
-                        }
-                        PatternSetType::Unknown => PatternSetType::Literal,
-                    },
-                    CheckPattern::Regex(_) => match acc {
-                        PatternSetType::Regex | PatternSetType::Mixed => acc,
-                        PatternSetType::Literal | PatternSetType::Unknown => PatternSetType::Regex,
-                    },
-                    CheckPattern::Match(_) => match acc {
-                        PatternSetType::Mixed => acc,
-                        PatternSetType::Regex | PatternSetType::Literal => PatternSetType::Mixed,
-                        PatternSetType::Unknown => PatternSetType::Mixed,
-                    },
-                    CheckPattern::Empty(_) => acc,
-                });
+        let raw_prefixes = unordered
+            .iter_mut()
+            .map(|line| {
+                // Compact the patterns as much as possible first
+                line.pattern.compact(interner);
+                line.pattern.pop_prefix()
+            })
+            .collect::<SmallVec<[_; 4]>>();
+        let mut unique_prefixes = BTreeMap::<_, usize>::default();
+        let mut prefixes = Vec::with_capacity(raw_prefixes.len());
+        let mut suffixes = Vec::<Vec<Pattern<'a>>>::with_capacity(raw_prefixes.len());
 
-        match set_type {
-            PatternSetType::Literal => {
-                let mut literals = unordered
-                    .into_iter()
-                    .map(|line| match line.pattern {
-                        CheckPattern::Literal(s) => s.map(Cow::Borrowed),
-                        _ => unreachable!(),
-                    })
-                    .collect::<Vec<_>>();
-                // Strip out duplicate substrings
-                literals.sort();
-                literals.dedup();
-                SubstringSetBuilder::new_with_patterns(literals)
-                    .build()
-                    .map(MatchAll::Literal)
-            }
-            PatternSetType::Regex => {
-                let mut patterns = unordered
-                    .into_iter()
-                    .map(|line| match line.pattern {
-                        CheckPattern::Literal(s) => {
-                            Span::new(s.span(), Cow::Owned(regex::escape(s.as_ref())))
-                        }
-                        CheckPattern::Regex(s) => s.map(Cow::Borrowed),
-                        _ => unreachable!(),
-                    })
-                    .collect::<Vec<_>>();
-                // Strip out duplicate patterns
-                patterns.sort();
-                patterns.dedup();
-                RegexSetMatcher::new(patterns).map(MatchAll::Regex)
-            }
-            PatternSetType::Mixed => {
-                let mut all_known = true;
-                let mut all_literal = true;
-                let mut prefixes = Vec::<PatternPrefix<'a>>::with_capacity(unordered.len());
-                let mut patterns = Vec::<Vec<Pattern<'a>>>::with_capacity(unordered.len());
-                for (id, mut pattern) in unordered.into_iter().enumerate() {
-                    match pattern.pattern.pop_prefix() {
-                        None => {
-                            all_known = false;
-                            all_literal = false;
-                            prefixes.push(PatternPrefix::Dynamic { id });
-                            patterns.push(vec![Pattern::compile(pattern.pattern, interner)?]);
-                        }
-                        Some((prefix, true)) => {
-                            if let Some(canonical_prefix_id) = prefixes.iter().find_map(|p| {
-                                if p.is_duplicate_prefix(&prefix) {
-                                    Some(p.id())
-                                } else {
-                                    None
-                                }
-                            }) {
-                                prefixes.push(PatternPrefix::Duplicate {
-                                    id,
-                                    canonical: canonical_prefix_id,
-                                });
-                                patterns[canonical_prefix_id]
-                                    .push(Pattern::compile(pattern.pattern, interner)?);
-                            } else {
-                                prefixes.push(PatternPrefix::Literal { id, prefix });
-                                patterns.push(vec![Pattern::compile(pattern.pattern, interner)?]);
-                            }
-                        }
-                        Some((prefix, false)) => {
-                            all_literal = false;
-                            if let Some(canonical_prefix_id) = prefixes.iter().find_map(|p| {
-                                if p.is_duplicate_prefix(&prefix) {
-                                    Some(p.id())
-                                } else {
-                                    None
-                                }
-                            }) {
-                                prefixes.push(PatternPrefix::Duplicate {
-                                    id,
-                                    canonical: canonical_prefix_id,
-                                });
-                                patterns[canonical_prefix_id]
-                                    .push(Pattern::compile(pattern.pattern, interner)?);
-                            } else {
-                                prefixes.push(PatternPrefix::Regex { id, prefix });
-                                patterns.push(vec![Pattern::compile(pattern.pattern, interner)?]);
-                            }
-                        }
-                    }
-                }
-
-                if all_known {
-                    let searcher = if all_literal {
-                        let mut builder = SubstringSetBuilder::new_with_patterns(vec![]);
-                        builder.with_patterns(
-                            prefixes.iter().filter_map(|prefix| prefix.clone_prefix()),
-                        );
-                        MatchAny::Literal(builder.build()?)
-                    } else {
-                        let prefix_patterns = prefixes
-                            .iter()
-                            .filter_map(|prefix| match prefix {
-                                PatternPrefix::Literal { ref prefix, .. } => Some(Span::new(
-                                    prefix.span(),
-                                    Cow::Owned(regex::escape(prefix)),
-                                )),
-                                PatternPrefix::Regex { ref prefix, .. } => Some(prefix.clone()),
-                                _ => None,
-                            })
-                            .collect::<Vec<_>>();
-                        MatchAny::Regex(RegexSetMatcher::new(prefix_patterns)?)
-                    };
-
-                    // We now have a single vector that can be used to dispatch a search
-                    Ok(Self::Smart {
-                        searcher,
-                        prefixes,
-                        patterns,
-                    })
+        for (id, prefix) in raw_prefixes.iter().enumerate() {
+            let span = prefix.span();
+            if let Some(canonical_prefix_id) = unique_prefixes.get(prefix).copied() {
+                let pattern =
+                    core::mem::replace(&mut unordered[id].pattern, CheckPattern::Empty(span));
+                if !pattern.is_empty() {
+                    suffixes[canonical_prefix_id].push(Pattern::compile(pattern, interner)?);
                 } else {
-                    // TODO: Implement support for dynamic prefixes
-                    let labels =
-                        prefixes
-                            .iter()
-                            .zip(patterns.iter())
-                            .filter_map(|(prefix, patterns)| {
-                                if let PatternPrefix::Dynamic { .. } = prefix {
-                                    Some(LabeledSpan::new_with_span(
-                                        Some(
-                                            "this pattern has a non-static (string/regex) prefix"
-                                                .to_string(),
-                                        ),
-                                        patterns[0].span(),
-                                    ))
-                                } else {
-                                    None
-                                }
-                            });
-                    let diag = Diag::new("support for consecutive CHECK-DAG/NOT patterns with leading match blocks is unsupported")
-                        .and_labels(labels)
-                        .with_help("see diagnostics for information on which patterns triggered this error");
-                    Err(Report::from(diag))
+                    suffixes[canonical_prefix_id].push(Pattern::Empty(AlwaysMatch::new(span)));
                 }
+                continue;
             }
-            PatternSetType::Unknown => panic!("invalid empty pattern set"),
+            let pattern_prefix = match &prefix {
+                Prefix::Literal(prefix) => PatternPrefix::Literal {
+                    id,
+                    prefix: prefix.clone(),
+                },
+                Prefix::Substring(prefix) => PatternPrefix::Substring {
+                    id,
+                    prefix: prefix.clone(),
+                },
+                Prefix::Regex(prefix) => PatternPrefix::Regex {
+                    id,
+                    prefix: prefix.clone(),
+                },
+                Prefix::Match(prefix) => PatternPrefix::Dynamic {
+                    id,
+                    prefix: prefix.clone(),
+                },
+                Prefix::Empty(span) => {
+                    let diag = Diag::new(
+                        "unexpected empty pattern encountered during pattern compilation",
+                    )
+                    .with_label(Label::new(*span, "pattern defined here"))
+                    .with_help("empty patterns are only valid in CHECK-NOT directives");
+                    return Err(Report::from(diag));
+                }
+            };
+            unique_prefixes.insert(prefix.clone(), id);
+            prefixes.push(pattern_prefix);
+            let pattern = core::mem::replace(&mut unordered[id].pattern, CheckPattern::Empty(span));
+            if !pattern.is_empty() {
+                suffixes.push(vec![Pattern::compile(pattern, interner)?]);
+            } else {
+                suffixes.push(vec![Pattern::Empty(AlwaysMatch::new(span))]);
+            }
         }
+
+        // We've de-duplicated the prefixes, and combined all suffixes for shared prefixes,
+        // next, we need to determine what searcher to use for prefix matching, which depends
+        // on the composition of the patterns
+
+        // A single stage match means that each prefix is unique, and that the prefix represents the entire pattern
+        let is_single_stage = suffixes.iter().all(|patterns| {
+            patterns.is_empty() || matches!(patterns.as_slice(), [Pattern::Empty(_)])
+        });
+
+        // Literal patterns are always single stage, and can be performed with a simple substring set matcher
+        let is_literal = prefixes
+            .iter()
+            .all(|prefix| matches!(prefix, PatternPrefix::Literal { .. }));
+        if is_literal {
+            assert!(is_single_stage);
+            // We can use a simple substring searcher in this case
+            return SubstringSetBuilder::new_with_patterns(
+                prefixes
+                    .into_iter()
+                    .filter_map(PatternPrefix::into_str)
+                    .collect(),
+            )
+            .build()
+            .map(MatchAll::Literal);
+        }
+
+        // Check if we have both literal+substring patterns, which require a slightly different strategy
+        let is_substring = prefixes.iter().all(|prefix| {
+            matches!(
+                prefix,
+                PatternPrefix::Literal { .. } | PatternPrefix::Substring { .. }
+            )
+        });
+        if is_substring {
+            // By definition this must be a multi-stage match
+            assert!(!is_single_stage);
+
+            let searcher = SubstringSetBuilder::new_with_patterns(
+                prefixes
+                    .into_iter()
+                    .filter_map(PatternPrefix::into_str)
+                    .collect(),
+            )
+            .build()
+            .map(MatchAny::Literal)?;
+
+            return Ok(Self::Smart {
+                searcher,
+                patterns: suffixes,
+            });
+        }
+
+        // If all patterns are regular expressions, or can be safely converted to one, so we can
+        // use a regex searcher for at least the prefixes, if not all of the patterns
+        let is_regex = prefixes.iter().all(PatternPrefix::is_regex_compatible);
+        // Single-stage regular expression matches can be performed with a single matcher
+        if is_regex {
+            if is_single_stage {
+                return RegexSetMatcher::new(
+                    prefixes
+                        .into_iter()
+                        .filter_map(PatternPrefix::into_regex_pattern)
+                        .collect(),
+                    interner,
+                )
+                .map(MatchAll::Regex);
+            }
+
+            let searcher = RegexSetMatcher::new(
+                prefixes
+                    .into_iter()
+                    .filter_map(PatternPrefix::into_regex_pattern)
+                    .collect(),
+                interner,
+            )
+            .map(MatchAny::Regex)?;
+            return Ok(Self::Smart {
+                searcher,
+                patterns: suffixes,
+            });
+        }
+
+        // If we reach here, it's because at least one prefix contains a match/substitution block
+        // that cannot be easily grouped with other prefixes. In such cases we evaluate the search
+        // entirely manually rather than delegating parts to other searchers
+        let mut prefix_patterns = Vec::with_capacity(prefixes.len());
+        for prefix in prefixes.into_iter() {
+            prefix_patterns.push(Pattern::from_prefix(prefix, interner)?);
+        }
+
+        Ok(Self::Prefix {
+            prefixes: prefix_patterns,
+            suffixes,
+        })
     }
 }
 impl<'a> Spanned for MatchAll<'a> {
@@ -209,31 +213,39 @@ impl<'a> Spanned for MatchAll<'a> {
             Self::Literal(ref matcher) => matcher.span(),
             Self::Regex(ref matcher) => matcher.span(),
             Self::Smart {
-                ref prefixes,
+                ref searcher,
                 ref patterns,
                 ..
             } => {
+                let span = searcher.span();
+                let start = span.start();
+                let default_end = span.end();
+                let end = patterns
+                    .iter()
+                    .map(|ps| ps.iter().map(|p| p.span().end()).max().unwrap())
+                    .max()
+                    .unwrap_or(default_end);
+                let end = core::cmp::max(end, default_end);
+                SourceSpan::from(start..end)
+            }
+            Self::Prefix {
+                ref prefixes,
+                ref suffixes,
+            } => {
                 let start = prefixes
                     .iter()
-                    .zip(patterns.iter())
-                    .map(|(prefix, patterns)| {
-                        prefix
-                            .span()
-                            .map(|s| s.offset())
-                            .or_else(|| patterns.iter().map(|p| p.start()).min())
-                            .unwrap()
-                    })
+                    .map(|prefix| prefix.span().start())
                     .min()
                     .unwrap();
                 let end = prefixes
                     .iter()
-                    .zip(patterns.iter())
-                    .map(|(prefix, patterns)| {
-                        prefix
-                            .span()
-                            .map(|s| s.offset())
-                            .or_else(|| patterns.iter().map(|p| p.end()).max())
-                            .unwrap()
+                    .zip(suffixes.iter())
+                    .map(|(prefix, suffixes)| {
+                        suffixes
+                            .iter()
+                            .map(|p| p.span().end())
+                            .max()
+                            .unwrap_or(prefix.span().end())
                     })
                     .max()
                     .unwrap();

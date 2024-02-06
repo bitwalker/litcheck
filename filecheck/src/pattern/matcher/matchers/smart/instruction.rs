@@ -1,7 +1,7 @@
 use regex_automata::PatternID;
 
 use crate::pattern::matcher::SubstringMatcher;
-use crate::{common::*, expr::ValueType};
+use crate::{ast::Capture, common::*, expr::ValueType};
 
 /// A single instruction for the [SmartMatcher] evaluation loop.
 ///
@@ -26,7 +26,7 @@ pub enum MatchOp<'a> {
         /// the `captures` set in [SmartMatcher]. This will be used to
         /// collect the captured value and push it on the operand
         /// stack.
-        capture: Option<CaptureGroup>,
+        captures: SmallVec<[CaptureGroup; 1]>,
     },
     /// Match a numeric value of the given format
     Numeric {
@@ -82,7 +82,7 @@ impl<'a> fmt::Debug for MatchOp<'a> {
             Self::Regex {
                 source,
                 pattern,
-                capture,
+                captures,
                 ..
             } => {
                 let config = pattern.get_config();
@@ -97,7 +97,7 @@ impl<'a> fmt::Debug for MatchOp<'a> {
                             .collect::<smallvec::SmallVec<[_; 4]>>(),
                     )
                     .field("match_kind", &config.get_match_kind())
-                    .field("capture", capture)
+                    .field("captures", captures)
                     .field("memory_usage", &pattern.memory_usage())
                     .finish()
             }
@@ -134,4 +134,5 @@ impl<'a> fmt::Debug for MatchOp<'a> {
 pub struct CaptureGroup {
     pub pattern_id: PatternID,
     pub group_id: usize,
+    pub info: Capture,
 }

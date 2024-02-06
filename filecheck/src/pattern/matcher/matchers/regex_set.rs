@@ -1,91 +1,287 @@
-use regex_automata::{MatchKind, PatternID};
+use regex_automata::{
+    dfa::{self, dense, onepass, Automaton, OverlappingState, StartKind},
+    meta,
+    nfa::thompson,
+    util::{
+        captures::{Captures, GroupInfo},
+        syntax,
+    },
+    Anchored, MatchKind, PatternID,
+};
 
-use crate::{common::*, expr::ValueType, pattern::search::RegexSetSearcher};
+use crate::{
+    ast::{Capture, RegexPattern},
+    common::*,
+    pattern::matcher::regex,
+};
 
-use super::regex;
+#[derive(Default, Clone)]
+#[allow(clippy::large_enum_variant)]
+pub enum CapturingRegex {
+    #[default]
+    None,
+    Onepass {
+        re: onepass::DFA,
+        cache: onepass::Cache,
+    },
+    Default {
+        re: meta::Regex,
+        cache: meta::Cache,
+    },
+}
 
-pub struct RegexSetMatcher<'a> {
+struct Search<'input> {
+    crlf: bool,
+    forward: bool,
+    input: regex_automata::Input<'input>,
+    reverse_input: regex_automata::Input<'input>,
+    last_match_end: Option<usize>,
+    captures: Captures,
+    overlapping: OverlappingState,
+    overlapping_reverse: OverlappingState,
+}
+impl<'input> Search<'input> {
+    fn start(input: Input<'input>, captures: Captures) -> Self {
+        let crlf = input.is_crlf();
+        let input: regex_automata::Input<'input> = input.into();
+        let reverse_input = input.clone().earliest(false);
+        let overlapping = OverlappingState::start();
+        let overlapping_reverse = OverlappingState::start();
+        Self {
+            crlf,
+            forward: true,
+            input,
+            reverse_input,
+            last_match_end: None,
+            overlapping,
+            overlapping_reverse,
+            captures,
+        }
+    }
+}
+
+pub struct RegexSetSearcher<'a, 'input, A = dense::DFA<Vec<u32>>> {
+    search: Search<'input>,
     /// The set of raw input patterns from which
     /// this matcher was constructed
     patterns: Vec<Span<Cow<'a, str>>>,
     /// The compiled regex which will be used to search the input buffer
-    pattern: Regex,
+    regex: dfa::regex::Regex<A>,
+    /// The regex used to obtain capturing groups, if there are any
+    capturing_regex: CapturingRegex,
     /// Metadata about captures in the given patterns
     ///
     /// Each pattern gets its own vector of capture info, since
     /// there is no requirement that all patterns have the same
     /// number or type of captures
-    captures: Vec<Vec<ValueType>>,
+    capture_types: Vec<Vec<Capture>>,
 }
-impl<'a> fmt::Debug for RegexSetMatcher<'a> {
+impl<'a, 'input> RegexSetSearcher<'a, 'input> {
+    pub fn new(
+        input: Input<'input>,
+        patterns: Vec<RegexPattern<'a>>,
+        interner: &StringInterner,
+    ) -> DiagResult<Self> {
+        let start_kind = if input.is_anchored() {
+            StartKind::Anchored
+        } else {
+            StartKind::Unanchored
+        };
+        Ok(
+            RegexSetMatcher::new_with_start_kind(start_kind, patterns, interner)?
+                .into_searcher(input),
+        )
+    }
+}
+impl<'a, 'input, A: Automaton> RegexSetSearcher<'a, 'input, A> {
+    pub fn from_matcher(matcher: RegexSetMatcher<'a, A>, input: Input<'input>) -> Self {
+        let captures = matcher.captures;
+        let search = Search::start(input, captures);
+        Self {
+            search,
+            patterns: matcher.patterns,
+            regex: matcher.regex,
+            capturing_regex: matcher.capturing_regex,
+            capture_types: matcher.capture_types,
+        }
+    }
+}
+
+impl<'a, 'input, A: Automaton + Clone> RegexSetSearcher<'a, 'input, A> {
+    pub fn from_matcher_ref(matcher: &RegexSetMatcher<'a, A>, input: Input<'input>) -> Self {
+        let captures = matcher.captures.clone();
+        let search = Search::start(input, captures);
+        Self {
+            search,
+            patterns: matcher.patterns.clone(),
+            regex: matcher.regex.clone(),
+            capturing_regex: matcher.capturing_regex.clone(),
+            capture_types: matcher.capture_types.clone(),
+        }
+    }
+}
+impl<'a, 'input, A> fmt::Debug for RegexSetSearcher<'a, 'input, A> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("RegexSetMatcher")
-            .field("pattern", &self.pattern)
+        f.debug_struct("RegexSetSearcher")
+            .field("patterns", &self.patterns)
+            .field("capture_types", &self.search.captures)
+            .field("crlf", &self.search.crlf)
+            .field("forward", &self.search.forward)
+            .field("last_match_end", &self.search.last_match_end)
             .finish()
     }
 }
-impl<'a> RegexSetMatcher<'a> {
-    pub fn new(patterns: Vec<Span<Cow<'a, str>>>) -> DiagResult<Self> {
-        let pattern = Regex::builder()
-            .configure(Regex::config().match_kind(MatchKind::All))
-            .build_many(patterns.as_slice())
-            .map_err(|error| {
-                regex::build_error_to_diagnostic(error, patterns.len(), |id| patterns[id].span())
-            })?;
-
-        // Compute capture group information
-        let mut captures = vec![];
-        let groups = pattern.group_info();
-        for i in 0..patterns.len() {
-            let pid = PatternID::new_unchecked(i);
-            let num_captures = groups.group_len(pid);
-            captures.push(vec![ValueType::String; num_captures]);
-        }
-
-        Ok(Self {
-            patterns,
-            pattern,
-            captures,
-        })
-    }
-
-    pub fn search<'input, 'patterns>(
-        &'patterns self,
-        input: Input<'input>,
-    ) -> RegexSetSearcher<'a, 'patterns, 'input> {
-        let pattern = self.pattern.clone();
-        RegexSetSearcher::from_matcher(
-            input,
-            pattern,
-            Cow::Borrowed(&self.patterns),
-            Cow::Borrowed(&self.captures),
-        )
-    }
-
-    pub fn from_parts(
-        pattern: Regex,
-        patterns: Vec<Span<Cow<'a, str>>>,
-        captures: Vec<Vec<ValueType>>,
-    ) -> Self {
-        Self {
-            patterns,
-            pattern,
-            captures,
-        }
-    }
-
-    pub fn pattern_len(&self) -> usize {
-        self.patterns.len()
-    }
-}
-impl<'a> Spanned for RegexSetMatcher<'a> {
+impl<'a, 'input, A> Spanned for RegexSetSearcher<'a, 'input, A> {
     fn span(&self) -> SourceSpan {
         let start = self.patterns.iter().map(|p| p.start()).min().unwrap();
         let end = self.patterns.iter().map(|p| p.end()).max().unwrap();
         SourceSpan::from(start..end)
     }
 }
-impl<'a> MatcherMut for RegexSetMatcher<'a> {
+
+pub struct RegexSetMatcher<'a, A = dense::DFA<Vec<u32>>> {
+    /// The set of raw input patterns from which
+    /// this matcher was constructed
+    patterns: Vec<Span<Cow<'a, str>>>,
+    /// The compiled regex which will be used to search the input buffer
+    regex: dfa::regex::Regex<A>,
+    /// The regex used to obtain capturing groups, if there are any
+    capturing_regex: CapturingRegex,
+    /// Captures storage
+    captures: Captures,
+    /// Metadata about captures in the given patterns
+    ///
+    /// Each pattern gets its own vector of capture info, since
+    /// there is no requirement that all patterns have the same
+    /// number or type of captures
+    capture_types: Vec<Vec<Capture>>,
+}
+impl<'a> RegexSetMatcher<'a> {
+    pub fn new(patterns: Vec<RegexPattern<'a>>, interner: &StringInterner) -> DiagResult<Self> {
+        Self::new_with_start_kind(StartKind::Both, patterns, interner)
+    }
+
+    pub fn new_with_start_kind(
+        start_kind: StartKind,
+        patterns: Vec<RegexPattern<'a>>,
+        interner: &StringInterner,
+    ) -> DiagResult<Self> {
+        let regex = dfa::regex::Regex::builder()
+            .dense(
+                dense::Config::new()
+                    .match_kind(MatchKind::All)
+                    .start_kind(start_kind)
+                    .starts_for_each_pattern(true),
+            )
+            .build_many(&patterns)
+            .map_err(|error| {
+                regex::build_error_to_diagnostic(error, patterns.len(), |id| patterns[id].span())
+            })?;
+
+        let has_captures = patterns.iter().any(|p| p.captures.is_empty());
+        let (capturing_regex, captures) = if !has_captures {
+            (CapturingRegex::None, Captures::empty(GroupInfo::empty()))
+        } else {
+            onepass::DFA::builder()
+                .syntax(syntax::Config::new().utf8(false))
+                .thompson(thompson::Config::new().utf8(false))
+                .build_many(&patterns)
+                .map_or_else(
+                    |_| {
+                        let re = Regex::builder()
+                            .configure(Regex::config().match_kind(MatchKind::All))
+                            .build_many(&patterns)
+                            .unwrap();
+                        let cache = re.create_cache();
+                        let captures = re.create_captures();
+                        (CapturingRegex::Default { re, cache }, captures)
+                    },
+                    |re| {
+                        let cache = re.create_cache();
+                        let captures = re.create_captures();
+                        (CapturingRegex::Onepass { re, cache }, captures)
+                    },
+                )
+        };
+
+        // Compute capture group information
+        let mut capture_types = vec![vec![]; patterns.len()];
+        let mut strings = Vec::with_capacity(patterns.len());
+        let groups = captures.group_info();
+        for (
+            i,
+            RegexPattern {
+                pattern,
+                captures: pattern_captures,
+            },
+        ) in patterns.into_iter().enumerate()
+        {
+            let span = pattern.span();
+            strings.push(pattern);
+            let pid = PatternID::new_unchecked(i);
+            let num_captures = groups.group_len(pid);
+            capture_types[i].resize(num_captures, Capture::Ignore(span));
+            for capture in pattern_captures.into_iter() {
+                if let Capture::Ignore(_) = capture {
+                    continue;
+                }
+                if let Some(name) = capture.group_name() {
+                    let group_name = interner.resolve(name);
+                    let group_id = groups.to_index(pid, group_name).unwrap_or_else(|| {
+                        panic!("expected group for capture of '{group_name}' in pattern {i}")
+                    });
+                    capture_types[i][group_id] = capture;
+                } else {
+                    assert_eq!(
+                        &capture_types[i][0],
+                        &Capture::Ignore(span),
+                        "{capture:?} would overwrite a previous implicit capture group in pattern {i}"
+                    );
+                    capture_types[i][0] = capture;
+                }
+            }
+        }
+
+        Ok(Self {
+            patterns: strings,
+            regex,
+            capturing_regex,
+            captures,
+            capture_types,
+        })
+    }
+
+    pub fn patterns_len(&self) -> usize {
+        self.patterns.len()
+    }
+}
+impl<'a, A: Automaton + Clone> RegexSetMatcher<'a, A> {
+    pub fn search<'input>(&self, input: Input<'input>) -> RegexSetSearcher<'a, 'input, A> {
+        RegexSetSearcher::from_matcher_ref(self, input)
+    }
+}
+impl<'a, A: Automaton> RegexSetMatcher<'a, A> {
+    #[inline]
+    pub fn into_searcher<'input>(self, input: Input<'input>) -> RegexSetSearcher<'a, 'input, A> {
+        RegexSetSearcher::from_matcher(self, input)
+    }
+}
+impl<'a, A> fmt::Debug for RegexSetMatcher<'a, A> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("RegexSetMatcher")
+            .field("patterns", &self.patterns)
+            .field("capture_types", &self.captures)
+            .finish()
+    }
+}
+impl<'a, A> Spanned for RegexSetMatcher<'a, A> {
+    fn span(&self) -> SourceSpan {
+        let start = self.patterns.iter().map(|p| p.start()).min().unwrap();
+        let end = self.patterns.iter().map(|p| p.end()).max().unwrap();
+        SourceSpan::from(start..end)
+    }
+}
+impl<'a, A: Automaton + Clone> MatcherMut for RegexSetMatcher<'a, A> {
     fn try_match_mut<'input, 'context, C>(
         &self,
         input: Input<'input>,
@@ -97,7 +293,7 @@ impl<'a> MatcherMut for RegexSetMatcher<'a> {
         self.try_match(input, context)
     }
 }
-impl<'a> Matcher for RegexSetMatcher<'a> {
+impl<'a, A: Automaton + Clone> Matcher for RegexSetMatcher<'a, A> {
     fn try_match<'input, 'context, C>(
         &self,
         input: Input<'input>,
@@ -106,40 +302,168 @@ impl<'a> Matcher for RegexSetMatcher<'a> {
     where
         C: Context<'input, 'context> + ?Sized,
     {
-        let regex_input = input.into();
-        let mut captures = self.pattern.create_captures();
-        self.pattern.search_captures(&regex_input, &mut captures);
-        if let Some(matched) = captures.get_match() {
-            let pattern_id = matched.pattern().as_usize();
-            let pattern_span = self.patterns[pattern_id].span();
-            let span = SourceSpan::from(matched.range());
-            let mut capture_infos = Vec::with_capacity(captures.group_len());
-            for (index, (capture, ty)) in captures
-                .iter()
-                .zip(self.captures[pattern_id].iter().copied())
-                .enumerate()
-            {
-                if let Some(capture_span) = capture {
-                    let captured = input.as_str(capture_span.range());
-                    capture_infos.push(CaptureInfo {
-                        span: SourceSpan::from(capture_span.range()),
+        let mut searcher = RegexSetSearcher::from_matcher_ref(self, input);
+        searcher.try_match_next(context)
+    }
+}
+
+impl<'a, 'b, A> PatternSetSearcher for RegexSetSearcher<'a, 'b, A>
+where
+    A: Automaton,
+{
+    type Input = regex_automata::Input<'b>;
+    type PatternID = PatternID;
+
+    fn input(&self) -> &Self::Input {
+        &self.search.input
+    }
+    fn last_match_end(&self) -> Option<usize> {
+        self.search.last_match_end
+    }
+    fn set_last_match_end(&mut self, end: usize) {
+        self.search.last_match_end = Some(end);
+        self.search.input.set_start(end);
+    }
+    fn patterns_len(&self) -> usize {
+        self.patterns.len()
+    }
+    fn pattern_span(&self, id: Self::PatternID) -> SourceSpan {
+        self.patterns[id.as_usize()].span()
+    }
+    fn try_match_next<'input, 'context, C>(
+        &mut self,
+        context: &C,
+    ) -> DiagResult<MatchResult<'input>>
+    where
+        C: Context<'input, 'context> + ?Sized,
+    {
+        let (fwd_dfa, rev_dfa) = (self.regex.forward(), self.regex.reverse());
+        let matched;
+        let mut last_end = self
+            .search
+            .last_match_end
+            .unwrap_or(self.search.input.start());
+        loop {
+            if self.search.forward {
+                if let Some((pattern_id, end)) = {
+                    fwd_dfa
+                        .try_search_overlapping_fwd(
+                            &self.search.input,
+                            &mut self.search.overlapping,
+                        )
+                        .expect("match error");
+                    self.search
+                        .overlapping
+                        .get_match()
+                        .map(|hm| (hm.pattern(), hm.offset()))
+                } {
+                    last_end = end;
+                    self.search
+                        .reverse_input
+                        .set_anchored(Anchored::Pattern(pattern_id));
+                    self.search
+                        .reverse_input
+                        .set_range(self.search.input.start()..end);
+                    self.search.forward = false;
+                    self.search.overlapping_reverse = OverlappingState::start();
+                    continue;
+                }
+            } else if let Some((pattern_id, start)) = {
+                rev_dfa
+                    .try_search_overlapping_rev(
+                        &self.search.reverse_input,
+                        &mut self.search.overlapping_reverse,
+                    )
+                    .expect("match error");
+                self.search
+                    .overlapping_reverse
+                    .get_match()
+                    .map(|hm| (hm.pattern(), hm.offset()))
+            } {
+                if start == last_end && !self.search.input.is_char_boundary(last_end) {
+                    continue;
+                }
+                self.search.last_match_end = Some(last_end);
+                matched = Some(regex_automata::Match::new(pattern_id, start..last_end));
+                break;
+            } else {
+                self.search.forward = true;
+            }
+        }
+
+        if let Some(matched) = matched {
+            let pattern_id = matched.pattern();
+            match self.capturing_regex {
+                CapturingRegex::None => {
+                    let overall_span = SourceSpan::from(matched.range());
+                    let pattern_index = pattern_id.as_usize();
+                    let pattern_span = self.patterns[pattern_index].span();
+                    Ok(MatchResult::ok(MatchInfo {
+                        span: overall_span,
                         pattern_span,
-                        index,
-                        value: match ty {
-                            ValueType::String => Value::Str(Cow::Borrowed(captured)),
-                            ValueType::Number(_) => {
-                                panic!("numeric captures are not expected here")
-                            }
-                        },
-                    });
+                        pattern_id: pattern_index,
+                        captures: vec![],
+                    }))
+                }
+                CapturingRegex::Default {
+                    ref re,
+                    ref mut cache,
+                } => {
+                    let input = self
+                        .search
+                        .input
+                        .clone()
+                        .anchored(Anchored::Pattern(pattern_id))
+                        .range(matched.range());
+                    re.search_captures_with(cache, &input, &mut self.search.captures);
+                    if let Some(matched) = self.search.captures.get_match() {
+                        extract_captures_from_match(
+                            matched,
+                            &self.search,
+                            &self.patterns,
+                            &self.capture_types,
+                            context,
+                        )
+                    } else {
+                        let error = CheckFailedError::MatchError {
+                            span: SourceSpan::from(matched.range()),
+                            input_file: context.input_file(),
+                            labels: vec![RelatedLabel::note(Label::at(matched.range()), context.match_file())],
+                            help: Some("meta regex searcher failed to match the input even though an initial DFA pass found a match".to_string()),
+                        };
+                        Err(Report::new(error))
+                    }
+                }
+                CapturingRegex::Onepass {
+                    ref re,
+                    ref mut cache,
+                } => {
+                    let input = self
+                        .search
+                        .input
+                        .clone()
+                        .anchored(Anchored::Pattern(pattern_id))
+                        .range(matched.range());
+                    re.captures(cache, input, &mut self.search.captures);
+                    if let Some(matched) = self.search.captures.get_match() {
+                        extract_captures_from_match(
+                            matched,
+                            &self.search,
+                            &self.patterns,
+                            &self.capture_types,
+                            context,
+                        )
+                    } else {
+                        let error = CheckFailedError::MatchError {
+                            span: SourceSpan::from(matched.range()),
+                            input_file: context.input_file(),
+                            labels: vec![RelatedLabel::note(Label::at(matched.range()), context.match_file())],
+                            help: Some("onepass regex searcher failed to match the input even though an initial DFA pass found a match".to_string()),
+                        };
+                        Err(Report::new(error))
+                    }
                 }
             }
-            Ok(MatchResult::ok(MatchInfo {
-                span,
-                pattern_span,
-                pattern_id,
-                captures: capture_infos,
-            }))
         } else {
             Ok(MatchResult::failed(
                 CheckFailedError::MatchNoneButExpected {
@@ -150,4 +474,57 @@ impl<'a> Matcher for RegexSetMatcher<'a> {
             ))
         }
     }
+}
+
+fn extract_captures_from_match<'a, 'input, 'context, C>(
+    matched: regex_automata::Match,
+    search: &Search<'_>,
+    patterns: &[Span<Cow<'a, str>>],
+    capture_types: &[Vec<Capture>],
+    context: &C,
+) -> DiagResult<MatchResult<'input>>
+where
+    C: Context<'input, 'context> + ?Sized,
+{
+    let pattern_id = matched.pattern();
+    let pattern_index = pattern_id.as_usize();
+    let pattern_span = patterns[pattern_index].span();
+    let overall_span = SourceSpan::from(matched.range());
+    let mut capture_infos = Vec::with_capacity(search.captures.group_len());
+    for (index, (maybe_capture_span, capture)) in search
+        .captures
+        .iter()
+        .zip(capture_types[pattern_id].iter().copied())
+        .enumerate()
+    {
+        if let Some(capture_span) = maybe_capture_span {
+            let input = context.search();
+            let captured = input.as_str(capture_span.range());
+            let capture_span = SourceSpan::from(capture_span.range());
+            let result = regex::try_convert_capture_to_type(
+                pattern_id,
+                index,
+                pattern_span,
+                overall_span,
+                Span::new(capture_span, captured),
+                capture,
+                &search.captures,
+                context,
+            );
+            match result {
+                Ok(capture_info) => {
+                    capture_infos.push(capture_info);
+                }
+                Err(error) => {
+                    return Ok(MatchResult::failed(error));
+                }
+            }
+        }
+    }
+    Ok(MatchResult::ok(MatchInfo {
+        span: overall_span,
+        pattern_span,
+        pattern_id: pattern_index,
+        captures: capture_infos,
+    }))
 }

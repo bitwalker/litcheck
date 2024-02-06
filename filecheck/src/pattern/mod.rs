@@ -13,10 +13,9 @@ pub use self::prefix::PatternPrefix;
 pub use self::search::{DefaultSearcher, PatternSetSearcher, Searcher};
 
 use crate::{
-    ast::{CheckPattern, CheckPatternPart, Match},
+    ast::{CheckPattern, CheckPatternPart},
     common::*,
     errors::InvalidCheckFileError,
-    expr::ValueType,
 };
 
 /// The compiled form of [CheckPattern]
@@ -44,96 +43,70 @@ impl<'a> Pattern<'a> {
         }
     }
 
-    pub fn compile(pattern: CheckPattern<'a>, interner: &mut StringInterner) -> DiagResult<Self> {
-        match pattern {
-            CheckPattern::Literal(s) => {
-                if s.is_empty() {
-                    return Err(Report::from(InvalidCheckFileError::EmptyPattern(s.span())));
+    pub fn from_prefix(
+        prefix: PatternPrefix<'a>,
+        interner: &mut StringInterner,
+    ) -> DiagResult<Self> {
+        match prefix {
+            PatternPrefix::Literal { prefix, .. } | PatternPrefix::Substring { prefix, .. } => {
+                if prefix.is_empty() {
+                    return Err(Report::from(InvalidCheckFileError::EmptyPattern(
+                        prefix.span(),
+                    )));
                 }
-                if s.trim().is_empty() {
-                    if s.chars().all(|c| c.is_ascii_whitespace()) {
-                        Ok(Pattern::Whitespace(AsciiWhitespaceMatcher::new(s.span())))
+                if prefix.trim().is_empty() {
+                    if prefix.chars().all(|c| c.is_ascii_whitespace()) {
+                        Ok(Pattern::Whitespace(AsciiWhitespaceMatcher::new(
+                            prefix.span(),
+                        )))
                     } else {
-                        Ok(Pattern::Regex(RegexMatcher::new(Span::new(
-                            s.span(),
+                        Ok(Pattern::Regex(RegexMatcher::new_nocapture(Span::new(
+                            prefix.span(),
                             Cow::Borrowed(r"\s+"),
                         ))?))
                     }
                 } else {
-                    Ok(Pattern::Substring(SubstringMatcher::new(
-                        s.map(Cow::Borrowed),
-                    )?))
+                    Ok(Pattern::Substring(SubstringMatcher::new(prefix)?))
                 }
             }
-            CheckPattern::Regex(s) => Ok(Pattern::Regex(RegexMatcher::new(s.map(Cow::Borrowed))?)),
+            PatternPrefix::Regex { prefix, .. } if prefix.captures.is_empty() => {
+                Ok(Pattern::Regex(RegexMatcher::new_nocapture(prefix.pattern)?))
+            }
+            PatternPrefix::Regex { prefix, .. } => {
+                Ok(Pattern::Regex(RegexMatcher::new(prefix, interner)?))
+            }
+            PatternPrefix::Dynamic { prefix, .. } => {
+                let mut builder = SmartMatcher::build(prefix.span(), interner);
+                builder.lower_match(prefix.into_owned())?;
+                Ok(Self::Smart(builder.build()))
+            }
+        }
+    }
+
+    pub fn compile(
+        mut pattern: CheckPattern<'a>,
+        interner: &mut StringInterner,
+    ) -> DiagResult<Self> {
+        pattern.compact(interner);
+        match pattern {
+            CheckPattern::Literal(s) => {
+                Self::from_prefix(PatternPrefix::Literal { prefix: s, id: 0 }, interner)
+            }
+            CheckPattern::Regex(s) => Ok(Pattern::Regex(RegexMatcher::new(s, interner)?)),
             CheckPattern::Match(s) => {
+                // At least one part requires expression evaluation
                 let (span, parts) = s.into_parts();
                 let mut builder = SmartMatcher::build(span, interner);
                 for part in parts.into_iter() {
                     match part {
                         CheckPatternPart::Literal(s) => {
-                            builder.literal(s.map(Cow::Borrowed))?;
+                            builder.literal(s)?;
                         }
                         CheckPatternPart::Regex(s) => {
-                            builder.regex(s.map(Cow::Borrowed))?;
+                            builder.regex_pattern(s)?;
                         }
-                        CheckPatternPart::Match(Match::Substitution {
-                            name,
-                            pattern: None,
-                            ..
-                        }) => {
-                            builder.substitution(Expr::Var(name));
-                        }
-                        CheckPatternPart::Match(Match::Substitution {
-                            span,
-                            name,
-                            pattern: Some(pattern),
-                        }) => {
-                            builder.capture(
-                                name.into_inner(),
-                                Span::new(span, Cow::Borrowed(pattern.into_inner())),
-                            )?;
-                        }
-                        CheckPatternPart::Match(Match::Numeric {
-                            span,
-                            format,
-                            capture: None,
-                            expr: None,
-                            ..
-                        }) => {
-                            builder.numeric(span, format);
-                        }
-                        CheckPatternPart::Match(Match::Numeric {
-                            format,
-                            capture: None,
-                            expr: Some(expr),
-                            ..
-                        }) => {
-                            builder.substitution_with_format(expr, ValueType::Number(format));
-                        }
-                        CheckPatternPart::Match(Match::Numeric {
-                            span,
-                            format,
-                            capture: Some(name),
-                            expr: None,
-                            ..
-                        }) => {
-                            builder.capture_numeric(span, name.into_inner(), format);
-                        }
-                        CheckPatternPart::Match(Match::Numeric {
-                            span,
-                            format,
-                            capture: Some(name),
-                            constraint,
-                            expr: Some(expr),
-                        }) => {
-                            builder.capture_numeric_with_constraint(
-                                span,
-                                name.into_inner(),
-                                format,
-                                constraint,
-                                expr,
-                            );
+                        CheckPatternPart::Match(m) => {
+                            builder.lower_match(m)?;
                         }
                     }
                 }
@@ -148,25 +121,26 @@ impl<'a> Pattern<'a> {
 
     pub fn compile_static(
         span: SourceSpan,
-        pattern: CheckPattern<'a>,
+        mut pattern: CheckPattern<'a>,
+        interner: &mut StringInterner,
     ) -> DiagResult<SimpleMatcher<'a>> {
+        pattern.compact(interner);
+
         match pattern {
-            CheckPattern::Literal(lit) => Ok(SimpleMatcher::Substring(SubstringMatcher::new(
-                lit.map(Cow::Borrowed),
-            )?)),
-            CheckPattern::Regex(s) => Ok(SimpleMatcher::Regex(RegexMatcher::new(
-                s.map(Cow::Borrowed),
-            )?)),
-            CheckPattern::Match(parts) => {
-                let var = parts
-                    .iter()
-                    .find(|p| matches!(p, CheckPatternPart::Match(_)))
-                    .unwrap()
-                    .span();
-                Err(Report::new(InvalidCheckFileError::CheckLabelVariable {
-                    line: span,
-                    var: var.span(),
-                }))
+            CheckPattern::Literal(lit) => Ok(SimpleMatcher::Substring(SubstringMatcher::new(lit)?)),
+            CheckPattern::Regex(regex) if regex.captures.is_empty() => {
+                Ok(SimpleMatcher::Regex(RegexMatcher::new(regex, interner)?))
+            }
+            pattern @ (CheckPattern::Regex(_) | CheckPattern::Match(_)) => {
+                let diag = Diag::new("invalid variable usage in pattern")
+                    .with_label(Label::new(span, "occurs in this pattern"))
+                    .and_labels(
+                        pattern
+                            .locate_variables()
+                            .map(|span| Label::new(span, "occurs here").into()),
+                    )
+                    .with_help("CHECK-LABEL patterns must be literals or regular expressions");
+                Err(Report::new(diag))
             }
             CheckPattern::Empty(_) => unreachable!(
                 "{pattern:?} is only valid for CHECK-EMPTY, and is not an actual pattern"
@@ -176,9 +150,7 @@ impl<'a> Pattern<'a> {
 
     pub fn compile_literal(pattern: CheckPattern<'a>) -> DiagResult<Self> {
         match pattern {
-            CheckPattern::Literal(lit) => Ok(Pattern::Substring(SubstringMatcher::new(
-                lit.map(Cow::Borrowed),
-            )?)),
+            CheckPattern::Literal(lit) => Ok(Pattern::Substring(SubstringMatcher::new(lit)?)),
             CheckPattern::Regex(_) | CheckPattern::Match(_) => {
                 unreachable!("the lexer will never emit tokens for these non-terminals")
             }

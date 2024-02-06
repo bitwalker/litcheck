@@ -6,11 +6,12 @@ pub struct AlwaysMatch {
     span: SourceSpan,
 }
 impl AlwaysMatch {
-    pub fn new(span: SourceSpan) -> Self {
+    pub const fn new(span: SourceSpan) -> Self {
         Self { span }
     }
 }
 impl MatcherMut for AlwaysMatch {
+    #[inline]
     fn try_match_mut<'input, 'context, C>(
         &self,
         input: Input<'input>,
@@ -23,6 +24,7 @@ impl MatcherMut for AlwaysMatch {
     }
 }
 impl Matcher for AlwaysMatch {
+    #[inline]
     fn try_match<'input, 'context, C>(
         &self,
         input: Input<'input>,
@@ -38,6 +40,7 @@ impl Matcher for AlwaysMatch {
     }
 }
 impl Spanned for AlwaysMatch {
+    #[inline]
     fn span(&self) -> SourceSpan {
         self.span
     }

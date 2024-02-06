@@ -114,7 +114,7 @@ impl<'a> CheckProgram<'a> {
             let line = lines.next().unwrap();
             assert_eq!(line.kind(), Check::Label);
 
-            let pattern = Pattern::compile_static(line.span, line.pattern)?;
+            let pattern = Pattern::compile_static(line.span, line.pattern, interner)?;
             self.push(CheckOp::BlockStart(pattern));
         }
 
