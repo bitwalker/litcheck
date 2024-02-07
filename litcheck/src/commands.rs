@@ -1,8 +1,10 @@
 mod filecheck;
 mod lit;
+mod not;
 
 pub use self::filecheck::FileCheck;
 pub use self::lit::Lit;
+pub use self::not::Not;
 
 use litcheck::diagnostics::DiagResult;
 
@@ -18,5 +20,5 @@ pub trait Command: clap::FromArgMatches {
 pub fn all() -> impl IntoIterator<Item = clap::Command> {
     use clap::CommandFactory;
 
-    [Lit::command(), FileCheck::command()]
+    [Lit::command(), FileCheck::command(), Not::command()]
 }

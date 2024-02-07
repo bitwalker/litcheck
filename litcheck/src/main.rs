@@ -25,6 +25,7 @@ pub fn main() -> DiagResult<ExitCode> {
             run::<FileCheck>(&mut cmd, name, matches)
         }
         (name @ "lit", matches) => run::<Lit>(&mut cmd, name, matches),
+        (name @ ("not" | "NOT"), matches) => run::<Not>(&mut cmd, name, matches),
         (name, _) => cmd
             .error(
                 clap::error::ErrorKind::InvalidSubcommand,
