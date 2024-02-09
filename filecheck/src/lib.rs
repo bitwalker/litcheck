@@ -26,6 +26,7 @@ pub(crate) mod common {
         ops::{ControlFlow, RangeBounds},
     };
 
+    pub use either::Either::{self, Left, Right};
     pub use litcheck::{
         diagnostics::{
             ArcSource, Diag, DiagResult, Diagnostic, Label, NamedSourceFile, Report, Source,

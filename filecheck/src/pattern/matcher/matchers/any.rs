@@ -1,6 +1,6 @@
 use crate::common::*;
 
-use super::{RegexSetMatcher, SubstringSetMatcher};
+use super::{MatchAll, RegexSetMatcher, SubstringSetMatcher};
 
 #[derive(Debug)]
 pub enum MatchAny<'a> {
@@ -8,15 +8,191 @@ pub enum MatchAny<'a> {
     Literal(SubstringSetMatcher<'a>),
     /// Match a set of static regex patterns
     Regex(RegexSetMatcher<'a>),
-    ///// Match a set of hybrid patterns
-    //Smart(SmartMatcherSet<'a>),
+    /// A highly dynamic pattern matcher, but less efficient, as
+    /// it is forced to perform some number of redundant searches
+    /// of the input in order to check for all patterns. This is
+    /// the only searcher which can match multiple patterns with
+    /// match/blocks substitutions in at least one of the pattern
+    /// prefixes
+    AnyPrefix {
+        /// The prefix patterns to search for
+        prefixes: Vec<Pattern<'a>>,
+        /// The suffix patterns corresponding to each prefix
+        suffixes: Vec<Vec<Pattern<'a>>>,
+    },
+    /// An optimized form of `AnyPrefix` when all of the prefixes
+    /// can be evaluated as a set of regular expressions.
+    RegexPrefix {
+        prefixes: RegexSetMatcher<'a>,
+        suffixes: Vec<Vec<Pattern<'a>>>,
+    },
+    /// An optimized form of `AnyPrefix` when all of the prefixes
+    /// can be evaluated as a set of substring literals.
+    SubstringPrefix {
+        prefixes: SubstringSetMatcher<'a>,
+        suffixes: Vec<Vec<Pattern<'a>>>,
+    },
+}
+impl<'a> From<MatchAll<'a>> for MatchAny<'a> {
+    fn from(match_all: MatchAll<'a>) -> Self {
+        match match_all {
+            MatchAll::Literal(lit) => Self::Literal(lit),
+            MatchAll::Regex(re) => Self::Regex(re),
+            MatchAll::Prefix { prefixes, suffixes } => Self::AnyPrefix { prefixes, suffixes },
+            MatchAll::Smart {
+                searcher: Self::Literal(prefixes),
+                patterns: suffixes,
+            } => Self::SubstringPrefix { prefixes, suffixes },
+            MatchAll::Smart {
+                searcher: Self::Regex(prefixes),
+                patterns: suffixes,
+            } => Self::RegexPrefix { prefixes, suffixes },
+            MatchAll::Smart { .. } => unreachable!(),
+        }
+    }
+}
+impl<'a> MatchAny<'a> {
+    pub fn pattern_len(&self) -> usize {
+        match self {
+            Self::Literal(ref matcher) => matcher.pattern_len(),
+            Self::Regex(ref matcher) => matcher.patterns_len(),
+            Self::AnyPrefix { suffixes, .. }
+            | Self::RegexPrefix { suffixes, .. }
+            | Self::SubstringPrefix { suffixes, .. } => suffixes.iter().map(|ps| ps.len()).sum(),
+        }
+    }
+
+    pub fn first_pattern(&self) -> Span<usize> {
+        match self {
+            Self::Literal(matcher) => matcher.first_pattern(),
+            Self::Regex(matcher) => matcher.first_pattern(),
+            Self::AnyPrefix {
+                ref prefixes,
+                ref suffixes,
+            } => {
+                let (prefix_id, start) = prefixes
+                    .iter()
+                    .enumerate()
+                    .map(|(i, p)| (i, p.span().start()))
+                    .min_by_key(|&(_, s)| s)
+                    .unwrap();
+                let (offset, end) = suffixes[prefix_id]
+                    .iter()
+                    .enumerate()
+                    .map(|(offset, p)| (offset, p.span().end()))
+                    .min_by_key(|&(_, e)| e)
+                    .unwrap();
+                Span::new(SourceSpan::from(start..end), prefix_id + offset)
+            }
+            Self::RegexPrefix {
+                ref prefixes,
+                ref suffixes,
+            } => {
+                let (first_prefix_span, first_prefix) = prefixes.first_pattern().into_parts();
+                let start = first_prefix_span.start();
+                let (offset, end) = suffixes[first_prefix]
+                    .iter()
+                    .enumerate()
+                    .map(|(offset, p)| (offset, p.span().end()))
+                    .min_by_key(|&(_, end)| end)
+                    .unwrap();
+                Span::new(SourceSpan::from(start..end), first_prefix + offset)
+            }
+            Self::SubstringPrefix {
+                ref prefixes,
+                ref suffixes,
+            } => {
+                let (first_prefix_span, first_prefix) = prefixes.first_pattern().into_parts();
+                let start = first_prefix_span.start();
+                let (offset, end) = suffixes[first_prefix]
+                    .iter()
+                    .enumerate()
+                    .map(|(offset, p)| (offset, p.span().end()))
+                    .min_by_key(|&(_, end)| end)
+                    .unwrap();
+                Span::new(SourceSpan::from(start..end), first_prefix + offset)
+            }
+        }
+    }
+
+    pub fn first_pattern_span(&self) -> SourceSpan {
+        self.first_pattern().span()
+    }
 }
 impl<'a> Spanned for MatchAny<'a> {
     fn span(&self) -> SourceSpan {
         match self {
             Self::Literal(ref matcher) => matcher.span(),
             Self::Regex(ref matcher) => matcher.span(),
-            //Self::Smart(ref matcher) => matcher.span(),
+            Self::AnyPrefix {
+                ref prefixes,
+                ref suffixes,
+            } => {
+                let start = prefixes
+                    .iter()
+                    .map(|prefix| prefix.span().start())
+                    .min()
+                    .unwrap();
+                let end = prefixes
+                    .iter()
+                    .zip(suffixes.iter())
+                    .map(|(prefix, suffixes)| {
+                        suffixes
+                            .iter()
+                            .map(|p| p.span().end())
+                            .max()
+                            .unwrap_or(prefix.span().end())
+                    })
+                    .max()
+                    .unwrap();
+                SourceSpan::from(start..end)
+            }
+            Self::RegexPrefix {
+                ref prefixes,
+                ref suffixes,
+            } => {
+                let prefix_span = prefixes.span();
+                let start = prefix_span.start();
+                let prefix_end = prefix_span.end();
+                let end = core::cmp::max(
+                    prefix_end,
+                    suffixes
+                        .iter()
+                        .map(|suffixes| {
+                            suffixes
+                                .iter()
+                                .map(|p| p.span().end())
+                                .max()
+                                .unwrap_or(prefix_end)
+                        })
+                        .max()
+                        .unwrap(),
+                );
+                SourceSpan::from(start..end)
+            }
+            Self::SubstringPrefix {
+                ref prefixes,
+                ref suffixes,
+            } => {
+                let prefix_span = prefixes.span();
+                let start = prefix_span.start();
+                let prefix_end = prefix_span.end();
+                let end = core::cmp::max(
+                    prefix_end,
+                    suffixes
+                        .iter()
+                        .map(|suffixes| {
+                            suffixes
+                                .iter()
+                                .map(|p| p.span().end())
+                                .max()
+                                .unwrap_or(prefix_end)
+                        })
+                        .max()
+                        .unwrap(),
+                );
+                SourceSpan::from(start..end)
+            }
         }
     }
 }
@@ -32,6 +208,151 @@ impl<'a> MatcherMut for MatchAny<'a> {
         match self {
             Self::Literal(ref matcher) => matcher.try_match_mut(input, context),
             Self::Regex(ref matcher) => matcher.try_match_mut(input, context),
+            Self::AnyPrefix {
+                ref prefixes,
+                ref suffixes,
+            } => {
+                let mut pattern_id = 0;
+                for (prefix, suffixes) in prefixes.iter().zip(suffixes.iter()) {
+                    match prefix.try_match_mut(input, context)? {
+                        // We found a match for the prefix
+                        MatchResult {
+                            info: Some(ref mut info),
+                            ty: MatchType::MatchFoundAndExpected,
+                        } => {
+                            // Try to find a matching suffix
+                            //
+                            // Always start the suffix search anchored to the end of the last match
+                            let mut suffix_input = input;
+                            suffix_input.set_start(info.span.end());
+                            suffix_input.set_anchored(true);
+                            match try_match_suffix(
+                                info,
+                                suffixes,
+                                pattern_id,
+                                suffix_input,
+                                context,
+                            )? {
+                                Some(found) => return Ok(found),
+                                None => {
+                                    pattern_id += suffixes.len();
+                                }
+                            }
+                        }
+                        // We found a match, but then some error occurred, so let's propagate the error
+                        MatchResult {
+                            info: Some(mut info),
+                            ty,
+                        } => {
+                            info.pattern_id = pattern_id;
+                            return Ok(MatchResult {
+                                info: Some(info),
+                                ty,
+                            });
+                        }
+                        // No match for this prefix, try the next
+                        _ => {
+                            pattern_id += suffixes.len();
+                        }
+                    }
+                }
+
+                // No match was found
+                Ok(MatchResult::failed(
+                    CheckFailedError::MatchNoneButExpected {
+                        span: self.span(),
+                        match_file: context.match_file(),
+                        note: None,
+                    },
+                ))
+            }
+            Self::RegexPrefix {
+                ref prefixes,
+                ref suffixes,
+            } => try_match_searcher(prefixes.search(input), suffixes, input, context),
+            Self::SubstringPrefix {
+                ref prefixes,
+                ref suffixes,
+            } => try_match_searcher(prefixes.search(input)?, suffixes, input, context),
         }
     }
+}
+
+fn try_match_searcher<'input, 'context, 'a, S, C>(
+    mut searcher: S,
+    suffixes: &[Vec<Pattern<'a>>],
+    input: Input<'input>,
+    context: &mut C,
+) -> DiagResult<MatchResult<'input>>
+where
+    S: PatternSetSearcher,
+    C: Context<'input, 'context> + ?Sized,
+{
+    loop {
+        match searcher.try_match_next(context)? {
+            MatchResult {
+                info: Some(ref mut info),
+                ty: MatchType::MatchFoundAndExpected,
+            } => {
+                let mut suffix_input = input;
+                suffix_input.set_start(searcher.last_match_end().unwrap());
+                suffix_input.set_anchored(true);
+                let suffixes = &suffixes[info.pattern_id];
+                if let Some(found) =
+                    try_match_suffix(info, suffixes, info.pattern_id, suffix_input, context)?
+                {
+                    break Ok(found);
+                }
+            }
+            result @ MatchResult { info: None, .. } => break Ok(result),
+            _ => continue,
+        }
+    }
+}
+
+fn try_match_suffix<'input, 'context, 'a, C>(
+    prefix_info: &mut MatchInfo<'input>,
+    suffixes: &[Pattern<'a>],
+    mut pattern_id: usize,
+    input: Input<'input>,
+    context: &mut C,
+) -> DiagResult<Option<MatchResult<'input>>>
+where
+    C: Context<'input, 'context> + ?Sized,
+{
+    for suffix in suffixes.iter() {
+        match suffix.try_match_mut(input, context)? {
+            MatchResult {
+                info: Some(mut suffix_info),
+                ty: MatchType::MatchFoundAndExpected,
+            } => {
+                // Match found, we're done
+                let mut captures = core::mem::take(&mut prefix_info.captures);
+                captures.append(&mut suffix_info.captures);
+                return Ok(Some(MatchResult::ok(MatchInfo {
+                    pattern_id,
+                    span: SourceSpan::from(prefix_info.span.start()..suffix_info.span.end()),
+                    captures,
+                    ..suffix_info
+                })));
+            }
+            MatchResult {
+                info: Some(mut info),
+                ty,
+            } => {
+                // We found a match, but then some error occurred, so let's propagate the error
+                info.pattern_id = pattern_id;
+                return Ok(Some(MatchResult {
+                    info: Some(info),
+                    ty,
+                }));
+            }
+            _ => {
+                // No match for this suffix
+                pattern_id += 1;
+            }
+        }
+    }
+
+    Ok(None)
 }

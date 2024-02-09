@@ -15,7 +15,10 @@ pub struct TestFailed {
     pub errors: Vec<CheckFailedError>,
 }
 impl TestFailed {
-    pub fn new(errors: Vec<CheckFailedError>, context: &MatchContext<'_, '_>) -> Self {
+    pub fn new<'input, 'context: 'input>(
+        errors: Vec<CheckFailedError>,
+        context: &MatchContext<'input, 'context>,
+    ) -> Self {
         let input_file = context.input_file();
         Self {
             test_from: TestInputType(context.match_file().name()),
@@ -109,7 +112,7 @@ pub enum CheckFailedError {
         #[source_code]
         input_file: litcheck::diagnostics::ArcSource,
         #[related]
-        pattern: Option<RelatedCheckError>,
+        labels: Vec<RelatedLabel>,
     },
     /// Indicates a match for an expected pattern, but the match is on the
     /// wrong line.
@@ -132,7 +135,7 @@ pub enum CheckFailedError {
         #[source_code]
         input_file: litcheck::diagnostics::ArcSource,
         #[related]
-        pattern: Option<RelatedCheckError>,
+        labels: Vec<RelatedLabel>,
         #[help]
         note: Option<String>,
     },
@@ -193,6 +196,17 @@ pub enum CheckFailedError {
         #[related]
         error: Option<RelatedError>,
     },
+    /// Indicates a match attempt failed for unknown reasons
+    #[error("error occurred while matching pattern")]
+    #[diagnostic()]
+    MatchNoneErrorNote {
+        #[label("when matching this pattern")]
+        span: SourceSpan,
+        #[source_code]
+        match_file: litcheck::diagnostics::ArcSource,
+        #[related]
+        error: Option<RelatedError>,
+    },
     /// Indicates a fuzzy match that serves as a suggestion for the next
     /// intended match for an expected pattern with too few or no good matches.
     #[error("an exact match was not found, but some similar matches were found, see notes")]
@@ -215,6 +229,19 @@ pub enum CheckFailedError {
         #[related]
         failed: Vec<CheckFailedError>,
     },
+}
+impl CheckFailedError {
+    /// Returns true if this error was produced in the context of a possibly-valid match
+    pub fn match_was_found(&self) -> bool {
+        matches!(
+            self,
+            Self::MatchFoundButExcluded { .. }
+                | Self::MatchFoundButWrongLine { .. }
+                | Self::MatchFoundButDiscarded { .. }
+                | Self::MatchFoundErrorNote { .. }
+                | Self::MatchFoundConstraintFailed { .. }
+        )
+    }
 }
 
 /// This is used to associated source spans from the match file

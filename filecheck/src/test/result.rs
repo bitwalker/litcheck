@@ -13,7 +13,7 @@ pub struct TestResult {
     error: TestFailed,
 }
 impl TestResult {
-    pub fn new(context: &MatchContext<'_, '_>) -> Self {
+    pub fn new<'input, 'context: 'input>(context: &MatchContext<'input, 'context>) -> Self {
         let error = TestFailed::new(vec![], context);
         Self {
             matches: vec![],
@@ -22,7 +22,10 @@ impl TestResult {
         }
     }
 
-    pub fn from_matches(matches: Matches<'_>, context: &MatchContext<'_, '_>) -> Self {
+    pub fn from_matches<'input, 'context: 'input>(
+        matches: Matches<'_>,
+        context: &MatchContext<'input, 'context>,
+    ) -> Self {
         let mut test_result = Self::new(context);
         test_result.append(matches);
         test_result
@@ -77,6 +80,10 @@ impl TestResult {
 
     pub fn errors(&self) -> &[CheckFailedError] {
         self.error.errors.as_slice()
+    }
+
+    pub fn last_match_end(&self) -> Option<usize> {
+        self.matches.iter().map(|mi| mi.span.end()).max()
     }
 
     pub fn into_result(mut self) -> Result<Vec<MatchInfo<'static>>, TestFailed> {

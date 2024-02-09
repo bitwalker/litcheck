@@ -53,10 +53,8 @@ pub enum MatchOp<'a> {
     },
     /// Pop a value off the operand stack and bind it to `name`
     Bind {
-        /// The span of the pattern from this bind is derived
-        span: SourceSpan,
         /// The name to bind
-        name: Symbol,
+        name: VariableName,
         /// If set, the value on the operand stack will be converted
         /// to a value of the given type, otherwise the match fails.
         ty: Option<ValueType>,

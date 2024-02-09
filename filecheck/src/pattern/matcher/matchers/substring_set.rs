@@ -43,6 +43,19 @@ impl<'a> SubstringSetMatcher<'a> {
         self.patterns.len()
     }
 
+    pub fn first_pattern(&self) -> Span<usize> {
+        self.patterns
+            .iter()
+            .enumerate()
+            .map(|(i, p)| Span::new(p.span(), i))
+            .min_by_key(|span| span.start())
+            .unwrap()
+    }
+
+    pub fn first_pattern_span(&self) -> SourceSpan {
+        self.first_pattern().span()
+    }
+
     /// Get a builder for configuring and building a new [SubstringSetMatcher]
     pub fn build() -> SubstringSetBuilder<'a> {
         SubstringSetBuilder::default()

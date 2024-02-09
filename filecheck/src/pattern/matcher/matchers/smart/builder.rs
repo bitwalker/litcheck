@@ -48,7 +48,7 @@ impl<'a, 'config> SmartMatcherBuilder<'a, 'config> {
                 span,
                 name,
                 pattern: Some(pattern),
-            } => self.capture(name.into_inner(), Span::new(span, pattern.into_inner())),
+            } => self.capture(name, Span::new(span, pattern.into_inner())),
             Match::Numeric {
                 span,
                 format,
@@ -68,20 +68,14 @@ impl<'a, 'config> SmartMatcherBuilder<'a, 'config> {
                 capture: Some(name),
                 expr: None,
                 ..
-            } => Ok(self.capture_numeric(span, name.into_inner(), format)),
+            } => Ok(self.capture_numeric(span, name, format)),
             Match::Numeric {
                 span,
                 format,
                 capture: Some(name),
                 constraint,
                 expr: Some(expr),
-            } => Ok(self.capture_numeric_with_constraint(
-                span,
-                name.into_inner(),
-                format,
-                constraint,
-                expr,
-            )),
+            } => Ok(self.capture_numeric_with_constraint(span, name, format, constraint, expr)),
         }
     }
 
@@ -179,8 +173,13 @@ impl<'a, 'config> SmartMatcherBuilder<'a, 'config> {
         self
     }
 
-    pub fn capture(&mut self, name: Symbol, source: Span<Cow<'a, str>>) -> DiagResult<&mut Self> {
-        let group_name = self.interner.resolve(name);
+    pub fn capture(
+        &mut self,
+        name: VariableName,
+        source: Span<Cow<'a, str>>,
+    ) -> DiagResult<&mut Self> {
+        let symbol = name.into_inner();
+        let group_name = self.interner.resolve(symbol);
         let span = source.span();
         let source = format!("(?P<{group_name}>{source})");
         let pattern = Regex::new(&source)
@@ -188,7 +187,7 @@ impl<'a, 'config> SmartMatcherBuilder<'a, 'config> {
         let groups = pattern.group_info();
         let pattern_id = self.register_pattern_group(span, groups)?;
 
-        let group_name = self.interner.resolve(name);
+        let group_name = self.interner.resolve(symbol);
         let group_id = groups
             .to_index(PatternID::ZERO, group_name)
             .unwrap_or_else(|| panic!("expected group for capture of '{group_name}'"));
@@ -196,7 +195,7 @@ impl<'a, 'config> SmartMatcherBuilder<'a, 'config> {
             pattern_id,
             group_id,
             info: Capture::Explicit(TypedVariable {
-                name: VariableName::User(Span::new(span, name)),
+                name,
                 ty: ValueType::String
             }),
         }];
@@ -206,11 +205,7 @@ impl<'a, 'config> SmartMatcherBuilder<'a, 'config> {
             pattern,
             captures,
         });
-        self.parts.push(MatchOp::Bind {
-            span,
-            name,
-            ty: None,
-        });
+        self.parts.push(MatchOp::Bind { name, ty: None });
 
         Ok(self)
     }
@@ -218,14 +213,14 @@ impl<'a, 'config> SmartMatcherBuilder<'a, 'config> {
     pub fn capture_numeric(
         &mut self,
         span: SourceSpan,
-        name: Symbol,
+        name: VariableName,
         format: NumberFormat,
     ) -> &mut Self {
         self.captures.push(ValueType::Number(format));
         let group = self.register_named_group(
             PatternID::ZERO,
             Capture::Explicit(TypedVariable {
-                name: VariableName::User(Span::new(span, name)),
+                name,
                 ty: ValueType::Number(format),
             }),
         );
@@ -235,7 +230,6 @@ impl<'a, 'config> SmartMatcherBuilder<'a, 'config> {
             capture: Some(group),
         });
         self.parts.push(MatchOp::Bind {
-            span,
             name,
             ty: Some(ValueType::Number(format)),
         });
@@ -245,7 +239,7 @@ impl<'a, 'config> SmartMatcherBuilder<'a, 'config> {
     pub fn capture_numeric_with_constraint(
         &mut self,
         span: SourceSpan,
-        name: Symbol,
+        name: VariableName,
         format: NumberFormat,
         constraint: Constraint,
         expr: Expr,
@@ -254,7 +248,7 @@ impl<'a, 'config> SmartMatcherBuilder<'a, 'config> {
         let group = self.register_named_group(
             PatternID::ZERO,
             Capture::Explicit(TypedVariable {
-                name: VariableName::User(Span::new(span, name)),
+                name,
                 ty: ValueType::Number(format),
             }),
         );
@@ -270,7 +264,6 @@ impl<'a, 'config> SmartMatcherBuilder<'a, 'config> {
             expr,
         });
         self.parts.push(MatchOp::Bind {
-            span,
             name,
             ty: Some(ValueType::Number(format)),
         });

@@ -1,4 +1,7 @@
-use regex_automata::{util::captures::Captures, PatternID};
+use regex_automata::{
+    util::{captures::Captures, syntax},
+    PatternID,
+};
 
 use crate::{
     ast::{Capture, RegexPattern},
@@ -30,6 +33,7 @@ impl<'a> RegexMatcher<'a> {
     pub fn new(pattern: RegexPattern<'a>, interner: &StringInterner) -> DiagResult<Self> {
         let span = pattern.span();
         let regex = Regex::builder()
+            .syntax(syntax::Config::new().multi_line(true))
             .build(pattern.as_ref())
             .map_err(|error| build_error_to_diagnostic(error, 1, |_| span))?;
 
@@ -67,6 +71,7 @@ impl<'a> RegexMatcher<'a> {
     pub fn new_nocapture(pattern: Span<Cow<'a, str>>) -> DiagResult<Self> {
         let span = pattern.span();
         let regex = Regex::builder()
+            .syntax(syntax::Config::new().multi_line(true))
             .build(pattern.as_ref())
             .map_err(|error| build_error_to_diagnostic(error, 1, |_| span))?;
 

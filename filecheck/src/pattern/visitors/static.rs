@@ -1,4 +1,4 @@
-use crate::common::*;
+use crate::{ast::Capture, common::*};
 
 /// This type is used to visit a set of N unordered patterns,
 /// such as those associated with CHECK-DAG/CHECK-NOT. It finds
@@ -8,7 +8,10 @@ use crate::common::*;
 /// Static patterns are those which meet one of the following criteria:
 ///
 /// * The patterns involved are of a single pattern type (e.g. regex)
-/// * The patterns do not contain any match blocks or substitutions
+/// * The patterns do not contain any match blocks or substitutions,
+/// however regex patterns may contain variable bindings, in the form
+/// of captures, which will be bound according to the capture metadata
+/// as matches are found.
 ///
 /// Currently, this visitor is used for evaluating sets of patterns
 /// which are either sets of literal strings, or sets of regexes.
@@ -75,6 +78,31 @@ impl<'a, S: PatternSetSearcher> StaticPatternSetVisitor<'a, S> {
                         .any(|span| span.contains(&range.start) || span.contains(&range.end))
                     {
                         continue;
+                    }
+
+                    // Bind any captured variables produced by this pattern
+                    {
+                        let scope = context.env_mut();
+                        for capture_info in info.captures.iter() {
+                            match capture_info.capture {
+                                Capture::Ignore(_) | Capture::All(_) => continue,
+                                Capture::Implicit(tv)
+                                | Capture::Explicit(tv)
+                                | Capture::Mapped { with: tv, .. } => match tv.name {
+                                    name @ (VariableName::User(_) | VariableName::Global(_)) => {
+                                        scope.insert(name, capture_info.value.clone());
+                                    }
+                                    VariableName::Pseudo(name) => {
+                                        let diag = Diag::new("unsupported variable binding")
+                                            .with_label(Label::new(name.range(), "occurs here"))
+                                            .with_help(
+                                                "pseudo-variables like LINE cannot be bound",
+                                            );
+                                        return Err(Report::new(diag));
+                                    }
+                                },
+                            }
+                        }
                     }
 
                     // Record that we've matched this pattern

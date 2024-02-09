@@ -1,6 +1,4 @@
-use std::collections::BTreeMap;
-
-use crate::{common::*, pattern::search::Input as SearcherInput};
+use crate::{ast::Capture, common::*, env::Bindings, pattern::search::Input as SearcherInput};
 
 /// This type is used to visit a set of N unordered patterns,
 /// such as those associated with CHECK-DAG/CHECK-NOT. It finds
@@ -180,6 +178,7 @@ impl<'a, S: PatternSetSearcher> DynamicPatternSetVisitor<'a, S> {
                         }
                         // Pattern matched, but not all patterns have been matched yet
                         ControlFlow::Continue(Some(info)) => {
+                            prefix_context.save();
                             matched.push(MatchResult::ok(info));
                             continue;
                         }
@@ -216,12 +215,11 @@ impl<'a, S: PatternSetSearcher> DynamicPatternSetVisitor<'a, S> {
                 .zip(self.errors[pattern_offset..].iter_mut())
                 .enumerate()
             {
-                let pattern_id = pattern_offset + index;
                 if let Some(error) = error.take() {
                     matched.push(MatchResult::failed(error));
                     continue;
                 }
-                if visited.iter().any(|id| id == &pattern_id) {
+                if visited.iter().any(|id| id == &index) {
                     continue;
                 }
                 let span = pattern.span();
@@ -285,6 +283,29 @@ impl<'a, S: PatternSetSearcher> DynamicPatternSetVisitor<'a, S> {
                     continue;
                 }
 
+                // Bind any captured variables produced by this pattern
+                {
+                    let scope = context.env_mut();
+                    for capture_info in info.captures.iter() {
+                        match capture_info.capture {
+                            Capture::Ignore(_) | Capture::All(_) => continue,
+                            Capture::Implicit(tv)
+                            | Capture::Explicit(tv)
+                            | Capture::Mapped { with: tv, .. } => match tv.name {
+                                name @ (VariableName::User(_) | VariableName::Global(_)) => {
+                                    scope.insert(name, capture_info.value.clone());
+                                }
+                                VariableName::Pseudo(name) => {
+                                    let diag = Diag::new("unsupported variable binding")
+                                        .with_label(Label::new(name.range(), "occurs here"))
+                                        .with_help("pseudo-variables like LINE cannot be bound");
+                                    return Err(Report::new(diag));
+                                }
+                            },
+                        }
+                    }
+                }
+
                 break Ok(ControlFlow::Continue(Span::new(info.span, info.pattern_id)));
             } else {
                 break Ok(ControlFlow::Break(None));
@@ -343,7 +364,7 @@ impl<'a, S: PatternSetSearcher> DynamicPatternSetVisitor<'a, S> {
 #[derive(Debug)]
 struct MatchState<'a> {
     info: MatchInfo<'a>,
-    bindings: BTreeMap<Symbol, Value<'a>>,
+    bindings: Bindings<Value<'a>>,
 }
 impl<'a> Eq for MatchState<'a> {}
 impl<'a> PartialEq for MatchState<'a> {

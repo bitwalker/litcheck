@@ -104,6 +104,14 @@ impl MatchType {
             Self::MatchFoundAndExpected | Self::MatchNoneAndExcluded
         )
     }
+
+    pub fn match_was_found(&self) -> bool {
+        match self {
+            Self::MatchFoundAndExpected => true,
+            Self::Failed(err) => err.match_was_found(),
+            Self::MatchNoneAndExcluded => false,
+        }
+    }
 }
 impl fmt::Display for MatchType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

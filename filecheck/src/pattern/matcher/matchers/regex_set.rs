@@ -173,23 +173,26 @@ impl<'a> RegexSetMatcher<'a> {
                     .start_kind(start_kind)
                     .starts_for_each_pattern(true),
             )
+            .syntax(syntax::Config::new().multi_line(true))
             .build_many(&patterns)
             .map_err(|error| {
                 regex::build_error_to_diagnostic(error, patterns.len(), |id| patterns[id].span())
             })?;
 
-        let has_captures = patterns.iter().any(|p| p.captures.is_empty());
+        let has_captures = patterns.iter().any(|p| !p.captures.is_empty());
         let (capturing_regex, captures) = if !has_captures {
             (CapturingRegex::None, Captures::empty(GroupInfo::empty()))
         } else {
             onepass::DFA::builder()
-                .syntax(syntax::Config::new().utf8(false))
+                .syntax(syntax::Config::new().utf8(false).multi_line(true))
                 .thompson(thompson::Config::new().utf8(false))
+                .configure(onepass::Config::new().starts_for_each_pattern(true))
                 .build_many(&patterns)
                 .map_or_else(
                     |_| {
                         let re = Regex::builder()
                             .configure(Regex::config().match_kind(MatchKind::All))
+                            .syntax(syntax::Config::new().multi_line(true))
                             .build_many(&patterns)
                             .unwrap();
                         let cache = re.create_cache();
@@ -254,6 +257,19 @@ impl<'a> RegexSetMatcher<'a> {
     pub fn patterns_len(&self) -> usize {
         self.patterns.len()
     }
+
+    pub fn first_pattern(&self) -> Span<usize> {
+        self.patterns
+            .iter()
+            .enumerate()
+            .map(|(i, p)| Span::new(p.span(), i))
+            .min_by_key(|span| span.start())
+            .unwrap()
+    }
+
+    pub fn first_pattern_span(&self) -> SourceSpan {
+        self.first_pattern().span()
+    }
 }
 impl<'a, A: Automaton + Clone> RegexSetMatcher<'a, A> {
     pub fn search<'input>(&self, input: Input<'input>) -> RegexSetSearcher<'a, 'input, A> {
@@ -270,7 +286,8 @@ impl<'a, A> fmt::Debug for RegexSetMatcher<'a, A> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("RegexSetMatcher")
             .field("patterns", &self.patterns)
-            .field("capture_types", &self.captures)
+            .field("captures", &self.captures)
+            .field("capture_types", &self.capture_types)
             .finish()
     }
 }
@@ -367,6 +384,9 @@ where
                     self.search.forward = false;
                     self.search.overlapping_reverse = OverlappingState::start();
                     continue;
+                } else {
+                    matched = None;
+                    break;
                 }
             } else if let Some((pattern_id, start)) = {
                 rev_dfa
@@ -392,6 +412,7 @@ where
         }
 
         if let Some(matched) = matched {
+            self.search.captures.clear();
             let pattern_id = matched.pattern();
             match self.capturing_regex {
                 CapturingRegex::None => {

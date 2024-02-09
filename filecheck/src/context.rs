@@ -47,8 +47,8 @@ pub trait Context<'input, 'context> {
 
     /// Get an [Input] that can be used to search from the current position to the
     /// end of the underlying buffer, ignoring the end bound of the cursor.
-    fn search_to_end(&self) -> Input<'input> {
-        self.cursor().search_to_end()
+    fn search_to_eof(&self) -> Input<'input> {
+        self.cursor().search_to_eof()
     }
 
     /// Get an [Input] that can be used to search the unvisited portion of the current block
@@ -106,7 +106,7 @@ impl<'guard, 'input, 'context> ContextGuard<'guard, 'input, 'context> {
 
     pub fn extend_locals<I>(&mut self, bindings: I)
     where
-        I: IntoIterator<Item = (Symbol, Value<'input>)>,
+        I: IntoIterator<Item = (VariableName, Value<'input>)>,
     {
         self.scope.extend(bindings);
     }

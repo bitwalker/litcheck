@@ -207,7 +207,7 @@ impl<'a> Cursor<'a> {
 
     /// Get an [Input] that can be used to search from the current position to the
     /// end of the underlying buffer, ignoring the end bound of the cursor.
-    pub fn search_to_end(&self) -> Input<'a> {
+    pub fn search_to_eof(&self) -> Input<'a> {
         Input::new(self.buffer, self.is_crlf()).span(self.block.start..)
     }
 

@@ -1,14 +1,12 @@
 mod dag;
 mod empty;
 mod next;
-mod not;
 mod plain;
 mod same;
 
 pub use self::dag::CheckDag;
 pub use self::empty::CheckEmpty;
 pub use self::next::CheckNext;
-pub use self::not::CheckNot;
 pub use self::plain::CheckPlain;
 pub use self::same::CheckSame;
 

@@ -60,15 +60,18 @@ impl<T> core::ops::RangeBounds<T> for Range<T> {
         Bound::Excluded(&self.end)
     }
 }
-impl<T: PartialOrd> Range<T> {
+impl<T: PartialOrd + fmt::Debug> Range<T> {
     pub fn new(start: T, end: T) -> Self {
         assert!(
             start <= end,
-            "invalid range: start must not be larger than end"
+            "invalid range: start {:?} must not be larger than end {:?}",
+            start,
+            end,
         );
         Self { start, end }
     }
-
+}
+impl<T: PartialOrd> Range<T> {
     #[inline]
     pub fn is_empty(&self) -> bool {
         !matches!(self.start.partial_cmp(&self.end), Some(Ordering::Less))

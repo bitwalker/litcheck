@@ -112,6 +112,16 @@ impl Label {
         }
     }
 
+    pub fn point<L>(at: usize, label: L) -> Self
+    where
+        StaticCow<str>: From<L>,
+    {
+        Self {
+            span: SourceSpan::from(at),
+            label: Some(Cow::from(label)),
+        }
+    }
+
     pub fn new<R, L>(range: R, label: L) -> Self
     where
         Range<usize>: From<R>,

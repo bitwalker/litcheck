@@ -45,6 +45,51 @@ impl<'a> MatchAll<'a> {
         }
     }
 
+    pub fn first_pattern(&self) -> Span<usize> {
+        match self {
+            Self::Literal(matcher) => matcher.first_pattern(),
+            Self::Regex(matcher) => matcher.first_pattern(),
+            Self::Smart {
+                ref searcher,
+                ref patterns,
+            } => {
+                let (prefix_span, prefix_id) = searcher.first_pattern().into_parts();
+                let (offset, end) = patterns[prefix_id]
+                    .iter()
+                    .enumerate()
+                    .map(|(offset, p)| (offset, p.span().end()))
+                    .min_by_key(|&(_, e)| e)
+                    .unwrap();
+                Span::new(
+                    SourceSpan::from(prefix_span.start()..end),
+                    prefix_id + offset,
+                )
+            }
+            Self::Prefix {
+                ref prefixes,
+                ref suffixes,
+            } => {
+                let (prefix_id, start) = prefixes
+                    .iter()
+                    .enumerate()
+                    .map(|(i, p)| (i, p.span().start()))
+                    .min_by_key(|&(_, s)| s)
+                    .unwrap();
+                let (offset, end) = suffixes[prefix_id]
+                    .iter()
+                    .enumerate()
+                    .map(|(offset, p)| (offset, p.span().end()))
+                    .min_by_key(|&(_, e)| e)
+                    .unwrap();
+                Span::new(SourceSpan::from(start..end), prefix_id + offset)
+            }
+        }
+    }
+
+    pub fn first_pattern_span(&self) -> SourceSpan {
+        self.first_pattern().span()
+    }
+
     pub fn compile(
         mut unordered: Vec<CheckLine<'a>>,
         interner: &mut StringInterner,

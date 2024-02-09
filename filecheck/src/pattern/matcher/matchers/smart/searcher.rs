@@ -148,17 +148,17 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
                         return Ok(result);
                     }
                 }
-                MatchOp::Bind { span, name, ty } => {
+                MatchOp::Bind { name, ty } => {
                     let value = self.stack.pop().expect("expected value on operand stack");
                     let value = match ty {
                         None | Some(ValueType::String) => value.into_value(),
                         Some(ValueType::Number(format)) => value
-                            .as_numeric(*span, *format, context)
+                            .as_numeric(name.span(), *format, context)
                             .map(Expr::Num)
                             .map(Value::Num)
                             .map_err(|mut err| {
                                 err.span = Some(self.span);
-                                err.specific_span = Some(*span);
+                                err.specific_span = Some(name.span());
                                 err
                             })?,
                     };

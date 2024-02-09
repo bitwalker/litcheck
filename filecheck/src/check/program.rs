@@ -1,35 +1,177 @@
+use std::collections::VecDeque;
+
 use crate::{
     ast::*,
     common::*,
     errors::InvalidCheckFileError,
-    pattern::matcher::{MatchAll, SimpleMatcher},
+    pattern::matcher::{MatchAll, MatchAny, SimpleMatcher},
     rules::*,
 };
 
-/// 1. Issue instructions to search for each CHECK-LABEL: directive (if present)
-/// and divide the input into blocks.
-/// 2. Move to the start of the first block
-/// 3. For each check directive, seek to the pattern, the test implicitly fails
-/// if the seek never matches. Unless the subsequent check is CHECK-SAME, we insert
-/// an Advance instruction after the seek, to ensure we move to the next line.
-/// 4. If there are multiple blocks, insert a SwitchToBlock at the end of each block
-/// that moves to the next block of the input.
+/// A tree of patterns to match on the same region of input.
+///
+/// Once all patterns are matched, the matches are checked
+/// to ensure that they appear in the correct order.
 #[derive(Debug)]
-pub enum CheckOp<'a> {
-    /// Like IndexOf, but also marks the start of a new block scope
-    ///
-    /// When evaluated, the checker will see if there are remaining blocks
-    /// in the program, and if so, find the index of the next BlockStart
-    BlockStart(SimpleMatcher<'a>),
-    ApplyRule(Box<dyn DynRule + 'a>),
-    ApplyRulePrecededBy(Box<dyn DynRule + 'a>, Box<dyn DynRule + 'a>),
-    RepeatRule(Box<dyn DynRule + 'a>, usize),
-    RepeatRulePrecededBy(Box<dyn DynRule + 'a>, usize, Box<dyn DynRule + 'a>),
+pub enum CheckTree<'a> {
+    /// The leaf node of this tree is a set of patterns to match as a group
+    Leaf(CheckGroup<'a>),
+    /// A two-way branch of the tree, rooted at a CHECK-NOT directive
+    Both {
+        /// Non-leaf nodes of the tree are rooted at a CHECK-NOT directive
+        root: MatchAny<'a>,
+        /// The patterns which must match before `root`
+        left: Box<CheckTree<'a>>,
+        /// The patterns which must match after `root`
+        right: Box<CheckTree<'a>>,
+    },
+    /// A single-branch node, rooted at a CHECK-NOT directive
+    Left {
+        /// Non-leaf nodes of the tree are rooted at a CHECK-NOT directive
+        root: MatchAny<'a>,
+        /// The patterns which must match before `root`
+        left: Box<CheckTree<'a>>,
+    },
+    /// A single-branch node, rooted at a CHECK-NOT directive
+    Right {
+        /// Non-leaf nodes of the tree are rooted at a CHECK-NOT directive
+        root: MatchAny<'a>,
+        /// The patterns which must match after `root`
+        right: Box<CheckTree<'a>>,
+    },
+}
+impl<'a> CheckTree<'a> {
+    pub fn leftmost(&self) -> Either<&CheckGroup<'a>, &MatchAny<'a>> {
+        match self {
+            Self::Leaf(ref group) => Left(group),
+            Self::Both { ref left, .. } | Self::Left { ref left, .. } => left.leftmost(),
+            Self::Right { ref root, .. } => Right(root),
+        }
+    }
+
+    pub fn rightmost(&self) -> Either<&CheckGroup<'a>, &MatchAny<'a>> {
+        match self {
+            Self::Leaf(ref group) => Left(group),
+            Self::Both { ref right, .. } | Self::Right { ref right, .. } => right.rightmost(),
+            Self::Left { ref root, .. } => Right(root),
+        }
+    }
 }
 
-#[derive(Default)]
+#[derive(Debug)]
+pub enum CheckGroup<'a> {
+    /// This group type occurs when there are no patterns
+    /// except for a CHECK-NOT in a logical group. This is
+    /// a special case, but is preferable to representing
+    /// this using [CheckTree]
+    Never(MatchAny<'a>),
+    /// A group of rules that can be matched in any order,
+    /// but must not overlap each other, and must not extend
+    /// past any matches in subsequent groups. This latter
+    /// property is verified lazily, after the true bounds
+    /// of the group are known.
+    Unordered(Box<CheckDag<'a>>),
+    /// This is a special group type, used to anchor the search for
+    /// a CHECK-DAG rule to a following CHECK. This is purely used to
+    /// improve the accuracy of diagnostics related to match errors
+    /// involving this specific rule transition.
+    Bounded {
+        /// The CHECK-DAG rule to match
+        left: Box<CheckDag<'a>>,
+        /// The CHECK group to set the end of the searchable
+        /// region for the CHECK-DAG rule
+        right: Box<CheckGroup<'a>>,
+    },
+    /// A group of rules that must be matched consecutively,
+    /// and must not overlap.
+    Ordered(Vec<Box<dyn DynRule + 'a>>),
+    /// An implicit group formed by a rule that is repeated N times
+    Repeated {
+        rule: Box<dyn DynRule + 'a>,
+        count: usize,
+    },
+    /// A tree of patterns to match depth-first
+    ///
+    /// This group type occurs in the presence of CHECK-NOT directives
+    Tree(Box<CheckTree<'a>>),
+}
+impl<'a> CheckGroup<'a> {
+    pub fn first_pattern_span(&self) -> SourceSpan {
+        match self {
+            Self::Never(match_any) => match_any.first_pattern_span(),
+            Self::Unordered(check_dag) => check_dag.first_pattern_span(),
+            Self::Bounded { left, .. } => left.first_pattern_span(),
+            Self::Ordered(rules) => rules
+                .iter()
+                .map(|rule| rule.span())
+                .min_by_key(|span| span.start())
+                .unwrap(),
+            Self::Repeated { rule, .. } => rule.span(),
+            Self::Tree(_tree) => todo!(),
+        }
+    }
+
+    pub fn span(&self) -> SourceSpan {
+        match self {
+            Self::Never(match_any) => match_any.span(),
+            Self::Unordered(check_dag) => check_dag.span(),
+            Self::Bounded { left, right } => {
+                let start = left.span().start();
+                let end = right.span().end();
+                SourceSpan::from(start..end)
+            }
+            Self::Ordered(rules) => {
+                let start = rules[0].span().start();
+                let end = rules.last().unwrap().span().end();
+                SourceSpan::from(start..end)
+            }
+            Self::Repeated { rule, .. } => rule.span(),
+            Self::Tree(ref tree) => {
+                let leftmost_start = match tree.leftmost() {
+                    Left(left) => left.span().start(),
+                    Right(left) => left.span().start(),
+                };
+                let rightmost_end = match tree.rightmost() {
+                    Left(right) => right.span().end(),
+                    Right(right) => right.span().end(),
+                };
+                SourceSpan::from(leftmost_start..rightmost_end)
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum CheckSection<'a> {
+    /// Rules contained between two CHECK-LABEL directives, or between a CHECK-LABEL
+    /// directive and the end of the input, whichever comes first.
+    ///
+    /// The bounds of a block are known before evaluating the rules it contains,
+    /// so all searches in a block are automatically bounded to that block.
+    Block {
+        /// The input span which defines the bounds for searches in the block
+        label: SimpleMatcher<'a>,
+        body: Vec<CheckGroup<'a>>,
+    },
+    /// Rules which are part of a single logical group
+    ///
+    /// Groups are formed in one of the following ways:
+    ///
+    /// * Rules following a CHECK or CHECK-COUNT directive belong
+    /// to the same logical group, until a CHECK-NOT, CHECK-DAG,
+    /// or the next CHECK/CHECK-COUNT/CHECK-LABEL
+    ///
+    /// * A set of CHECK-NOT rules is its own special type of group,
+    /// see the Exclude* variants for details.
+    ///
+    /// * A set of CHECK-DAG rules is its own special type of group,
+    /// see the Unordered* variants for details.
+    Group { body: CheckGroup<'a> },
+}
+
+#[derive(Default, Debug)]
 pub struct CheckProgram<'a> {
-    pub code: Vec<CheckOp<'a>>,
+    pub sections: Vec<CheckSection<'a>>,
 }
 impl<'a> CheckProgram<'a> {
     pub fn compile(
@@ -37,166 +179,273 @@ impl<'a> CheckProgram<'a> {
         _config: &Config,
         interner: &mut StringInterner,
     ) -> DiagResult<Self> {
-        // 1. Identify and split lines into blocks
-        // 2. For each block, compile the rules of that block
-        let mut program = Self::default();
-
-        let mut lines = check_file.into_lines();
+        let lines = check_file.into_lines();
         if lines.is_empty() {
             return Err(Report::from(InvalidCheckFileError::Empty));
         }
 
-        let mut blocks = vec![];
-        let mut num_lines = lines.len();
-        let mut ln = 0;
-        'outer: while ln < num_lines {
-            if lines[ln].kind() == Check::Label {
-                // Split the current block at `ln` if we aren't at the beginning
-                if ln > 0 {
-                    let mut split = lines.split_off(ln + 1);
-                    core::mem::swap(&mut lines, &mut split);
-                    blocks.push(split);
-                    ln = 0;
-                    num_lines = lines.len();
-                }
-                // Search until we find the next check-label, or end of file
-                let mut block_ln = ln + 1;
-                while block_ln < num_lines {
-                    if lines[block_ln].kind() == Check::Label {
-                        let mut split = lines.split_off(block_ln);
-                        core::mem::swap(&mut lines, &mut split);
-                        blocks.push(split);
-                        ln = 0;
-                        num_lines = lines.len();
-                        continue 'outer;
-                    }
-                    block_ln += 1;
-                }
-                // We reached end of file, so all blocks have been seen;
-                break;
-            }
-            // Skip over other directives
-            ln += 1;
-        }
-
-        // If we have not recorded any blocks, then the entire file
-        // is in a single logical block. Similarly, if there are lines
-        // that we have not yet added to a block, append them as a
-        // new block.
-        if blocks.is_empty() {
-            assert!(!lines.is_empty());
-            blocks.push(lines);
-        } else if !lines.is_empty() {
-            blocks.push(lines);
-        }
-
-        // Now, all blocks have been computed, so process each block
-        for block in blocks.into_iter().filter(|b| !b.is_empty()) {
-            program.compile_block(block, interner)?;
-        }
+        let mut program = Self::default();
+        program.compile_lines(lines, interner)?;
 
         Ok(program)
     }
 
-    fn compile_block(
+    /// Preprocess lines into blocks/groups
+    fn compile_lines(
         &mut self,
-        block: Vec<CheckLine<'a>>,
+        lines: Vec<CheckLine<'a>>,
         interner: &mut StringInterner,
     ) -> DiagResult<()> {
-        let mut lines = block.into_iter().peekable();
-
-        // Handle labeled block prologue
-        let is_labeled = lines
-            .peek()
-            .map(|line| matches!(line.kind(), Check::Label))
-            .unwrap_or(false);
-        if is_labeled {
-            let line = lines.next().unwrap();
-            assert_eq!(line.kind(), Check::Label);
-
-            let pattern = Pattern::compile_static(line.span, line.pattern, interner)?;
-            self.push(CheckOp::BlockStart(pattern));
-        }
-
-        // Emit the body of the block
-        let mut before: Option<Box<dyn DynRule + 'a>> = None;
-        while let Some(line) = lines.next() {
-            match line.kind() {
-                Check::Dag => {
-                    let mut dags = vec![line];
-                    loop {
-                        if matches!(lines.peek().map(|l| l.kind()), Some(Check::Dag)) {
-                            dags.push(lines.next().unwrap());
-                            continue;
-                        }
-                        break;
-                    }
-                    let rule = self.compile_rule_from_many(Check::Dag, dags, interner)?;
-                    if let Some(before) = before.take() {
-                        self.push(CheckOp::ApplyRulePrecededBy(rule, before));
-                    } else {
-                        self.push(CheckOp::ApplyRule(rule));
-                    }
-                }
-                Check::Not => {
-                    let mut nots = vec![line];
-                    loop {
-                        if matches!(lines.peek().map(|l| l.kind()), Some(Check::Not)) {
-                            nots.push(lines.next().unwrap());
-                            continue;
-                        }
-                        break;
-                    }
-                    let rule = self.compile_rule_from_many(Check::Not, nots, interner)?;
-                    assert!(before.replace(rule).is_none());
-                }
-                Check::Empty => {
-                    if self.code.is_empty() {
-                        return Err(Report::from(InvalidCheckFileError::InvalidFirstCheck {
-                            kind: Check::Empty,
-                            line: line.span(),
-                        }));
-                    }
-                    let rule = Box::new(CheckEmpty::new(line.span()));
-                    if let Some(before) = before.take() {
-                        self.push(CheckOp::ApplyRulePrecededBy(rule, before));
-                    } else {
-                        self.push(CheckOp::ApplyRule(rule));
-                    }
-                }
-                kind @ (Check::Plain | Check::Same | Check::Next) => {
-                    if kind != Check::Plain && self.code.is_empty() {
-                        return Err(Report::from(InvalidCheckFileError::InvalidFirstCheck {
-                            kind,
-                            line: line.span(),
-                        }));
-                    }
-                    let rule = self.compile_rule(line.ty, line.pattern, interner)?;
-                    if let Some(before) = before.take() {
-                        self.push(CheckOp::ApplyRulePrecededBy(rule, before));
-                    } else {
-                        self.push(CheckOp::ApplyRule(rule));
-                    }
-                }
-                Check::Count(n) => {
-                    let rule = self.compile_rule(line.ty, line.pattern, interner)?;
-                    if let Some(before) = before.take() {
-                        self.push(CheckOp::RepeatRulePrecededBy(rule, n, before));
-                    } else {
-                        self.push(CheckOp::RepeatRule(rule, n));
-                    }
-                }
-                Check::None | Check::Comment => continue,
+        // Divide up input lines into blocks
+        let mut iter = lines.into_iter().peekable();
+        let mut label = None;
+        let mut block = vec![];
+        let mut blocks: VecDeque<(Option<CheckLine<'a>>, Vec<CheckLine<'a>>)> = VecDeque::default();
+        while let Some(next) = iter.peek() {
+            match next.kind() {
                 Check::Label => {
-                    unreachable!("all check-label directives should have been stripped")
+                    if !block.is_empty() {
+                        blocks.push_back((label.take(), core::mem::take(&mut block)));
+                    }
+                    label = iter.next();
+                    while let Some(next) = iter.peek() {
+                        match next.kind() {
+                            Check::Label => {
+                                break;
+                            }
+                            _ => {
+                                block.push(iter.next().unwrap());
+                            }
+                        }
+                    }
                 }
+                Check::Empty | Check::Same | Check::Next if block.is_empty() && label.is_none() => {
+                    return Err(Report::from(InvalidCheckFileError::InvalidFirstCheck {
+                        kind: Check::Empty,
+                        line: next.span(),
+                    }));
+                }
+                Check::Plain
+                | Check::Count(_)
+                | Check::Next
+                | Check::Same
+                | Check::Not
+                | Check::Dag
+                | Check::Empty => {
+                    block.push(iter.next().unwrap());
+                }
+                _ => unreachable!(),
             }
         }
 
-        // If there are remaining unordered CHECK-(DAG|NOT) lines, emit
-        // an implicit check for those items to the end of the block/file
-        if let Some(before) = before.take() {
-            self.push(CheckOp::ApplyRule(before));
+        if !block.is_empty() {
+            blocks.push_back((label.take(), block));
+        }
+
+        self.compile_blocks(&mut blocks, interner)
+    }
+
+    /// Categorize and process blocks
+    fn compile_blocks(
+        &mut self,
+        blocks: &mut VecDeque<(Option<CheckLine<'a>>, Vec<CheckLine<'a>>)>,
+        interner: &mut StringInterner,
+    ) -> DiagResult<()> {
+        let mut groups = vec![];
+        let mut pending_tree = None;
+
+        while let Some((maybe_label, body)) = blocks.pop_front() {
+            let mut body = VecDeque::from(body);
+            while let Some(line) = body.pop_front() {
+                match line.kind() {
+                    Check::Not => {
+                        assert!(pending_tree.is_none());
+                        let mut nots = vec![line];
+                        while let Some(next) = body.pop_front() {
+                            if matches!(next.kind(), Check::Not) {
+                                nots.push(next);
+                            } else {
+                                body.push_front(next);
+                                break;
+                            }
+                        }
+                        let matcher = MatchAny::from(MatchAll::compile(nots, interner)?);
+                        if body.is_empty() {
+                            match groups.pop() {
+                                Some(CheckGroup::Tree(left)) => {
+                                    groups.push(CheckGroup::Tree(Box::new(CheckTree::Left {
+                                        root: matcher,
+                                        left,
+                                    })))
+                                }
+                                Some(left @ CheckGroup::Unordered(_)) => {
+                                    groups.push(CheckGroup::Tree(Box::new(CheckTree::Left {
+                                        root: matcher,
+                                        left: Box::new(CheckTree::Leaf(left)),
+                                    })))
+                                }
+                                Some(group) => {
+                                    groups.push(group);
+                                    groups.push(CheckGroup::Never(matcher));
+                                }
+                                None => groups.push(CheckGroup::Never(matcher)),
+                            }
+                        } else {
+                            match groups.pop() {
+                                Some(CheckGroup::Tree(left)) => {
+                                    pending_tree = Some((Some(left), matcher));
+                                }
+                                Some(left @ CheckGroup::Unordered(_)) => {
+                                    let left = Box::new(CheckTree::Leaf(left));
+                                    pending_tree = Some((Some(left), matcher));
+                                }
+                                Some(group) => {
+                                    groups.push(group);
+                                    pending_tree = Some((None, matcher));
+                                }
+                                None => {
+                                    pending_tree = Some((None, matcher));
+                                }
+                            }
+                        }
+                    }
+                    Check::Dag => {
+                        let mut dags = vec![line];
+                        while let Some(next) = body.pop_front() {
+                            if matches!(next.kind(), Check::Dag) {
+                                dags.push(next);
+                            } else {
+                                body.push_front(next);
+                                break;
+                            }
+                        }
+                        let check_dag = Box::new(CheckDag::new(MatchAll::compile(dags, interner)?));
+
+                        let group = if matches!(
+                            body.front().map(|line| line.kind()),
+                            Some(Check::Plain | Check::Count(_))
+                        ) {
+                            let line = body.pop_front().unwrap();
+                            let bounding_group = match line.kind() {
+                                Check::Plain => CheckGroup::Ordered(vec![self.compile_rule(
+                                    line.ty,
+                                    line.pattern,
+                                    interner,
+                                )?]),
+                                Check::Count(count) => CheckGroup::Repeated {
+                                    rule: self.compile_rule(line.ty, line.pattern, interner)?,
+                                    count,
+                                },
+                                _ => unsafe { std::hint::unreachable_unchecked() },
+                            };
+                            CheckGroup::Bounded {
+                                left: check_dag,
+                                right: Box::new(bounding_group),
+                            }
+                        } else {
+                            CheckGroup::Unordered(check_dag)
+                        };
+                        if let Some((maybe_left, root)) = pending_tree.take() {
+                            match maybe_left {
+                                Some(left) => {
+                                    groups.push(CheckGroup::Tree(Box::new(CheckTree::Both {
+                                        root,
+                                        left,
+                                        right: Box::new(CheckTree::Leaf(group)),
+                                    })));
+                                }
+                                None => {
+                                    groups.push(CheckGroup::Tree(Box::new(CheckTree::Right {
+                                        root,
+                                        right: Box::new(CheckTree::Leaf(group)),
+                                    })));
+                                }
+                            }
+                        } else {
+                            groups.push(group);
+                        }
+                    }
+                    Check::Count(count) => {
+                        let group = CheckGroup::Repeated {
+                            rule: self.compile_rule(line.ty, line.pattern, interner)?,
+                            count,
+                        };
+                        if let Some((maybe_left, root)) = pending_tree.take() {
+                            match maybe_left {
+                                Some(left) => {
+                                    groups.push(CheckGroup::Tree(Box::new(CheckTree::Both {
+                                        root,
+                                        left,
+                                        right: Box::new(CheckTree::Leaf(group)),
+                                    })));
+                                }
+                                None => {
+                                    groups.push(CheckGroup::Tree(Box::new(CheckTree::Right {
+                                        root,
+                                        right: Box::new(CheckTree::Leaf(group)),
+                                    })));
+                                }
+                            }
+                        } else {
+                            groups.push(group);
+                        }
+                    }
+                    _ => {
+                        body.push_front(line);
+                        let mut rules: Vec<Box<dyn DynRule + 'a>> = vec![];
+                        while let Some(next) = body.pop_front() {
+                            match next.kind() {
+                                Check::Not | Check::Dag | Check::Count(_) => {
+                                    body.push_front(next);
+                                    break;
+                                }
+                                Check::Empty => {
+                                    rules.push(Box::new(CheckEmpty::new(next.span())));
+                                }
+                                _ => {
+                                    rules.push(self.compile_rule(
+                                        next.ty,
+                                        next.pattern,
+                                        interner,
+                                    )?);
+                                }
+                            }
+                        }
+                        let group = CheckGroup::Ordered(rules);
+                        if let Some((maybe_left, root)) = pending_tree.take() {
+                            match maybe_left {
+                                Some(left) => {
+                                    groups.push(CheckGroup::Tree(Box::new(CheckTree::Both {
+                                        root,
+                                        left,
+                                        right: Box::new(CheckTree::Leaf(group)),
+                                    })));
+                                }
+                                None => {
+                                    groups.push(CheckGroup::Tree(Box::new(CheckTree::Right {
+                                        root,
+                                        right: Box::new(CheckTree::Leaf(group)),
+                                    })));
+                                }
+                            }
+                        } else {
+                            groups.push(group);
+                        }
+                    }
+                }
+            }
+            assert!(pending_tree.is_none());
+            if let Some(label) = maybe_label {
+                let label = Pattern::compile_static(label.span, label.pattern, interner)?;
+                self.sections.push(CheckSection::Block {
+                    label,
+                    body: core::mem::take(&mut groups),
+                });
+            } else {
+                for body in core::mem::take(&mut groups).into_iter() {
+                    self.sections.push(CheckSection::Group { body });
+                }
+            }
         }
 
         Ok(())
@@ -222,24 +471,5 @@ impl<'a> CheckProgram<'a> {
             Check::Next => Ok(Box::new(CheckNext::new(pattern.into_matcher_mut()))),
             kind => unreachable!("we should never be compiling a rule for {kind} here"),
         }
-    }
-
-    fn compile_rule_from_many(
-        &mut self,
-        kind: Check,
-        lines: Vec<CheckLine<'a>>,
-        interner: &mut StringInterner,
-    ) -> DiagResult<Box<dyn DynRule + 'a>> {
-        let match_all = MatchAll::compile(lines, interner)?;
-        match kind {
-            Check::Dag => Ok(Box::new(CheckDag::new(match_all))),
-            Check::Not => Ok(Box::new(CheckNot::new(match_all))),
-            _ => panic!("{kind} is not valid in this context"),
-        }
-    }
-
-    #[inline(always)]
-    fn push(&mut self, op: CheckOp<'a>) {
-        self.code.push(op);
     }
 }

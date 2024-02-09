@@ -14,6 +14,11 @@ impl<'a> CheckDag<'a> {
     pub fn new(patterns: MatchAll<'a>) -> Self {
         Self { patterns }
     }
+
+    #[inline]
+    pub fn first_pattern_span(&self) -> SourceSpan {
+        self.patterns.first_pattern_span()
+    }
 }
 impl<'check> Spanned for CheckDag<'check> {
     fn span(&self) -> SourceSpan {
@@ -72,6 +77,10 @@ impl<'check> Rule for CheckDag<'check> {
                         let mut visitor = DynamicPatternSetVisitor::new(&mut searcher, patterns);
                         visitor.try_match_all(&mut guard)
                     }
+                    searcher => panic!(
+                        "unsupported match_any configuration in match_all: {:?}",
+                        searcher
+                    ),
                 };
                 match result {
                     Ok(result) if result.is_ok() => {
@@ -86,7 +95,11 @@ impl<'check> Rule for CheckDag<'check> {
                 prefixes: ref _prefixes,
                 suffixes: ref _suffixes,
             } => {
-                todo!()
+                // TODO: Implement support for full breadth of possible pattern types
+                let diag = Diag::new("support for CHECK-DAG with this mixture of patterns is not yet supported")
+                    .with_label(Label::new(self.span(), "not supported"))
+                    .with_help("try to ensure all patterns begin with a literal or regular expression component");
+                Err(Report::from(diag))
             }
         }
     }
@@ -95,6 +108,8 @@ impl<'check> Rule for CheckDag<'check> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::check::CheckSection;
+    use std::assert_matches::assert_matches;
     use std::collections::VecDeque;
 
     /// This test ensures that the ordering of CHECK-DAG patterns is not
@@ -311,21 +326,23 @@ block3(v11):
         let match_file = context.match_file();
         let match_file_source = match_file.as_ref();
         let check_file = context.parse(match_file_source)?;
-        let program = context.compile(check_file)?;
+        let mut program = context.compile(check_file)?;
 
         let mut mctx = context.match_context();
-        let blocks = crate::check::analyze_blocks(&program, &mut mctx)?;
+        let mut blocks = crate::check::discover_blocks(&program, &mut mctx)?;
         assert_eq!(blocks.len(), 2);
 
-        let block = &blocks[0];
+        blocks.pop().unwrap();
+        let block = blocks.pop().unwrap();
         assert!(block.start.is_some());
-        assert!(block.code_start.is_some());
+        assert_eq!(block.sections, Some(Range::new(0, 1)));
         assert!(!block.range().is_empty());
 
         mctx.enter_block(block.range());
-        let ops = &program.code.as_slice()[block.code_start()..];
-        let mut test_result = TestResult::new(&mctx);
-        crate::check::check_block(ops, &mut test_result, &mut mctx);
+        assert_matches!(&program.sections[0], CheckSection::Block { .. });
+        program.sections.pop();
+
+        let test_result = crate::check::check_blocks([block], &program, &mut mctx);
         assert!(test_result.is_failed());
         if let [CheckFailedError::MatchNoneButExpected { .. }] = test_result.errors() {
             Ok(())
@@ -378,12 +395,12 @@ block3(v11):
         let program = context.compile(check_file)?;
 
         let mut mctx = context.match_context();
-        let blocks = crate::check::analyze_blocks(&program, &mut mctx)?;
+        let blocks = crate::check::discover_blocks(&program, &mut mctx)?;
         assert_eq!(blocks.len(), 2);
 
         let block = &blocks[0];
         assert!(block.start.is_some());
-        assert!(block.code_start.is_some());
+        assert_eq!(block.sections, Some(Range::new(0, 1)));
         assert!(!block.range().is_empty());
 
         mctx.enter_block(block.range());

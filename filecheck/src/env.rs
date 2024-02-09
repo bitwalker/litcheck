@@ -1,6 +1,96 @@
-use std::{collections::BTreeMap, rc::Rc};
+use std::fmt;
+
+use im_rc::OrdMap;
 
 use crate::common::*;
+
+pub struct Bindings<V: Clone> {
+    system: OrdMap<Symbol, V>,
+    bound: OrdMap<VariableName, V>,
+}
+impl<V: Clone + fmt::Debug> fmt::Debug for Bindings<V> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("Bindings")
+            .field("system", &self.system)
+            .field("bound", &self.bound)
+            .finish()
+    }
+}
+impl<V: Clone> Default for Bindings<V> {
+    fn default() -> Self {
+        Self {
+            system: OrdMap::new(),
+            bound: OrdMap::new(),
+        }
+    }
+}
+impl<V: Clone> Clone for Bindings<V> {
+    fn clone(&self) -> Self {
+        Self {
+            system: self.system.clone(),
+            bound: self.bound.clone(),
+        }
+    }
+}
+impl<V: Clone> IntoIterator for Bindings<V> {
+    type Item = (VariableName, V);
+    type IntoIter = im_rc::ordmap::ConsumingIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.bound.into_iter()
+    }
+}
+impl<V: Clone> Bindings<V> {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn new_with_system(system: OrdMap<Symbol, V>) -> Self {
+        Self {
+            system,
+            bound: OrdMap::new(),
+        }
+    }
+
+    pub fn get(&self, name: &VariableName) -> Option<&V> {
+        match name {
+            VariableName::User(_) => self.bound.get(name),
+            VariableName::Global(sym) => self.bound.get(name).or_else(|| self.system.get(sym)),
+            VariableName::Pseudo(_) => {
+                panic!("expected pseudo-variable to have been expanded by caller")
+            }
+        }
+    }
+
+    pub fn get_local(&self, name: Symbol) -> Option<&V> {
+        self.bound.get(&VariableName::User(Span::new(0..0, name)))
+    }
+
+    pub fn get_global(&self, name: Symbol) -> Option<&V> {
+        self.bound
+            .get(&VariableName::Global(Span::new(0..0, name)))
+            .or_else(|| self.system.get(&name))
+    }
+
+    pub fn insert(&mut self, name: VariableName, value: V) {
+        self.bound.insert(name, value);
+    }
+
+    pub fn extend<I>(&mut self, bindings: I)
+    where
+        I: IntoIterator<Item = (VariableName, V)>,
+    {
+        self.bound.extend(bindings);
+    }
+
+    pub fn merge(&mut self, other: Self) {
+        self.bound = other.bound.union(core::mem::take(&mut self.bound));
+    }
+
+    pub fn clear(&mut self) {
+        self.bound.clear();
+    }
+}
 
 /// A [LexicalScope] represents a scoped environment used for
 /// expression evaluation during pattern matching in CHECK rules.
@@ -16,7 +106,9 @@ use crate::common::*;
 /// for the set of mutable operations that can be performed.
 pub trait LexicalScope {
     /// The value type bound by variables
-    type Value;
+    type Value: Clone;
+
+    fn bindings(&self) -> &Bindings<Self::Value>;
 
     /// Get the value bound to `name`
     fn get(&self, name: &VariableName) -> Option<&Self::Value> {
@@ -30,10 +122,14 @@ pub trait LexicalScope {
     }
 
     /// Get the value locally bound to `symbol`
-    fn get_local(&self, symbol: &Symbol) -> Option<&Self::Value>;
+    fn get_local(&self, symbol: &Symbol) -> Option<&Self::Value> {
+        self.bindings().get_local(*symbol)
+    }
 
     /// Get the value globally bound to `symbol`
-    fn get_global(&self, symbol: &Symbol) -> Option<&Self::Value>;
+    fn get_global(&self, symbol: &Symbol) -> Option<&Self::Value> {
+        self.bindings().get_global(*symbol)
+    }
 
     /// Resolve an interned [Symbol] to its string value
     fn resolve(&self, symbol: Symbol) -> &str;
@@ -43,6 +139,11 @@ where
     S: LexicalScope + ?Sized,
 {
     type Value = <S as LexicalScope>::Value;
+
+    #[inline(always)]
+    fn bindings(&self) -> &Bindings<Self::Value> {
+        (**self).bindings()
+    }
 
     #[inline(always)]
     fn get(&self, name: &VariableName) -> Option<&Self::Value> {
@@ -69,6 +170,11 @@ where
     S: LexicalScope + ?Sized,
 {
     type Value = <S as LexicalScope>::Value;
+
+    #[inline(always)]
+    fn bindings(&self) -> &Bindings<Self::Value> {
+        (**self).bindings()
+    }
 
     #[inline(always)]
     fn get(&self, name: &VariableName) -> Option<&Self::Value> {
@@ -99,11 +205,11 @@ pub trait LexicalScopeMut: LexicalScope {
     /// Get a [Symbol] representing the interned string `value`
     fn symbolize(&mut self, value: &str) -> Symbol;
 
-    /// Insert a new local binding
-    fn insert(&mut self, symbol: Symbol, value: Self::Value);
+    /// Insert a new binding
+    fn insert(&mut self, name: VariableName, value: Self::Value);
 
     /// Take the local bindings of this scope, emptying the scope
-    fn take(&mut self) -> BTreeMap<Symbol, Self::Value>;
+    fn take(&mut self) -> Bindings<Self::Value>;
 
     /// Clear the local bindings of this scope
     fn clear(&mut self);
@@ -123,12 +229,12 @@ where
     }
 
     #[inline(always)]
-    fn insert(&mut self, symbol: Symbol, value: Self::Value) {
-        (**self).insert(symbol, value)
+    fn insert(&mut self, name: VariableName, value: Self::Value) {
+        (**self).insert(name, value)
     }
 
     #[inline(always)]
-    fn take(&mut self) -> BTreeMap<Symbol, Self::Value> {
+    fn take(&mut self) -> Bindings<Self::Value> {
         (**self).take()
     }
 
@@ -137,7 +243,7 @@ where
         (**self).clear();
     }
 }
-impl<V> dyn LexicalScopeMut<Value = V> {
+impl<V: Clone> dyn LexicalScopeMut<Value = V> {
     #[inline(always)]
     pub fn get_or_intern<S>(&mut self, value: S) -> Symbol
     where
@@ -148,7 +254,7 @@ impl<V> dyn LexicalScopeMut<Value = V> {
 
     pub fn extend<I>(&mut self, bindings: I)
     where
-        I: IntoIterator<Item = (Symbol, <Self as LexicalScope>::Value)>,
+        I: IntoIterator<Item = (VariableName, <Self as LexicalScope>::Value)>,
     {
         bindings.into_iter().for_each(move |(k, v)| {
             self.insert(k, v);
@@ -165,7 +271,7 @@ pub trait LexicalScopeExtend {
     /// Extend the local set of bindings from the given iterator.
     fn extend<I>(&mut self, bindings: I)
     where
-        I: IntoIterator<Item = (Symbol, Self::Value)>;
+        I: IntoIterator<Item = (VariableName, Self::Value)>;
 }
 impl<'a, S> LexicalScopeExtend for &'a mut S
 where
@@ -176,7 +282,7 @@ where
     #[inline]
     fn extend<I>(&mut self, bindings: I)
     where
-        I: IntoIterator<Item = (Symbol, Self::Value)>,
+        I: IntoIterator<Item = (VariableName, Self::Value)>,
     {
         (**self).extend(bindings);
     }
@@ -189,23 +295,16 @@ where
 pub struct Env<'input, 'context> {
     /// The current string interner
     interner: &'context mut StringInterner,
-    /// Global variables set on command line
-    globals: Rc<BTreeMap<Symbol, Value<'input>>>,
-    /// Local variables bound during matching
-    locals: BTreeMap<Symbol, Value<'input>>,
+    bindings: Bindings<Value<'input>>,
 }
 impl<'input, 'context: 'input> Env<'input, 'context> {
     /// Create a new environment with the given set of predefined global variables
     ///
     /// The local binding set will be empty.
-    pub fn new(
-        interner: &'context mut StringInterner,
-        globals: Rc<BTreeMap<Symbol, Value<'input>>>,
-    ) -> Self {
+    pub fn new(interner: &'context mut StringInterner) -> Self {
         Self {
             interner,
-            globals,
-            locals: Default::default(),
+            bindings: Bindings::new(),
         }
     }
 
@@ -214,22 +313,19 @@ impl<'input, 'context: 'input> Env<'input, 'context> {
         config: &'ctx Config,
         interner: &'ctx mut StringInterner,
     ) -> Env<'i, 'ctx> {
-        let globals = Rc::new(BTreeMap::<_, Value<'i>>::from_iter(
-            config.variables.iter().map(|v| {
-                (
-                    interner.get_or_intern(v.name.as_ref()),
-                    match v.value {
-                        Value::Undef => Value::Undef,
-                        Value::Str(ref s) => Value::Str(s.clone()),
-                        Value::Num(ref n) => Value::Num(n.clone()),
-                    },
-                )
-            }),
-        ));
+        let system = OrdMap::<_, Value<'i>>::from_iter(config.variables.iter().map(|v| {
+            (
+                interner.get_or_intern(v.name.as_ref()),
+                match v.value {
+                    Value::Undef => Value::Undef,
+                    Value::Str(ref s) => Value::Str(s.clone()),
+                    Value::Num(ref n) => Value::Num(n.clone()),
+                },
+            )
+        }));
         Env {
             interner,
-            globals,
-            locals: Default::default(),
+            bindings: Bindings::new_with_system(system),
         }
     }
 
@@ -240,12 +336,11 @@ impl<'input, 'context: 'input> Env<'input, 'context> {
     pub fn protect<'guard, 'this: 'guard>(
         &'this mut self,
     ) -> ScopeGuard<'guard, 'input, Value<'input>> {
-        let globals = self.globals.clone();
+        let bindings = self.bindings.clone();
         ScopeGuard {
             interner: self.interner,
-            parent: &mut self.locals,
-            globals,
-            locals: Default::default(),
+            parent: &mut self.bindings,
+            bindings,
             _marker: core::marker::PhantomData,
         }
     }
@@ -253,12 +348,21 @@ impl<'input, 'context: 'input> Env<'input, 'context> {
 impl<'input, 'context: 'input> LexicalScope for Env<'input, 'context> {
     type Value = Value<'input>;
 
+    #[inline(always)]
+    fn bindings(&self) -> &Bindings<Self::Value> {
+        &self.bindings
+    }
+
+    fn get(&self, name: &VariableName) -> Option<&Self::Value> {
+        self.bindings.get(name)
+    }
+
     fn get_local(&self, symbol: &Symbol) -> Option<&Self::Value> {
-        self.locals.get(symbol)
+        self.bindings.get_local(*symbol)
     }
 
     fn get_global(&self, symbol: &Symbol) -> Option<&Self::Value> {
-        self.globals.get(symbol)
+        self.bindings.get_global(*symbol)
     }
 
     fn resolve(&self, symbol: Symbol) -> &str {
@@ -275,16 +379,16 @@ impl<'input, 'context: 'input> LexicalScopeMut for Env<'input, 'context> {
         self.interner.get_or_intern(value)
     }
 
-    fn insert(&mut self, symbol: Symbol, value: Self::Value) {
-        self.locals.insert(symbol, value);
+    fn insert(&mut self, name: VariableName, value: Self::Value) {
+        self.bindings.insert(name, value);
     }
 
-    fn take(&mut self) -> BTreeMap<Symbol, Self::Value> {
-        core::mem::take(&mut self.locals)
+    fn take(&mut self) -> Bindings<Self::Value> {
+        core::mem::take(&mut self.bindings)
     }
 
     fn clear(&mut self) {
-        self.locals.clear();
+        self.bindings.clear();
     }
 }
 impl<'input, 'context: 'input> LexicalScopeExtend for Env<'input, 'context> {
@@ -292,9 +396,9 @@ impl<'input, 'context: 'input> LexicalScopeExtend for Env<'input, 'context> {
 
     fn extend<I>(&mut self, bindings: I)
     where
-        I: IntoIterator<Item = (Symbol, Self::Value)>,
+        I: IntoIterator<Item = (VariableName, Self::Value)>,
     {
-        self.locals.extend(bindings);
+        self.bindings.extend(bindings);
     }
 }
 
@@ -312,44 +416,47 @@ impl<'input, 'context: 'input> LexicalScopeExtend for Env<'input, 'context> {
 /// all of the changes made up to that point will be ignored. When
 /// a rule succeeds, the scope can be persisted explicitly to the
 /// outer scope.
-pub struct ScopeGuard<'a, 'input: 'a, V: 'input + 'a> {
+pub struct ScopeGuard<'a, 'input: 'a, V: Clone + 'input + 'a> {
     interner: &'a mut StringInterner,
-    parent: &'a mut BTreeMap<Symbol, V>,
-    globals: Rc<BTreeMap<Symbol, V>>,
-    locals: BTreeMap<Symbol, V>,
+    parent: &'a mut Bindings<V>,
+    bindings: Bindings<V>,
     _marker: core::marker::PhantomData<&'input ()>,
 }
 impl<'a, 'input> ScopeGuard<'a, 'input, Value<'input>> {
     /// Consume this [ScopeGuard] and persist any changes to the
     /// parent [LexicalScope].
     pub fn save(mut self) {
-        let locals = core::mem::take(&mut self.locals);
-        self.parent.extend(locals);
+        let bindings = core::mem::take(&mut self.bindings);
+        self.parent.merge(bindings);
     }
 
     pub fn protect<'guard, 'this: 'guard>(
         &'this mut self,
     ) -> ScopeGuard<'guard, 'input, Value<'input>> {
-        let globals = self.globals.clone();
+        let bindings = self.bindings.clone();
         ScopeGuard {
             interner: self.interner,
-            parent: &mut self.locals,
-            globals,
-            locals: Default::default(),
+            parent: &mut self.bindings,
+            bindings,
             _marker: core::marker::PhantomData,
         }
     }
 }
-impl<'a, 'input: 'a, V: 'input> LexicalScope for ScopeGuard<'a, 'input, V> {
+impl<'a, 'input: 'a, V: Clone + 'input> LexicalScope for ScopeGuard<'a, 'input, V> {
     type Value = V;
 
+    #[inline(always)]
+    fn bindings(&self) -> &Bindings<Self::Value> {
+        &self.bindings
+    }
+
     fn get_local(&self, symbol: &Symbol) -> Option<&Self::Value> {
-        self.locals.get(symbol).or_else(|| self.parent.get(symbol))
+        self.bindings.get_local(*symbol)
     }
 
     #[inline(always)]
     fn get_global(&self, symbol: &Symbol) -> Option<&Self::Value> {
-        self.globals.get(symbol)
+        self.bindings.get_global(*symbol)
     }
 
     #[inline(always)]
@@ -357,7 +464,7 @@ impl<'a, 'input: 'a, V: 'input> LexicalScope for ScopeGuard<'a, 'input, V> {
         self.interner.resolve(symbol)
     }
 }
-impl<'a, 'input: 'a, V: 'input> LexicalScopeMut for ScopeGuard<'a, 'input, V> {
+impl<'a, 'input: 'a, V: Clone + 'input> LexicalScopeMut for ScopeGuard<'a, 'input, V> {
     #[inline(always)]
     fn interner(&mut self) -> &mut StringInterner {
         self.interner
@@ -368,26 +475,26 @@ impl<'a, 'input: 'a, V: 'input> LexicalScopeMut for ScopeGuard<'a, 'input, V> {
         self.interner.get_or_intern(value)
     }
 
-    fn insert(&mut self, symbol: Symbol, value: Self::Value) {
-        self.locals.insert(symbol, value);
+    fn insert(&mut self, name: VariableName, value: Self::Value) {
+        self.bindings.insert(name, value);
     }
 
     #[inline]
-    fn take(&mut self) -> BTreeMap<Symbol, Self::Value> {
-        core::mem::take(&mut self.locals)
+    fn take(&mut self) -> Bindings<Self::Value> {
+        core::mem::replace(&mut self.bindings, self.parent.clone())
     }
 
     fn clear(&mut self) {
-        self.locals.clear();
+        self.bindings.clear();
     }
 }
-impl<'a, 'input: 'a, V: 'input> LexicalScopeExtend for ScopeGuard<'a, 'input, V> {
+impl<'a, 'input: 'a, V: Clone + 'input> LexicalScopeExtend for ScopeGuard<'a, 'input, V> {
     type Value = V;
 
     fn extend<I>(&mut self, bindings: I)
     where
-        I: IntoIterator<Item = (Symbol, Self::Value)>,
+        I: IntoIterator<Item = (VariableName, Self::Value)>,
     {
-        self.locals.extend(bindings);
+        self.bindings.extend(bindings);
     }
 }
