@@ -107,7 +107,10 @@ impl<'a> CheckGroup<'a> {
                 .min_by_key(|span| span.start())
                 .unwrap(),
             Self::Repeated { rule, .. } => rule.span(),
-            Self::Tree(_tree) => todo!(),
+            Self::Tree(tree) => match tree.leftmost() {
+                Left(group) => group.first_pattern_span(),
+                Right(match_any) => match_any.first_pattern_span(),
+            },
         }
     }
 

@@ -180,7 +180,7 @@ fn integration_test_check_dag_xfail_x3() -> DiagResult<()> {
     assert_matches!(&result, Err(_));
 
     let error = result.unwrap_err().downcast::<TestFailed>().unwrap();
-    if let [CheckFailedError::MatchFoundButDiscarded { .. }] = error.errors() {
+    if let [CheckFailedError::MatchNoneButExpected { .. }] = error.errors() {
         Ok(())
     } else {
         Err(error.into())

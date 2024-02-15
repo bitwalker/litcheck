@@ -5,6 +5,17 @@ in the LLVM project and elsewhere, as a single multi-call binary containing the
 functionality of both while keeping them largely compatible with the exiting
 tools via symlinks, if you so require.
 
+> [!WARNING]
+> This is a work-in-progress/experiment, it doesn't necessarily support
+> the full lit/FileCheck feature set with the exact semantics of LLVM lit/FileCheck.
+
+> [!NOTE] 
+> This project is a playground for experimenting with various abstractions
+> in the face of zero-copy (or minimal copy) processing of input. As a result, the code 
+> (namely in the FileCheck impl) has some duplication and some oddities in its structure 
+> that will be eventually factored out as I make changes. Don't look at the code as a 
+> model architecture for this kind of tooling, at least at this point in time.
+
 ## Rationale
 
 Why?
@@ -24,12 +35,10 @@ as the backend.
 The initial implementation is done, albeit with a few missing items I will be
 checking off in the near future, or which you should be aware of:
 
-* Support for `CHECK-DAG`/`CHECK-NOT` is all but done, however the rules are not
-finished, so `filecheck` will panic if it encounters these directives
-* Very little testing of various parts of the system, so bugs are numerous,
-but I'm slowly adding more tests, and will eventually try to replicate the main
-original FileCheck/lit test suite(s), to the degree it makes sense.
-* I added support for a variety of target features and things used by LLVM,
+* I have imported the LLVM test suite for FileCheck, but it is not yet being
+run in CI, and several of the tests are not yet passing as I finish implementing some
+of the more subtle details.
+* (lit) I added support for a variety of target features and things used by LLVM,
 but what I chose to support and didn't overall isn't super consistent, mostly
 whether or not I would find it useful. If you are hoping for 100% compatiblity,
 this is not that.
@@ -79,9 +88,10 @@ That's all there is to it!
 
 ## Quickstart
 
-NOTE: See upstream [FileCheck](https://llvm.org/docs/CommandGuide/FileCheck.html) and [lit](https://www.llvm.org/docs/CommandGuide/lit.html)
-documentation for details on how to write tests with, and configure, these tools. My own documentation is forthcoming, but this
-will get you by in the near term.
+> [!NOTE] 
+> See upstream [FileCheck](https://llvm.org/docs/CommandGuide/FileCheck.html) and [lit](https://www.llvm.org/docs/CommandGuide/lit.html)
+> documentation for details on how to write tests with, and configure, these tools. My own documentation is forthcoming, but this
+> will get you by in the near term.
 
 
 1. Create a `lit` test suite:

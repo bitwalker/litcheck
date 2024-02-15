@@ -10,6 +10,21 @@ pub trait PatternIdentifier: Sized + Copy + PartialEq + Eq + fmt::Debug {
     fn as_usize(&self) -> usize;
 }
 
+impl PatternIdentifier for usize {
+    #[inline(always)]
+    fn new(id: usize) -> Result<Self, InvalidPatternIdentifier> {
+        Ok(id)
+    }
+    #[inline(always)]
+    fn new_unchecked(id: usize) -> Self {
+        id
+    }
+    #[inline(always)]
+    fn as_usize(&self) -> usize {
+        *self
+    }
+}
+
 impl PatternIdentifier for regex_automata::PatternID {
     fn new(id: usize) -> Result<Self, InvalidPatternIdentifier> {
         regex_automata::PatternID::new(id).map_err(|_| InvalidPatternIdentifier)

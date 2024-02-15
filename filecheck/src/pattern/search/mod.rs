@@ -1,9 +1,11 @@
 mod aho_corasick;
 mod r#default;
+mod pattern_set;
 mod regex;
 mod substring_set;
 
 pub use self::aho_corasick::AhoCorasickSearcher;
+pub use self::pattern_set::PatternSetSearcher;
 pub use self::r#default::DefaultSearcher;
 pub use self::regex::RegexSearcher;
 pub use self::substring_set::SubstringSetSearcher;
@@ -46,7 +48,7 @@ pub trait Searcher {
         F: FnMut(&Self::Input) -> Result<Option<Self::Match>, Self::MatchError>;
 }
 
-pub trait PatternSetSearcher {
+pub trait PatternSearcher<'input> {
     type Input: Input;
     type PatternID: PatternIdentifier;
 
@@ -55,10 +57,7 @@ pub trait PatternSetSearcher {
     fn set_last_match_end(&mut self, end: usize);
     fn patterns_len(&self) -> usize;
     fn pattern_span(&self, id: Self::PatternID) -> SourceSpan;
-    fn try_match_next<'input, 'context, C>(
-        &mut self,
-        context: &C,
-    ) -> DiagResult<MatchResult<'input>>
+    fn try_match_next<'context, C>(&mut self, context: &mut C) -> DiagResult<MatchResult<'input>>
     where
         C: Context<'input, 'context> + ?Sized;
 }
@@ -83,5 +82,32 @@ pub trait Input: fmt::Debug {
         crate::common::Input::new(self.buffer(), false)
             .anchored(self.anchored())
             .span(self.range())
+    }
+}
+
+impl<'a> Input for crate::common::Input<'a> {
+    #[inline(always)]
+    fn buffer(&self) -> &[u8] {
+        crate::common::Input::buffer(self)
+    }
+    #[inline(always)]
+    fn anchored(&self) -> bool {
+        self.is_anchored()
+    }
+    #[inline(always)]
+    fn range(&self) -> Range<usize> {
+        self.bounds()
+    }
+    #[inline(always)]
+    fn start(&self) -> usize {
+        crate::common::Input::start(self)
+    }
+    #[inline(always)]
+    fn set_start(&mut self, start: usize) {
+        crate::common::Input::set_start(self, start)
+    }
+    #[inline(always)]
+    fn set_range(&mut self, range: Range<usize>) {
+        crate::common::Input::set_span(self, range)
     }
 }

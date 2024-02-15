@@ -16,7 +16,7 @@ use crate::{ast::Capture, common::*};
 /// Currently, this visitor is used for evaluating sets of patterns
 /// which are either sets of literal strings, or sets of regexes.
 ///
-/// This visitor requires a [PatternSetSearcher] that will be used to
+/// This visitor requires a [PatternSearcher] that will be used to
 /// find matches for the set of patterns we wish to visit.
 ///
 /// Using that searcher, this visitor will find the next longest match
@@ -24,12 +24,12 @@ use crate::{ast::Capture, common::*};
 /// matched again. The search continues until all patterns are matched,
 /// or we run out of input to search. Either way, all match results
 /// are returned at the end for use in diagnostics.
-pub struct StaticPatternSetVisitor<'a, S: PatternSetSearcher> {
+pub struct StaticPatternSetVisitor<'a, S> {
     searcher: &'a mut S,
     errors: Vec<Option<CheckFailedError>>,
 }
 #[cfg(test)]
-impl<'a, S: PatternSetSearcher + fmt::Debug> fmt::Debug for StaticPatternSetVisitor<'a, S> {
+impl<'a, S: fmt::Debug> fmt::Debug for StaticPatternSetVisitor<'a, S> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> fmt::Result {
         f.debug_struct("StaticPatternSetVisitor")
             .field("searcher", &self.searcher)
@@ -37,8 +37,8 @@ impl<'a, S: PatternSetSearcher + fmt::Debug> fmt::Debug for StaticPatternSetVisi
             .finish()
     }
 }
-impl<'a, S: PatternSetSearcher> StaticPatternSetVisitor<'a, S> {
-    /// Create a new visitor for the given [PatternSetSearcher]
+impl<'a, 'input, S: PatternSearcher<'input>> StaticPatternSetVisitor<'a, S> {
+    /// Create a new visitor for the given [PatternSearcher]
     pub fn new(searcher: &'a mut S) -> Self {
         let num_patterns = searcher.patterns_len();
 
@@ -47,7 +47,7 @@ impl<'a, S: PatternSetSearcher> StaticPatternSetVisitor<'a, S> {
         Self { searcher, errors }
     }
 
-    pub fn try_match_all<'input>(
+    pub fn try_match_all(
         &mut self,
         context: &mut ContextGuard<'_, 'input, '_>,
     ) -> DiagResult<Matches<'input>> {
@@ -141,7 +141,7 @@ impl<'a, S: PatternSetSearcher> StaticPatternSetVisitor<'a, S> {
                                 continue;
                             }
                             let span = self.searcher.pattern_span(
-                                <S as PatternSetSearcher>::PatternID::new_unchecked(pattern_id),
+                                <S as PatternSearcher>::PatternID::new_unchecked(pattern_id),
                             );
                             matches.push(MatchResult::failed(
                                 CheckFailedError::MatchNoneButExpected {

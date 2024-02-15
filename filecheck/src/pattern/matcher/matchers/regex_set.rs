@@ -307,28 +307,15 @@ impl<'a, A: Automaton + Clone> MatcherMut for RegexSetMatcher<'a, A> {
     where
         C: Context<'input, 'context> + ?Sized,
     {
-        self.try_match(input, context)
-    }
-}
-impl<'a, A: Automaton + Clone> Matcher for RegexSetMatcher<'a, A> {
-    fn try_match<'input, 'context, C>(
-        &self,
-        input: Input<'input>,
-        context: &C,
-    ) -> DiagResult<MatchResult<'input>>
-    where
-        C: Context<'input, 'context> + ?Sized,
-    {
-        let mut searcher = RegexSetSearcher::from_matcher_ref(self, input);
+        let mut searcher = self.search(input);
         searcher.try_match_next(context)
     }
 }
-
-impl<'a, 'b, A> PatternSetSearcher for RegexSetSearcher<'a, 'b, A>
+impl<'a, 'input, A> PatternSearcher<'input> for RegexSetSearcher<'a, 'input, A>
 where
     A: Automaton,
 {
-    type Input = regex_automata::Input<'b>;
+    type Input = regex_automata::Input<'input>;
     type PatternID = PatternID;
 
     fn input(&self) -> &Self::Input {
@@ -347,10 +334,7 @@ where
     fn pattern_span(&self, id: Self::PatternID) -> SourceSpan {
         self.patterns[id.as_usize()].span()
     }
-    fn try_match_next<'input, 'context, C>(
-        &mut self,
-        context: &C,
-    ) -> DiagResult<MatchResult<'input>>
+    fn try_match_next<'context, C>(&mut self, context: &mut C) -> DiagResult<MatchResult<'input>>
     where
         C: Context<'input, 'context> + ?Sized,
     {

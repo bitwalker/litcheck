@@ -10,7 +10,10 @@ use self::searcher::SmartSearcher;
 
 use crate::common::*;
 
-use regex_automata::util::captures::{Captures, GroupInfo};
+use regex_automata::util::{
+    captures::{Captures, GroupInfo},
+    primitives::NonMaxUsize,
+};
 
 /// This is a combination, jack-of-all trades matcher, which is
 /// executes a set of smaller matches to form a large one. Some
@@ -55,10 +58,10 @@ impl<'a> SmartMatcher<'a> {
     fn new(
         span: SourceSpan,
         parts: Vec<MatchOp<'a>>,
-        groups: Vec<Vec<Option<Cow<'a, str>>>>,
+        group_info: Vec<Vec<Option<Cow<'a, str>>>>,
     ) -> Self {
         let group_info =
-            GroupInfo::new(groups).expect("expected capturing groups to meet all requirements");
+            GroupInfo::new(group_info).expect("expected capturing groups to meet all requirements");
         Self {
             span,
             parts,
@@ -86,12 +89,11 @@ impl<'a> MatcherMut for SmartMatcher<'a> {
     where
         C: Context<'input, 'context> + ?Sized,
     {
-        let mut captures = Captures::matches(self.group_info().clone());
+        let mut captures = Captures::all(self.group_info().clone());
         let searcher = SmartSearcher::new(self.span, input, &mut captures);
         searcher.search_captures(&self.parts, context)?;
         if let Some(matched) = captures.get_match() {
-            // TODO: Add captures to result
-            Ok(MatchResult::ok(MatchInfo::new(matched.range(), self.span)))
+            extract_captures_from_match(self.span, matched, &captures, &self.parts, context)
         } else {
             Ok(MatchResult::failed(
                 CheckFailedError::MatchNoneButExpected {
@@ -101,5 +103,126 @@ impl<'a> MatcherMut for SmartMatcher<'a> {
                 },
             ))
         }
+    }
+}
+
+fn extract_captures_from_match<'a, 'input, 'context, C>(
+    pattern_span: SourceSpan,
+    matched: regex_automata::Match,
+    captures: &Captures,
+    patterns: &[MatchOp<'a>],
+    context: &C,
+) -> DiagResult<MatchResult<'input>>
+where
+    C: Context<'input, 'context> + ?Sized,
+{
+    use crate::ast::Capture;
+
+    let overall_span = SourceSpan::from(matched.range());
+    let mut capture_infos = Vec::with_capacity(captures.group_len());
+    let input = context.search();
+    let slots = captures.slots();
+    for op in patterns {
+        match op {
+            MatchOp::Regex {
+                ref source,
+                captures: group_captures,
+                ..
+            } => {
+                let pattern_span = source.span();
+                for group in group_captures.iter() {
+                    if matches!(group.info, Capture::Ignore(_)) {
+                        continue;
+                    }
+                    match capture_group_to_capture_info(
+                        overall_span,
+                        pattern_span,
+                        group,
+                        captures,
+                        slots,
+                        context,
+                        &input,
+                    ) {
+                        Ok(None) => continue,
+                        Ok(Some(capture_info)) => {
+                            capture_infos.push(capture_info);
+                        }
+                        Err(error) => return Ok(MatchResult::failed(error)),
+                    }
+                }
+            }
+            MatchOp::Numeric {
+                span,
+                capture: Some(ref group),
+                ..
+            } => {
+                match capture_group_to_capture_info(
+                    overall_span,
+                    *span,
+                    group,
+                    captures,
+                    slots,
+                    context,
+                    &input,
+                ) {
+                    Ok(None) => continue,
+                    Ok(Some(capture_info)) => {
+                        capture_infos.push(capture_info);
+                    }
+                    Err(error) => return Ok(MatchResult::failed(error)),
+                }
+            }
+            MatchOp::Substitution { .. }
+            | MatchOp::Bind { .. }
+            | MatchOp::Drop
+            | MatchOp::Constraint { .. }
+            | MatchOp::Literal(_)
+            | MatchOp::Substring(_)
+            | MatchOp::Numeric { .. } => (),
+        }
+    }
+    Ok(MatchResult::ok(MatchInfo {
+        span: overall_span,
+        pattern_span,
+        pattern_id: 0,
+        captures: capture_infos,
+    }))
+}
+
+fn capture_group_to_capture_info<'input, 'context, C>(
+    overall_span: SourceSpan,
+    pattern_span: SourceSpan,
+    group: &CaptureGroup,
+    captures: &Captures,
+    slots: &[Option<NonMaxUsize>],
+    context: &C,
+    input: &Input<'input>,
+) -> Result<Option<CaptureInfo<'input>>, CheckFailedError>
+where
+    C: Context<'input, 'context> + ?Sized,
+{
+    let group_info = captures.group_info();
+
+    let (a, b) = group_info
+        .slots(group.pattern_id, group.group_id)
+        .expect("invalid capture group");
+    if let Some(start) = slots[a].map(|offset| offset.get()) {
+        let end = slots[b].expect("expected end offset to be present").get();
+        let captured = input.as_str(start..end);
+        let capture_span = SourceSpan::from(start..end);
+
+        super::regex::try_convert_capture_to_type(
+            group.pattern_id,
+            group.group_id,
+            pattern_span,
+            overall_span,
+            Span::new(capture_span, captured),
+            group.info,
+            captures,
+            context,
+        )
+        .map(Some)
+    } else {
+        Ok(None)
     }
 }

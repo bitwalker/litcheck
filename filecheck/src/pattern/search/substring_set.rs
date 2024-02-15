@@ -87,8 +87,10 @@ impl<'a, 'patterns, 'input> Spanned for SubstringSetSearcher<'a, 'patterns, 'inp
         SourceSpan::from(start..end)
     }
 }
-impl<'a, 'patterns, 'b> PatternSetSearcher for SubstringSetSearcher<'a, 'patterns, 'b> {
-    type Input = aho_corasick::Input<'b>;
+impl<'a, 'patterns, 'input> PatternSearcher<'input>
+    for SubstringSetSearcher<'a, 'patterns, 'input>
+{
+    type Input = aho_corasick::Input<'input>;
     type PatternID = aho_corasick::PatternID;
 
     fn input(&self) -> &Self::Input {
@@ -106,10 +108,7 @@ impl<'a, 'patterns, 'b> PatternSetSearcher for SubstringSetSearcher<'a, 'pattern
     fn pattern_span(&self, id: Self::PatternID) -> SourceSpan {
         SubstringSetSearcher::pattern_span(self, id.as_usize())
     }
-    fn try_match_next<'input, 'context, C>(
-        &mut self,
-        context: &C,
-    ) -> DiagResult<MatchResult<'input>>
+    fn try_match_next<'context, C>(&mut self, context: &mut C) -> DiagResult<MatchResult<'input>>
     where
         C: Context<'input, 'context> + ?Sized,
     {

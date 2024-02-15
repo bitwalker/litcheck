@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use regex_automata::{util::captures::GroupInfo, PatternID};
 
 use crate::{
@@ -15,9 +13,7 @@ pub struct SmartMatcherBuilder<'a, 'config> {
     span: SourceSpan,
     interner: &'config mut StringInterner,
     parts: Vec<MatchOp<'a>>,
-    group_name_ids: Vec<BTreeMap<Symbol, usize>>,
-    pattern_groups: Vec<Vec<Option<Cow<'a, str>>>>,
-    captures: Vec<ValueType>,
+    raw_group_info: Vec<Vec<Option<Cow<'a, str>>>>,
 }
 impl<'a, 'config> SmartMatcherBuilder<'a, 'config> {
     pub fn new(span: SourceSpan, interner: &'config mut StringInterner) -> Self {
@@ -25,14 +21,12 @@ impl<'a, 'config> SmartMatcherBuilder<'a, 'config> {
             span,
             interner,
             parts: vec![],
-            group_name_ids: vec![],
-            pattern_groups: vec![vec![None]],
-            captures: vec![],
+            raw_group_info: vec![vec![None]],
         }
     }
 
     pub fn build(self) -> SmartMatcher<'a> {
-        SmartMatcher::new(self.span, self.parts, self.pattern_groups)
+        SmartMatcher::new(self.span, self.parts, self.raw_group_info)
     }
 
     pub fn lower_match(&mut self, part: crate::ast::Match<'a>) -> DiagResult<&mut Self> {
@@ -80,6 +74,7 @@ impl<'a, 'config> SmartMatcherBuilder<'a, 'config> {
     }
 
     pub fn literal(&mut self, pattern: Span<Cow<'a, str>>) -> DiagResult<&mut Self> {
+        self.register_empty_pattern_group();
         self.parts.push(MatchOp::Literal(pattern));
         Ok(self)
     }
@@ -93,7 +88,7 @@ impl<'a, 'config> SmartMatcherBuilder<'a, 'config> {
             .map_err(|error| regex::build_error_to_diagnostic(error, 1, |_| source.span()))?;
 
         let groups = pattern.group_info();
-        let pattern_id = self.register_pattern_group(source.span(), groups)?;
+        let pattern_id = self.register_pattern_group(groups);
         let mut captures = SmallVec::<[CaptureGroup; 1]>::default();
         for capture in source.captures.into_iter() {
             if let Capture::Ignore(_) = capture {
@@ -128,6 +123,7 @@ impl<'a, 'config> SmartMatcherBuilder<'a, 'config> {
     }
 
     pub fn numeric(&mut self, span: SourceSpan, format: NumberFormat) -> &mut Self {
+        self.register_empty_pattern_group();
         self.parts.push(MatchOp::Numeric {
             span,
             format,
@@ -143,11 +139,9 @@ impl<'a, 'config> SmartMatcherBuilder<'a, 'config> {
         constraint: Constraint,
         expr: Expr,
     ) -> &mut Self {
-        self.captures.push(ValueType::Number(format));
-        let group = self.register_unnamed_group(
-            PatternID::ZERO,
-            Capture::All(Span::new(span, ValueType::Number(format))),
-        );
+        let pattern_id = self.register_empty_pattern_group();
+        let group =
+            self.register_unnamed_group(pattern_id, Span::new(span, ValueType::Number(format)));
         self.parts.push(MatchOp::Numeric {
             span,
             format,
@@ -163,11 +157,13 @@ impl<'a, 'config> SmartMatcherBuilder<'a, 'config> {
     }
 
     pub fn substitution(&mut self, expr: Expr) -> &mut Self {
+        self.register_empty_pattern_group();
         self.parts.push(MatchOp::Substitution { expr, ty: None });
         self
     }
 
     pub fn substitution_with_format(&mut self, expr: Expr, ty: ValueType) -> &mut Self {
+        self.register_empty_pattern_group();
         self.parts
             .push(MatchOp::Substitution { expr, ty: Some(ty) });
         self
@@ -185,7 +181,7 @@ impl<'a, 'config> SmartMatcherBuilder<'a, 'config> {
         let pattern = Regex::new(&source)
             .map_err(|error| regex::build_error_to_diagnostic(error, 1, |_| source.span()))?;
         let groups = pattern.group_info();
-        let pattern_id = self.register_pattern_group(span, groups)?;
+        let pattern_id = self.register_pattern_group(groups);
 
         let group_name = self.interner.resolve(symbol);
         let group_id = groups
@@ -216,9 +212,9 @@ impl<'a, 'config> SmartMatcherBuilder<'a, 'config> {
         name: VariableName,
         format: NumberFormat,
     ) -> &mut Self {
-        self.captures.push(ValueType::Number(format));
+        let pattern_id = self.register_empty_pattern_group();
         let group = self.register_named_group(
-            PatternID::ZERO,
+            pattern_id,
             Capture::Explicit(TypedVariable {
                 name,
                 ty: ValueType::Number(format),
@@ -244,9 +240,9 @@ impl<'a, 'config> SmartMatcherBuilder<'a, 'config> {
         constraint: Constraint,
         expr: Expr,
     ) -> &mut Self {
-        self.captures.push(ValueType::Number(format));
+        let pattern_id = self.register_empty_pattern_group();
         let group = self.register_named_group(
-            PatternID::ZERO,
+            pattern_id,
             Capture::Explicit(TypedVariable {
                 name,
                 ty: ValueType::Number(format),
@@ -270,22 +266,14 @@ impl<'a, 'config> SmartMatcherBuilder<'a, 'config> {
         self
     }
 
-    /// This permits us to store captures for nested patterns in the same [Captures]
-    fn register_pattern_group(
-        &mut self,
-        span: SourceSpan,
-        group_info: &GroupInfo,
-    ) -> DiagResult<PatternID> {
-        use std::collections::btree_map::Entry;
-
+    /// Register a new [Captures] pattern
+    fn register_pattern_group(&mut self, group_info: &GroupInfo) -> PatternID {
         assert_eq!(
             group_info.pattern_len(),
             1,
             "unsupported multi-pattern pattern group registration"
         );
-        assert_eq!(self.group_name_ids.len(), self.pattern_groups.len());
-        let pid = PatternID::new_unchecked(self.pattern_groups.len());
-        let mut group_name_ids = BTreeMap::default();
+        let pid = PatternID::new_unchecked(self.raw_group_info.len());
         let mut groups = vec![];
         for group_name in group_info.pattern_names(PatternID::ZERO) {
             match group_name {
@@ -293,88 +281,48 @@ impl<'a, 'config> SmartMatcherBuilder<'a, 'config> {
                     groups.push(None);
                 }
                 Some(group_name) => {
-                    let symbol = self.interner.get_or_intern(group_name);
-                    match group_name_ids.entry(symbol) {
-                        Entry::Occupied(_) => {
-                            let label = format!("the capturing group '{group_name}' conflicts with another in the same pattern");
-                            return Err(Report::new(Diag::new("invalid regular expression pattern")
-                                .with_label(Label::new(span, label))
-                                .with_help("try using a different group name, or removing the explicit name if not needed")));
-                        }
-                        Entry::Vacant(entry) => {
-                            entry.insert(0);
-                        }
-                    }
+                    groups.push(Some(Cow::Owned(group_name.to_string())));
                 }
             }
         }
 
-        self.pattern_groups.push(groups);
-        self.group_name_ids.push(group_name_ids);
+        self.raw_group_info.push(groups);
 
-        Ok(pid)
+        pid
     }
 
-    fn register_unnamed_group(&mut self, pid: PatternID, capture: Capture) -> CaptureGroup {
-        let pattern_group = &mut self.pattern_groups[pid.as_usize()];
+    fn register_empty_pattern_group(&mut self) -> PatternID {
+        let pid = PatternID::new_unchecked(self.raw_group_info.len());
+        self.raw_group_info.push(vec![None]);
+        pid
+    }
+
+    fn register_unnamed_group(
+        &mut self,
+        pid: PatternID,
+        capture_type: Span<ValueType>,
+    ) -> CaptureGroup {
+        let pattern_group = &mut self.raw_group_info[pid.as_usize()];
         let group_id = pattern_group.len();
         pattern_group.push(None);
         CaptureGroup {
             pattern_id: pid,
             group_id,
-            info: Capture::All(Span::new(capture.span(), capture.value_type())),
+            info: Capture::All(capture_type),
         }
     }
 
     fn register_named_group(&mut self, pid: PatternID, capture: Capture) -> CaptureGroup {
-        use std::collections::btree_map::Entry;
-
         let group_name = capture.group_name().unwrap();
         let name = self.interner.resolve(group_name);
-        let pattern_group_index = pid.as_usize();
-        let (name, mapped) = match self.group_name_ids[pattern_group_index].entry(group_name) {
-            Entry::Vacant(entry) => {
-                entry.insert(0);
-                (Cow::Owned(name.to_string()), false)
-            }
-            Entry::Occupied(mut entry) => {
-                let next_id = entry.get_mut();
-                let id = *next_id;
-                *next_id += 1;
-                (Cow::Owned(format!("{name}[{id}]")), true)
-            }
-        };
-        let group_name = if mapped {
-            self.interner.get_or_intern(&name)
-        } else {
-            group_name
-        };
-        let info = if !mapped {
-            capture
-        } else {
-            match capture {
-                Capture::Implicit(with) => Capture::Mapped {
-                    group: group_name,
-                    with,
-                },
-                Capture::Explicit(with) => Capture::Mapped {
-                    group: group_name,
-                    with,
-                },
-                Capture::Mapped { with, .. } => Capture::Mapped {
-                    group: group_name,
-                    with,
-                },
-                capture => capture,
-            }
-        };
-        let pattern_group = &mut self.pattern_groups[pattern_group_index];
-        let group_id = pattern_group.len();
-        pattern_group.push(Some(name));
+        let pattern_id = pid.as_usize();
+        let pattern_groups = &mut self.raw_group_info[pattern_id];
+        let group_id = pattern_groups.len();
+        pattern_groups.push(Some(Cow::Owned(name.to_string())));
         CaptureGroup {
             pattern_id: pid,
             group_id,
-            info,
+            info: capture,
         }
     }
 }

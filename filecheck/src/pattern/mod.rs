@@ -10,7 +10,7 @@ pub use self::id::PatternIdentifier;
 pub use self::matcher::*;
 pub use self::matches::Matches;
 pub use self::prefix::PatternPrefix;
-pub use self::search::{DefaultSearcher, PatternSetSearcher, Searcher};
+pub use self::search::{DefaultSearcher, PatternSearcher, Searcher};
 
 use crate::{
     ast::{CheckPattern, CheckPatternPart},

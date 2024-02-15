@@ -38,16 +38,13 @@ impl<'a> From<MatchAll<'a>> for MatchAny<'a> {
         match match_all {
             MatchAll::Literal(lit) => Self::Literal(lit),
             MatchAll::Regex(re) => Self::Regex(re),
-            MatchAll::Prefix { prefixes, suffixes } => Self::AnyPrefix { prefixes, suffixes },
-            MatchAll::Smart {
-                searcher: Self::Literal(prefixes),
-                patterns: suffixes,
-            } => Self::SubstringPrefix { prefixes, suffixes },
-            MatchAll::Smart {
-                searcher: Self::Regex(prefixes),
-                patterns: suffixes,
-            } => Self::RegexPrefix { prefixes, suffixes },
-            MatchAll::Smart { .. } => unreachable!(),
+            MatchAll::AnyPrefix { prefixes, suffixes } => Self::AnyPrefix { prefixes, suffixes },
+            MatchAll::SubstringPrefix { prefixes, suffixes } => {
+                Self::SubstringPrefix { prefixes, suffixes }
+            }
+            MatchAll::RegexPrefix { prefixes, suffixes } => {
+                Self::RegexPrefix { prefixes, suffixes }
+            }
         }
     }
 }
@@ -205,6 +202,8 @@ impl<'a> MatcherMut for MatchAny<'a> {
     where
         C: Context<'input, 'context> + ?Sized,
     {
+        use crate::pattern::search::PatternSetSearcher;
+
         match self {
             Self::Literal(ref matcher) => matcher.try_match_mut(input, context),
             Self::Regex(ref matcher) => matcher.try_match_mut(input, context),
@@ -212,59 +211,8 @@ impl<'a> MatcherMut for MatchAny<'a> {
                 ref prefixes,
                 ref suffixes,
             } => {
-                let mut pattern_id = 0;
-                for (prefix, suffixes) in prefixes.iter().zip(suffixes.iter()) {
-                    match prefix.try_match_mut(input, context)? {
-                        // We found a match for the prefix
-                        MatchResult {
-                            info: Some(ref mut info),
-                            ty: MatchType::MatchFoundAndExpected,
-                        } => {
-                            // Try to find a matching suffix
-                            //
-                            // Always start the suffix search anchored to the end of the last match
-                            let mut suffix_input = input;
-                            suffix_input.set_start(info.span.end());
-                            suffix_input.set_anchored(true);
-                            match try_match_suffix(
-                                info,
-                                suffixes,
-                                pattern_id,
-                                suffix_input,
-                                context,
-                            )? {
-                                Some(found) => return Ok(found),
-                                None => {
-                                    pattern_id += suffixes.len();
-                                }
-                            }
-                        }
-                        // We found a match, but then some error occurred, so let's propagate the error
-                        MatchResult {
-                            info: Some(mut info),
-                            ty,
-                        } => {
-                            info.pattern_id = pattern_id;
-                            return Ok(MatchResult {
-                                info: Some(info),
-                                ty,
-                            });
-                        }
-                        // No match for this prefix, try the next
-                        _ => {
-                            pattern_id += suffixes.len();
-                        }
-                    }
-                }
-
-                // No match was found
-                Ok(MatchResult::failed(
-                    CheckFailedError::MatchNoneButExpected {
-                        span: self.span(),
-                        match_file: context.match_file(),
-                        note: None,
-                    },
-                ))
+                let searcher = PatternSetSearcher::new(input, prefixes)?;
+                try_match_searcher(searcher, suffixes, input, context)
             }
             Self::RegexPrefix {
                 ref prefixes,
@@ -285,7 +233,7 @@ fn try_match_searcher<'input, 'context, 'a, S, C>(
     context: &mut C,
 ) -> DiagResult<MatchResult<'input>>
 where
-    S: PatternSetSearcher,
+    S: PatternSearcher<'input>,
     C: Context<'input, 'context> + ?Sized,
 {
     loop {

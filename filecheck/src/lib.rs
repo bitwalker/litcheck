@@ -50,7 +50,7 @@ pub(crate) mod common {
     pub use crate::input::Input;
     pub use crate::pattern::{
         AnyMatcher, CaptureInfo, MatchInfo, MatchResult, MatchType, Matcher, MatcherMut, Matches,
-        Pattern, PatternIdentifier, PatternSetSearcher, Searcher,
+        Pattern, PatternIdentifier, PatternSearcher, Searcher,
     };
     pub use crate::rules::{DynRule, Rule};
     #[cfg(test)]

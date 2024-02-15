@@ -10,7 +10,7 @@ use crate::{ast::Capture, common::*, env::Bindings, pattern::search::Input as Se
 /// * The patterns involved are prefixed with a heterogenous set of pattern types
 /// * The patterns contain match blocks or substitutions
 ///
-/// This visitor requires a [PatternSetSearcher] that will be used to
+/// This visitor requires a [PatternSearcher] that will be used to
 /// find matches for a set of "prefix" patterns. This might be a single
 /// pattern for the set (if they have a common prefix), or a set where
 /// there is exactly one prefix pattern for every pattern (if the prefixes
@@ -32,7 +32,7 @@ use crate::{ast::Capture, common::*, env::Bindings, pattern::search::Input as Se
 /// * One or more of the matches failed due to constraints or other
 /// post-processing, and no further successful matches for those patterns
 /// were found.
-pub struct DynamicPatternSetVisitor<'a, S: PatternSetSearcher> {
+pub struct DynamicPatternSetVisitor<'a, S> {
     searcher: &'a mut S,
     suffix_patterns: &'a [Vec<Pattern<'a>>],
     patterns_matched: Vec<Vec<Span<usize>>>,
@@ -41,7 +41,8 @@ pub struct DynamicPatternSetVisitor<'a, S: PatternSetSearcher> {
     num_patterns: usize,
     max_suffix_patterns: usize,
 }
-impl<'a, S: PatternSetSearcher + fmt::Debug> fmt::Debug for DynamicPatternSetVisitor<'a, S> {
+#[cfg(test)]
+impl<'a, S: fmt::Debug> fmt::Debug for DynamicPatternSetVisitor<'a, S> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> fmt::Result {
         f.debug_struct("DynamicPatternSetVisitor")
             .field("searcher", &self.searcher)
@@ -53,7 +54,7 @@ impl<'a, S: PatternSetSearcher + fmt::Debug> fmt::Debug for DynamicPatternSetVis
             .finish()
     }
 }
-impl<'a, S: PatternSetSearcher> DynamicPatternSetVisitor<'a, S> {
+impl<'a, 'input, S: PatternSearcher<'input>> DynamicPatternSetVisitor<'a, S> {
     /// Create a new instance of this visitor with the given prefix searcher
     /// and corresponding set of suffix patterns.
     ///
@@ -91,7 +92,7 @@ impl<'a, S: PatternSetSearcher> DynamicPatternSetVisitor<'a, S> {
         }
     }
 
-    pub fn try_match_all<'guard, 'input, 'context>(
+    pub fn try_match_all<'guard, 'context>(
         &mut self,
         context: &mut ContextGuard<'guard, 'input, 'context>,
     ) -> DiagResult<Matches<'input>> {
@@ -118,13 +119,9 @@ impl<'a, S: PatternSetSearcher> DynamicPatternSetVisitor<'a, S> {
                 // We found a match for the prefix
                 ControlFlow::Continue(prefix_id) => {
                     let prefix_id = prefix_id.into_inner();
-                    // Save the searcher state so it can be restored if we fail to match
-                    // at this location
-                    let searcher_snapshot = self.searcher.last_match_end();
                     // Add an temporary binding scope which will be merged into
                     // the overall match bindings if we find a match at this location
                     let mut pattern_context = prefix_context.protect();
-                    let start_pos = pattern_context.cursor().position();
                     // Try to find a matching suffix pattern
                     match_states.clear();
                     for (index, pattern) in self.suffix_patterns[prefix_id].iter().enumerate() {
@@ -154,10 +151,6 @@ impl<'a, S: PatternSetSearcher> DynamicPatternSetVisitor<'a, S> {
                                 match_states.push(None);
                                 pattern_context.env_mut().clear();
                             }
-                        }
-                        pattern_context.cursor_mut().move_to(start_pos);
-                        if let Some(end) = searcher_snapshot {
-                            self.searcher.set_last_match_end(end);
                         }
                     }
                     // Exit the temporary scope
@@ -235,7 +228,7 @@ impl<'a, S: PatternSetSearcher> DynamicPatternSetVisitor<'a, S> {
         Ok(matched)
     }
 
-    fn match_pattern<'guard, 'input, 'context>(
+    fn match_pattern<'guard, 'context>(
         &mut self,
         pattern: &'guard Pattern<'a>,
         context: &mut ContextGuard<'guard, 'input, 'context>,
@@ -256,7 +249,7 @@ impl<'a, S: PatternSetSearcher> DynamicPatternSetVisitor<'a, S> {
         }
     }
 
-    fn next_prefix<'input>(
+    fn next_prefix(
         &mut self,
         context: &mut ContextGuard<'_, 'input, '_>,
     ) -> DiagResult<ControlFlow<Option<MatchResult<'input>>, Span<usize>>> {
@@ -313,7 +306,7 @@ impl<'a, S: PatternSetSearcher> DynamicPatternSetVisitor<'a, S> {
         }
     }
 
-    fn select_longest_match<'input>(
+    fn select_longest_match(
         &mut self,
         prefix_id: usize,
         match_states: &mut [Option<MatchState<'input>>],

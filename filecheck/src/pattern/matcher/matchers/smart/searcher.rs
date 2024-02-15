@@ -26,6 +26,7 @@ pub struct SmartSearcher<'a, 'input> {
     cursor: Input<'input>,
     /// The operand stack used by the searcher
     stack: Vec<Operand<'input>>,
+    match_pattern_id: PatternID,
     match_start: usize,
     match_end: usize,
 }
@@ -38,6 +39,7 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
             input,
             cursor: input,
             stack: vec![],
+            match_pattern_id: PatternID::ZERO,
             match_start: start,
             match_end: start,
         }
@@ -47,6 +49,7 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
         self.captures.set_pattern(None);
         self.cursor = self.input;
         self.stack.clear();
+        self.match_pattern_id = PatternID::ZERO;
         self.match_start = start;
         self.match_end = start;
         self.cursor.set_start(start);
@@ -186,8 +189,8 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
             self.match_start,
             self.match_end,
         );
+        self.match_pattern_id = PatternID::ZERO;
         self.captures.set_pattern(Some(PatternID::ZERO));
-        // TODO: Record actual captures
         Ok(MatchResult::ok(MatchInfo::new(
             self.match_start..self.match_end,
             self.span,
@@ -199,7 +202,7 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
         part: &MatchOp<'a>,
         context: &ContextGuard<'_, 'input, 'context>,
     ) -> DiagResult<MatchResult<'input>> {
-        match part {
+        let result = match part {
             MatchOp::Literal(ref pattern) => self.match_literal(pattern, context),
             MatchOp::Substring(ref matcher) => self.match_substring(matcher, context),
             MatchOp::Regex {
@@ -220,9 +223,13 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
                 format,
                 capture,
             } => self.match_number(*span, *format, *capture, context),
-            MatchOp::Substitution { ty, expr } => self.match_substitution(*ty, expr, context),
+            MatchOp::Substitution { ty, expr } => {
+                return self.match_substitution(*ty, expr, context)
+            }
             _ => unreachable!("non-pattern parts are handled in search_captures"),
-        }
+        };
+        self.match_pattern_id = PatternID::new_unchecked(self.match_pattern_id.one_more());
+        result
     }
 
     fn match_literal<'context>(
@@ -235,6 +242,7 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
             if buffer.starts_with(pattern.as_ref()) {
                 let start = self.cursor.start();
                 let end = start + pattern.as_bytes().len();
+                set_capturing_group_span(self.captures, self.match_pattern_id, 0, start, end);
                 return Ok(MatchResult::ok(MatchInfo::new(start..end, pattern.span())));
             }
             Some(format!(
@@ -246,6 +254,7 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
             if let Some(offset) = memchr::memmem::find(self.cursor.as_slice(), bytes) {
                 let start = self.cursor.start() + offset;
                 let end = start + bytes.len();
+                set_capturing_group_span(self.captures, self.match_pattern_id, 0, start, end);
                 return Ok(MatchResult::ok(MatchInfo::new(start..end, pattern.span())));
             }
             None
@@ -266,7 +275,22 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
         matcher: &SubstringMatcher<'a>,
         context: &ContextGuard<'_, 'input, 'context>,
     ) -> DiagResult<MatchResult<'input>> {
-        matcher.try_match(self.cursor, context)
+        match matcher.try_match(self.cursor, context) {
+            Ok(MatchResult {
+                info: Some(info),
+                ty,
+            }) => {
+                set_capturing_group_span(
+                    self.captures,
+                    self.match_pattern_id,
+                    0,
+                    info.span.start(),
+                    info.span.end(),
+                );
+                Ok(MatchResult::new(ty, Some(info)))
+            }
+            result => result,
+        }
     }
 
     fn match_regex<'context>(
@@ -276,7 +300,15 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
         context: &ContextGuard<'_, 'input, 'context>,
     ) -> DiagResult<MatchResult<'input>> {
         if let Some(matched) = pattern.find(self.cursor) {
-            Ok(MatchResult::ok(MatchInfo::new(matched.range(), span)))
+            let range = matched.range();
+            set_capturing_group_span(
+                self.captures,
+                self.match_pattern_id,
+                0,
+                range.start,
+                range.end,
+            );
+            Ok(MatchResult::ok(MatchInfo::new(range, span)))
         } else {
             Ok(MatchResult::failed(
                 CheckFailedError::MatchNoneButExpected {
@@ -305,15 +337,14 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
             // Record local captures of this pattern in the global captures
             let mut captured = Vec::with_capacity(capture_groups.len());
             for capture_group in capture_groups.iter() {
-                let (start_slot, end_slot) = self
-                    .captures
-                    .group_info()
-                    .slots(capture_group.pattern_id, capture_group.group_id)
-                    .expect("invalid group id");
-                let slots = self.captures.slots_mut();
                 if let Some(capture_span) = captures.get_group(capture_group.group_id) {
-                    slots[start_slot] = Some(NonMaxUsize::new(capture_span.start).unwrap());
-                    slots[end_slot] = Some(NonMaxUsize::new(capture_span.end).unwrap());
+                    set_capturing_group_span(
+                        self.captures,
+                        capture_group.pattern_id,
+                        capture_group.group_id,
+                        capture_span.start,
+                        capture_span.end,
+                    );
 
                     let content = self.cursor.as_str(capture_span.range());
                     match capture_group.info {
@@ -331,17 +362,15 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
                         }
                     }
                 } else {
-                    slots[start_slot] = None;
-                    slots[end_slot] = None;
+                    unset_capturing_group_span(
+                        self.captures,
+                        capture_group.pattern_id,
+                        capture_group.group_id,
+                    );
                 }
             }
             Ok(MatchResult::ok(
-                MatchInfo::new_with_pattern(
-                    range,
-                    pattern_span,
-                    captures.pattern().unwrap().as_usize(),
-                )
-                .with_captures(captured),
+                MatchInfo::new(range, pattern_span).with_captures(captured),
             ))
         } else {
             Ok(MatchResult::failed(
@@ -394,14 +423,13 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
                 let raw = self.cursor.as_str(matched.range());
                 match Number::parse_with_format(Span::new(span, raw), format) {
                     Ok(parsed) => {
-                        let (start_slot, end_slot) = self
-                            .captures
-                            .group_info()
-                            .slots(capture_group.pattern_id, capture_group.group_id)
-                            .expect("invalid capture group");
-                        let slots = self.captures.slots_mut();
-                        slots[start_slot] = Some(NonMaxUsize::new(range.start).unwrap());
-                        slots[end_slot] = Some(NonMaxUsize::new(range.end).unwrap());
+                        set_capturing_group_span(
+                            self.captures,
+                            self.match_pattern_id,
+                            1,
+                            range.start,
+                            range.end,
+                        );
                         let captured = CaptureInfo {
                             span,
                             pattern_span,
@@ -437,8 +465,16 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
                 ))
             }
         } else if let Some(matched) = pattern.find(input) {
+            let range = matched.range();
+            set_capturing_group_span(
+                self.captures,
+                self.match_pattern_id,
+                0,
+                range.start,
+                range.end,
+            );
             // Record the overall match
-            Ok(MatchResult::ok(MatchInfo::new(matched.range(), span)))
+            Ok(MatchResult::ok(MatchInfo::new(range, span)))
         } else {
             Ok(MatchResult::failed(
                 CheckFailedError::MatchNoneButExpected {
@@ -634,4 +670,15 @@ fn set_capturing_group_span(
     let slots = captures.slots_mut();
     slots[match_start_slot] = Some(NonMaxUsize::new(start).unwrap());
     slots[match_end_slot] = Some(NonMaxUsize::new(end).unwrap());
+}
+
+fn unset_capturing_group_span(captures: &mut Captures, pid: PatternID, gid: usize) {
+    let match_start_slot = captures
+        .group_info()
+        .slot(pid, gid)
+        .expect("the implicit match group should always be available");
+    let match_end_slot = match_start_slot + 1;
+    let slots = captures.slots_mut();
+    slots[match_start_slot] = None;
+    slots[match_end_slot] = None;
 }

@@ -1,9 +1,6 @@
 use crate::{
     common::*,
-    pattern::{
-        matcher::{MatchAll, MatchAny},
-        visitors::*,
-    },
+    pattern::{matcher::MatchAll, search::PatternSetSearcher, visitors::*},
 };
 
 #[derive(Debug)]
@@ -36,71 +33,49 @@ impl<'check> Rule for CheckDag<'check> {
     {
         let mut guard = context.protect();
         let input = guard.search_block();
-        match self.patterns {
+        let result = match self.patterns {
             MatchAll::Literal(ref matcher) => {
                 let mut searcher = matcher.search(input)?;
                 let mut visitor = StaticPatternSetVisitor::new(&mut searcher);
-                match visitor.try_match_all(&mut guard) {
-                    Ok(result) if result.is_ok() => {
-                        guard.save();
-                        Ok(result)
-                    }
-                    Ok(result) => Ok(result),
-                    Err(error) => Err(error),
-                }
+                visitor.try_match_all(&mut guard)
             }
             MatchAll::Regex(ref matcher) => {
                 let mut searcher = matcher.search(input);
                 let mut visitor = StaticPatternSetVisitor::new(&mut searcher);
-                match visitor.try_match_all(&mut guard) {
-                    Ok(result) if result.is_ok() => {
-                        guard.save();
-                        Ok(result)
-                    }
-                    Ok(result) => Ok(result),
-                    Err(error) => Err(error),
-                }
+                visitor.try_match_all(&mut guard)
             }
-            MatchAll::Smart {
-                ref searcher,
-                ref patterns,
+            MatchAll::RegexPrefix {
+                ref prefixes,
+                ref suffixes,
                 ..
             } => {
-                let result = match searcher {
-                    MatchAny::Literal(ref matcher) => {
-                        let mut searcher = matcher.search(input)?;
-                        let mut visitor = DynamicPatternSetVisitor::new(&mut searcher, patterns);
-                        visitor.try_match_all(&mut guard)
-                    }
-                    MatchAny::Regex(ref matcher) => {
-                        let mut searcher = matcher.search(input);
-                        let mut visitor = DynamicPatternSetVisitor::new(&mut searcher, patterns);
-                        visitor.try_match_all(&mut guard)
-                    }
-                    searcher => panic!(
-                        "unsupported match_any configuration in match_all: {:?}",
-                        searcher
-                    ),
-                };
-                match result {
-                    Ok(result) if result.is_ok() => {
-                        guard.save();
-                        Ok(result)
-                    }
-                    Ok(result) => Ok(result),
-                    Err(error) => Err(error),
-                }
+                let mut searcher = prefixes.search(input);
+                let mut visitor = DynamicPatternSetVisitor::new(&mut searcher, suffixes);
+                visitor.try_match_all(&mut guard)
             }
-            MatchAll::Prefix {
-                prefixes: ref _prefixes,
-                suffixes: ref _suffixes,
+            MatchAll::SubstringPrefix {
+                ref prefixes,
+                ref suffixes,
             } => {
-                // TODO: Implement support for full breadth of possible pattern types
-                let diag = Diag::new("support for CHECK-DAG with this mixture of patterns is not yet supported")
-                    .with_label(Label::new(self.span(), "not supported"))
-                    .with_help("try to ensure all patterns begin with a literal or regular expression component");
-                Err(Report::from(diag))
+                let mut searcher = prefixes.search(input)?;
+                let mut visitor = DynamicPatternSetVisitor::new(&mut searcher, suffixes);
+                visitor.try_match_all(&mut guard)
             }
+            MatchAll::AnyPrefix {
+                ref prefixes,
+                ref suffixes,
+            } => {
+                let mut searcher = PatternSetSearcher::new(input, prefixes)?;
+                let mut visitor = DynamicPatternSetVisitor::new(&mut searcher, suffixes);
+                visitor.try_match_all(&mut guard)
+            }
+        };
+        match result {
+            Ok(result) if result.is_ok() => {
+                guard.save();
+                Ok(result)
+            }
+            result => result,
         }
     }
 }

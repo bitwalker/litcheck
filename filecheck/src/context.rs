@@ -96,7 +96,6 @@ pub struct ContextGuard<'guard, 'input, 'context> {
     input_file: ArcSource,
     scope: ScopeGuard<'guard, 'input, Value<'input>>,
     cursor: CursorGuard<'guard, 'input>,
-    _marker: core::marker::PhantomData<&'input ()>,
 }
 impl<'guard, 'input, 'context> ContextGuard<'guard, 'input, 'context> {
     pub fn save(self) {
@@ -111,7 +110,7 @@ impl<'guard, 'input, 'context> ContextGuard<'guard, 'input, 'context> {
         self.scope.extend(bindings);
     }
 }
-impl<'guard, 'input: 'guard, 'context> Context<'input, 'context>
+impl<'guard, 'input, 'context> Context<'input, 'context>
     for ContextGuard<'guard, 'input, 'context>
 {
     fn protect<'nested, 'this: 'nested>(
@@ -123,7 +122,6 @@ impl<'guard, 'input: 'guard, 'context> Context<'input, 'context>
             input_file: self.match_file.clone(),
             scope: self.scope.protect(),
             cursor: self.cursor.protect(),
-            _marker: core::marker::PhantomData,
         }
     }
 
@@ -229,7 +227,6 @@ impl<'input, 'context: 'input> Context<'input, 'context> for MatchContext<'input
             input_file: self.match_file.clone(),
             scope: self.env.protect(),
             cursor: self.cursor.protect(),
-            _marker: core::marker::PhantomData,
         }
     }
 

@@ -65,6 +65,15 @@ impl<'a> Input<'a> {
         self.span.start = core::cmp::min(start, self.buffer.len());
     }
 
+    /// Set the bounds of the search area to `range`
+    ///
+    /// The range is clamped to the buffer size
+    pub fn set_span(&mut self, range: Range<usize>) {
+        let eof = self.buffer.len();
+        self.span.start = core::cmp::min(range.start, eof);
+        self.span.end = core::cmp::min(range.end, eof);
+    }
+
     /// Returns true if this search could never return any other match
     ///
     /// Specifically, if the start position of the search is greater than the end
