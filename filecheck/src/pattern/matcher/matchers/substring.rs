@@ -1,4 +1,4 @@
-use aho_corasick::{AhoCorasick, AhoCorasickBuilder, AhoCorasickKind, MatchKind};
+use aho_corasick::{AhoCorasick, AhoCorasickBuilder, AhoCorasickKind, MatchKind, StartKind};
 
 use crate::common::*;
 
@@ -25,17 +25,30 @@ impl<'a> fmt::Debug for SubstringMatcher<'a> {
 }
 impl<'a> SubstringMatcher<'a> {
     /// Construct a new matcher from a given string
-    pub fn new(pattern: Span<Cow<'a, str>>) -> DiagResult<Self> {
+    pub fn new(pattern: Span<Cow<'a, str>>, config: &Config) -> DiagResult<Self> {
+        Self::new_with_start_kind(pattern, StartKind::Unanchored, config)
+    }
+
+    pub fn new_with_start_kind(
+        pattern: Span<Cow<'a, str>>,
+        start_kind: StartKind,
+        config: &Config,
+    ) -> DiagResult<Self> {
         assert!(
             !pattern.is_empty(),
             "an empty string is not a valid substring pattern"
         );
 
+        let pattern =
+            pattern.map(|p| text::canonicalize_horizontal_whitespace(p, config.strict_whitespace));
+
         let (span, pattern) = pattern.into_parts();
         let mut builder = AhoCorasickBuilder::new();
         let searcher = builder
             .match_kind(MatchKind::LeftmostLongest)
+            .start_kind(start_kind)
             .kind(Some(AhoCorasickKind::DFA))
+            .ascii_case_insensitive(config.ignore_case)
             .build([pattern.as_ref()])
             .map_err(|err| {
                 let diag = Diag::new("failed to build aho-corasick searcher")
@@ -110,7 +123,8 @@ Field: 2
         );
 
         let pattern = Span::new(8..10, Cow::Borrowed("Name: bar"));
-        let matcher = SubstringMatcher::new(pattern).expect("expected pattern to be valid");
+        let matcher =
+            SubstringMatcher::new(pattern, &context.config).expect("expected pattern to be valid");
         let mctx = context.match_context();
         let input = mctx.search();
         let result = matcher.try_match(input, &mctx)?;

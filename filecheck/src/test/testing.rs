@@ -138,14 +138,16 @@ impl TestContext {
 
     #[track_caller]
     pub fn parse<'a>(&mut self, source: &'a str) -> DiagResult<CheckFile<'a>> {
-        let mut parser = parse::CheckFileParser::new(
-            &self.config.check_prefixes,
-            &self.config.comment_prefixes,
-            &mut self.interner,
-        );
+        let mut parser = parse::CheckFileParser::new(&self.config, &mut self.interner);
         parser
             .parse(source)
-            .map_err(|err| Report::new(err).with_source_code(source.to_string()))
+            .map_err(|err| Report::from(err).with_source_code(source.to_string()))
+    }
+
+    #[track_caller]
+    pub fn parse_err<'a>(&mut self, source: &'a str) -> Result<CheckFile<'a>, ParserError> {
+        let mut parser = parse::CheckFileParser::new(&self.config, &mut self.interner);
+        parser.parse(source)
     }
 
     #[track_caller]
@@ -164,7 +166,7 @@ impl<'a, S: SourceFile + ?Sized> Tokens<'a, S> {
         self.lexer
             .next()
             .transpose()
-            .map_err(|err| Report::new(err).with_source_code(self.source.source().to_string()))
+            .map_err(|err| Report::from(err).with_source_code(self.source.source().to_string()))
             .map(|opt| opt.map(|(_, tok, _)| tok))
     }
 }

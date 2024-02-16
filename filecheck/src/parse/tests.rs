@@ -703,10 +703,10 @@ fn main() -> i32 { std::process::exit(); }
 "#;
     let mut context = TestContext::new();
 
-    let file = context.parse(input).unwrap();
-
-    let lines = file.lines();
-    assert_eq!(lines.len(), 0);
+    assert_matches!(
+        context.parse_err(input),
+        Err(ParserError::UnusedCheckPrefixes(_))
+    );
 }
 
 #[test]

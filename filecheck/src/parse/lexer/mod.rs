@@ -25,6 +25,8 @@ use self::patterns::{Check, Pattern};
 pub struct Lexer<'input> {
     input: Input<'input>,
     patterns: Vec<Pattern>,
+    check_prefixes: Vec<Arc<str>>,
+    seen_prefixes: Vec<bool>,
     regex: Regex,
     searcher: RegexSearcher<'input>,
     cache: regex_automata::meta::Cache,
@@ -48,8 +50,8 @@ impl<'input> Lexer<'input> {
     /// string. Note that no lexical analysis occurs until the lexer has been iterated over.
     pub fn new<S>(
         source: &'input S,
-        check_prefixes: &[Box<str>],
-        comment_prefixes: &[Box<str>],
+        check_prefixes: &[Arc<str>],
+        comment_prefixes: &[Arc<str>],
     ) -> Self
     where
         S: SourceFile + ?Sized + 'input,
@@ -78,6 +80,8 @@ impl<'input> Lexer<'input> {
         Lexer {
             input,
             patterns,
+            check_prefixes: check_prefixes.iter().cloned().collect(),
+            seen_prefixes: vec![false; check_prefixes.len()],
             regex,
             searcher,
             cache,
@@ -88,6 +92,14 @@ impl<'input> Lexer<'input> {
             leading_lf: true,
             buffer: VecDeque::with_capacity(128),
         }
+    }
+
+    pub fn unused_prefixes(&self) -> Vec<Arc<str>> {
+        self.check_prefixes
+            .iter()
+            .zip(self.seen_prefixes.iter().copied())
+            .filter_map(|(prefix, used)| if used { None } else { Some(prefix.clone()) })
+            .collect()
     }
 
     pub fn current_offset(&self) -> SourceSpan {
@@ -163,8 +175,20 @@ impl<'input> Lexer<'input> {
             let range = Range::from(matched.range());
             let pattern = &self.patterns[pid.as_usize()];
             let pattern_ty = pattern.ty;
+            if let Check::Comment = pattern_ty {
+                return self.tokenize_comment(range);
+            }
+
+            let prefix_span = self.captures.get_group_by_name("prefix").unwrap();
+            let prefix = self.input.as_str(prefix_span.start..prefix_span.end);
+            if let Some(index) = self
+                .check_prefixes
+                .iter()
+                .position(|pfx| pfx.as_ref() == prefix)
+            {
+                self.seen_prefixes[index] = true;
+            }
             match pattern_ty {
-                Check::Comment => return self.tokenize_comment(range),
                 Check::Count => {
                     let valid = self.tokenize_check_count_prefix(range);
                     if !valid {

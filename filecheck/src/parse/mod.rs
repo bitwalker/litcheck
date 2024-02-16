@@ -76,6 +76,9 @@ pub enum ParserError {
         #[label("no closing '}}' found for this block")]
         span: SourceSpan,
     },
+    #[error("no check strings found with prefix(es) {}", text::DisplayCommaSeparated(.0.as_slice()))]
+    #[diagnostic()]
+    UnusedCheckPrefixes(Vec<Arc<str>>),
 }
 
 pub type ParseResult<T> = Result<T, ParserError>;

@@ -80,6 +80,7 @@ impl<'a, 'input> RegexSetSearcher<'a, 'input> {
     pub fn new(
         input: Input<'input>,
         patterns: Vec<RegexPattern<'a>>,
+        config: &Config,
         interner: &StringInterner,
     ) -> DiagResult<Self> {
         let start_kind = if input.is_anchored() {
@@ -88,7 +89,7 @@ impl<'a, 'input> RegexSetSearcher<'a, 'input> {
             StartKind::Unanchored
         };
         Ok(
-            RegexSetMatcher::new_with_start_kind(start_kind, patterns, interner)?
+            RegexSetMatcher::new_with_start_kind(start_kind, patterns, config, interner)?
                 .into_searcher(input),
         )
     }
@@ -157,13 +158,18 @@ pub struct RegexSetMatcher<'a, A = dense::DFA<Vec<u32>>> {
     capture_types: Vec<Vec<Capture>>,
 }
 impl<'a> RegexSetMatcher<'a> {
-    pub fn new(patterns: Vec<RegexPattern<'a>>, interner: &StringInterner) -> DiagResult<Self> {
-        Self::new_with_start_kind(StartKind::Both, patterns, interner)
+    pub fn new(
+        patterns: Vec<RegexPattern<'a>>,
+        config: &Config,
+        interner: &StringInterner,
+    ) -> DiagResult<Self> {
+        Self::new_with_start_kind(StartKind::Both, patterns, config, interner)
     }
 
     pub fn new_with_start_kind(
         start_kind: StartKind,
         patterns: Vec<RegexPattern<'a>>,
+        config: &Config,
         interner: &StringInterner,
     ) -> DiagResult<Self> {
         let regex = dfa::regex::Regex::builder()
@@ -173,7 +179,11 @@ impl<'a> RegexSetMatcher<'a> {
                     .start_kind(start_kind)
                     .starts_for_each_pattern(true),
             )
-            .syntax(syntax::Config::new().multi_line(true))
+            .syntax(
+                syntax::Config::new()
+                    .multi_line(true)
+                    .case_insensitive(config.ignore_case),
+            )
             .build_many(&patterns)
             .map_err(|error| {
                 regex::build_error_to_diagnostic(error, patterns.len(), |id| patterns[id].span())
@@ -184,7 +194,12 @@ impl<'a> RegexSetMatcher<'a> {
             (CapturingRegex::None, Captures::empty(GroupInfo::empty()))
         } else {
             onepass::DFA::builder()
-                .syntax(syntax::Config::new().utf8(false).multi_line(true))
+                .syntax(
+                    syntax::Config::new()
+                        .utf8(false)
+                        .multi_line(true)
+                        .case_insensitive(config.ignore_case),
+                )
                 .thompson(thompson::Config::new().utf8(false))
                 .configure(onepass::Config::new().starts_for_each_pattern(true))
                 .build_many(&patterns)
@@ -192,7 +207,11 @@ impl<'a> RegexSetMatcher<'a> {
                     |_| {
                         let re = Regex::builder()
                             .configure(Regex::config().match_kind(MatchKind::All))
-                            .syntax(syntax::Config::new().multi_line(true))
+                            .syntax(
+                                syntax::Config::new()
+                                    .multi_line(true)
+                                    .case_insensitive(config.ignore_case),
+                            )
                             .build_many(&patterns)
                             .unwrap();
                         let cache = re.create_cache();

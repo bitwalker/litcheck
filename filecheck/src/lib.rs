@@ -18,12 +18,14 @@ pub use self::test::TestContext;
 pub use self::test::{Test, TestResult};
 
 use clap::{builder::ValueParser, ArgAction, Args, ColorChoice, ValueEnum};
+use std::sync::Arc;
 
 pub(crate) mod common {
     pub use std::{
         borrow::Cow,
         fmt,
         ops::{ControlFlow, RangeBounds},
+        sync::Arc,
     };
 
     pub use either::Either::{self, Left, Right};
@@ -66,6 +68,13 @@ pub const DEFAULT_COMMENT_PREFIXES: &[&str] = &["COM", "RUN"];
 /// the command line; and uses one to verify the other.
 #[derive(Debug, Args)]
 pub struct Config {
+    /// Allow checking empty input. By default, empty input is rejected.
+    #[arg(
+        default_value_t = false,
+        action(clap::ArgAction::SetTrue),
+        help_heading = "Input"
+    )]
+    pub allow_empty: bool,
     /// Which prefixes to treat as directives.
     ///
     /// For example, in the directive `CHECK-SAME`, `CHECK` is the prefix.
@@ -73,10 +82,11 @@ pub struct Config {
         long = "check-prefix",
         value_name = "PREFIX",
         default_value = "CHECK",
+        action(clap::ArgAction::Append),
         value_parser(re_value_parser("^[A-Za-z][A-Za-z0-9_]*")),
         help_heading = "Syntax"
     )]
-    pub check_prefixes: Vec<Box<str>>,
+    pub check_prefixes: Vec<Arc<str>>,
     /// Which prefixes to treat as comments.
     ///
     /// All content on a line following a comment directive is ignored,
@@ -85,10 +95,11 @@ pub struct Config {
         long = "comment-prefix",
         value_name = "PREFIX",
         default_value = "COM,RUN",
+        action(clap::ArgAction::Append),
         value_parser(re_value_parser("^[A-Za-z][A-Za-z0-9_]*")),
         help_heading = "Syntax"
     )]
-    pub comment_prefixes: Vec<Box<str>>,
+    pub comment_prefixes: Vec<Arc<str>>,
     /// If specifying multiple check prefixes, this controls whether or not
     /// to raise an error if one of the prefixes is missing in the test file.
     #[arg(long, default_value_t = false, help_heading = "Syntax")]
@@ -188,19 +199,20 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            check_prefixes: vec!["CHECK".to_string().into_boxed_str()],
+            allow_empty: false,
+            check_prefixes: vec![Arc::from("CHECK".to_string().into_boxed_str())],
             comment_prefixes: vec![
-                "COM".to_string().into_boxed_str(),
-                "RUN".to_string().into_boxed_str(),
+                Arc::from("COM".to_string().into_boxed_str()),
+                Arc::from("RUN".to_string().into_boxed_str()),
             ],
-            allow_unused_prefixes: true,
+            allow_unused_prefixes: false,
             strict_whitespace: false,
             match_full_lines: false,
             ignore_case: false,
             implicit_check_not: vec![],
             dump_input: Default::default(),
             dump_input_filter: Default::default(),
-            enable_var_scope: true,
+            enable_var_scope: false,
             variables: vec![],
             verbose: 0,
             color: Default::default(),
@@ -237,10 +249,10 @@ pub enum DumpFilter {
 fn re_value_parser(r: &'static str) -> ValueParser {
     use clap::{error::ErrorKind, Error};
 
-    ValueParser::from(move |s: &str| -> Result<Box<str>, clap::Error> {
+    ValueParser::from(move |s: &str| -> Result<Arc<str>, clap::Error> {
         let re = regex::Regex::new(r).unwrap();
         if re.is_match(s) {
-            Ok(s.to_owned().into_boxed_str())
+            Ok(Arc::from(s.to_owned().into_boxed_str()))
         } else {
             Err(Error::raw(
                 ErrorKind::ValueValidation,

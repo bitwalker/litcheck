@@ -71,9 +71,10 @@ impl<'a> SmartMatcher<'a> {
 
     pub fn build<'config>(
         span: SourceSpan,
+        config: &'config Config,
         interner: &'config mut StringInterner,
     ) -> SmartMatcherBuilder<'a, 'config> {
-        SmartMatcherBuilder::new(span, interner)
+        SmartMatcherBuilder::new(span, config, interner)
     }
 
     pub fn group_info(&self) -> &GroupInfo {
@@ -177,7 +178,6 @@ where
             | MatchOp::Drop
             | MatchOp::Constraint { .. }
             | MatchOp::Literal(_)
-            | MatchOp::Substring(_)
             | MatchOp::Numeric { .. } => (),
         }
     }

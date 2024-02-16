@@ -43,11 +43,7 @@ impl<'a> Test<'a> {
         ArcSource: From<S> + 'input,
     {
         // Parse the check file
-        let mut parser = parse::CheckFileParser::new(
-            &self.config.check_prefixes,
-            &self.config.comment_prefixes,
-            &mut self.strings,
-        );
+        let mut parser = parse::CheckFileParser::new(&self.config, &mut self.strings);
 
         let match_file = parser
             .parse(&self.match_file)

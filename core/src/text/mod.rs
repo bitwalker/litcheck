@@ -1,3 +1,8 @@
+mod display;
+pub use self::display::DisplayCommaSeparated;
+
+use std::borrow::Cow;
+
 use crate::range::Range;
 
 /// The style of line endings used in a file
@@ -167,5 +172,35 @@ pub fn is_char_boundary(buffer: &[u8], offset: usize) -> bool {
         // corresponds to a byte that begins a valid UTF-8 encoding of a
         // Unicode scalar value.
         Some(&b) => b <= 0b0111_1111 || b >= 0b1100_0000,
+    }
+}
+
+pub fn canonicalize_horizontal_whitespace(
+    s: Cow<'_, str>,
+    strict_whitespace: bool,
+) -> Cow<'_, str> {
+    if strict_whitespace {
+        return s;
+    }
+
+    if s.contains(is_non_canonical_horizontal_whitespace) {
+        Cow::Owned(s.replace(is_non_canonical_horizontal_whitespace, " "))
+    } else {
+        s
+    }
+}
+
+#[inline]
+fn is_non_canonical_horizontal_whitespace(c: char) -> bool {
+    match c {
+        '\t' => true,
+        // Unicode Space_Separator category, sans space (which we are canonicalizing to)
+        '\u{00A0}'
+        | '\u{1680}'
+        | '\u{2000}'..='\u{200A}'
+        | '\u{202F}'
+        | '\u{205F}'
+        | '\u{3000}' => true,
+        _ => false,
     }
 }

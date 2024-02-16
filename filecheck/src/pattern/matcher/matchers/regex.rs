@@ -30,10 +30,18 @@ impl<'a> fmt::Debug for RegexMatcher<'a> {
     }
 }
 impl<'a> RegexMatcher<'a> {
-    pub fn new(pattern: RegexPattern<'a>, interner: &StringInterner) -> DiagResult<Self> {
+    pub fn new(
+        pattern: RegexPattern<'a>,
+        config: &Config,
+        interner: &StringInterner,
+    ) -> DiagResult<Self> {
         let span = pattern.span();
         let regex = Regex::builder()
-            .syntax(syntax::Config::new().multi_line(true))
+            .syntax(
+                syntax::Config::new()
+                    .multi_line(true)
+                    .case_insensitive(config.ignore_case),
+            )
             .build(pattern.as_ref())
             .map_err(|error| build_error_to_diagnostic(error, 1, |_| span))?;
 
@@ -68,10 +76,14 @@ impl<'a> RegexMatcher<'a> {
         })
     }
 
-    pub fn new_nocapture(pattern: Span<Cow<'a, str>>) -> DiagResult<Self> {
+    pub fn new_nocapture(pattern: Span<Cow<'a, str>>, config: &Config) -> DiagResult<Self> {
         let span = pattern.span();
         let regex = Regex::builder()
-            .syntax(syntax::Config::new().multi_line(true))
+            .syntax(
+                syntax::Config::new()
+                    .multi_line(true)
+                    .case_insensitive(config.ignore_case),
+            )
             .build(pattern.as_ref())
             .map_err(|error| build_error_to_diagnostic(error, 1, |_| span))?;
 
@@ -319,8 +331,8 @@ Field: 2
             SourceSpan::from(0..0),
             Cow::Borrowed("Name: b[[:alpha:]]*"),
         ));
-        let matcher =
-            RegexMatcher::new(pattern, &context.interner).expect("expected pattern to be valid");
+        let matcher = RegexMatcher::new(pattern, &context.config, &context.interner)
+            .expect("expected pattern to be valid");
         let mctx = context.match_context();
         let input = mctx.search();
         let result = matcher.try_match(input, &mctx)?;

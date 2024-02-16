@@ -1,5 +1,4 @@
 use crate::common::*;
-use crate::expr::ExprError;
 use crate::test::TestInputType;
 
 #[derive(Diagnostic, Debug, thiserror::Error)]
@@ -31,13 +30,6 @@ impl TestFailed {
     pub fn errors(&self) -> &[CheckFailedError] {
         self.errors.as_slice()
     }
-}
-
-#[derive(Diagnostic, Debug, thiserror::Error)]
-pub enum CheckError {
-    #[error("check failed: invalid expression in directive: {0}")]
-    #[diagnostic(transparent)]
-    Expr(#[from] ExprError),
 }
 
 #[derive(Diagnostic, Debug, thiserror::Error)]
@@ -90,6 +82,8 @@ pub struct UndefinedVariableError {
 
 #[derive(Diagnostic, Debug, thiserror::Error)]
 pub enum CheckFailedError {
+    #[error("the input file was rejected because it is empty, and --allow-empty was not set")]
+    EmptyInput,
     /// Indicates an error while processing a potential match
     #[error("an error occurred while processing a potential match")]
     #[diagnostic()]

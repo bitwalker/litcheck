@@ -28,8 +28,17 @@ impl<'a> SubstringSetMatcher<'a> {
     /// Create a new matcher for the given set of substring patterns
     ///
     /// NOTE: This function will panic if the set is empty.
-    pub fn new(patterns: Vec<Span<Cow<'a, str>>>) -> DiagResult<Self> {
-        SubstringSetBuilder::new_with_patterns(patterns).build()
+    pub fn new(patterns: Vec<Span<Cow<'a, str>>>, config: &Config) -> DiagResult<Self> {
+        let patterns = patterns
+            .into_iter()
+            .map(|p| {
+                p.map(|p| text::canonicalize_horizontal_whitespace(p, config.strict_whitespace))
+            })
+            .collect();
+
+        let mut builder = SubstringSetBuilder::new_with_patterns(patterns);
+        builder.case_insensitive(config.ignore_case);
+        builder.build()
     }
 
     pub fn search<'input, 'patterns>(
@@ -306,7 +315,7 @@ CHECK-DAG: tail call i32
 
         let pattern1 = Span::new(12..24, Cow::Borrowed("tail call i64"));
         let pattern2 = Span::new(25..41, Cow::Borrowed("tail call i32"));
-        let matcher = SubstringSetMatcher::new(vec![pattern1, pattern2])
+        let matcher = SubstringSetMatcher::new(vec![pattern1, pattern2], &context.config)
             .expect("expected pattern to be valid");
         let mctx = context.match_context();
         let input = mctx.search();
@@ -345,7 +354,7 @@ CHECK-DAG: tail call
 
         let pattern1 = Span::new(12..24, Cow::Borrowed("tail call i32"));
         let pattern2 = Span::new(25..37, Cow::Borrowed("tail call"));
-        let matcher = SubstringSetMatcher::new(vec![pattern1, pattern2])
+        let matcher = SubstringSetMatcher::new(vec![pattern1, pattern2], &context.config)
             .expect("expected pattern to be valid");
         let mctx = context.match_context();
         let input = mctx.search();
@@ -384,7 +393,7 @@ CHECK-DAG: sub1
 
         let pattern1 = Span::new(12..17, Cow::Borrowed("inc4"));
         let pattern2 = Span::new(19..35, Cow::Borrowed("sub1"));
-        let matcher = SubstringSetMatcher::new(vec![pattern1, pattern2])
+        let matcher = SubstringSetMatcher::new(vec![pattern1, pattern2], &context.config)
             .expect("expected pattern to be valid");
         let mctx = context.match_context();
         let input = mctx.search();

@@ -97,10 +97,10 @@ entry:
 ",
             );
         let mut mctx = context.match_context();
-        let pattern = SubstringMatcher::new(Span::new(
-            SourceSpan::from(6..14),
-            Cow::Borrowed("tail call"),
-        ))
+        let pattern = SubstringMatcher::new(
+            Span::new(SourceSpan::from(6..14), Cow::Borrowed("tail call")),
+            &mctx.config,
+        )
         .expect("expected pattern to be valid");
         let rule = CheckPlain::new(pattern);
         let matches = rule
@@ -108,10 +108,13 @@ entry:
             .expect("expected non-fatal application of rule");
         TestResult::from_matches(matches, &mctx).into_result()?;
 
-        let pattern = SubstringMatcher::new(Span::new(
-            SourceSpan::from(26..50),
-            Cow::Borrowed("@llvm.atomic.load.add.i64"),
-        ))
+        let pattern = SubstringMatcher::new(
+            Span::new(
+                SourceSpan::from(26..50),
+                Cow::Borrowed("@llvm.atomic.load.add.i64"),
+            ),
+            &mctx.config,
+        )
         .expect("expected pattern to be valid");
         let rule = CheckSame::new(pattern);
         let matches = rule

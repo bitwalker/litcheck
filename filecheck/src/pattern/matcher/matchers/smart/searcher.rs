@@ -204,7 +204,6 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
     ) -> DiagResult<MatchResult<'input>> {
         let result = match part {
             MatchOp::Literal(ref pattern) => self.match_literal(pattern, context),
-            MatchOp::Substring(ref matcher) => self.match_substring(matcher, context),
             MatchOp::Regex {
                 source,
                 pattern,
@@ -233,44 +232,6 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
     }
 
     fn match_literal<'context>(
-        &mut self,
-        pattern: &Span<Cow<'_, str>>,
-        context: &ContextGuard<'_, 'input, 'context>,
-    ) -> DiagResult<MatchResult<'input>> {
-        let buffer = self.cursor.as_str(self.cursor.bounds());
-        let note = if self.cursor.is_anchored() {
-            if buffer.starts_with(pattern.as_ref()) {
-                let start = self.cursor.start();
-                let end = start + pattern.as_bytes().len();
-                set_capturing_group_span(self.captures, self.match_pattern_id, 0, start, end);
-                return Ok(MatchResult::ok(MatchInfo::new(start..end, pattern.span())));
-            }
-            Some(format!(
-                "search is anchored: expected match to occur starting at offset {}",
-                self.cursor.start()
-            ))
-        } else {
-            let bytes = pattern.as_bytes();
-            if let Some(offset) = memchr::memmem::find(self.cursor.as_slice(), bytes) {
-                let start = self.cursor.start() + offset;
-                let end = start + bytes.len();
-                set_capturing_group_span(self.captures, self.match_pattern_id, 0, start, end);
-                return Ok(MatchResult::ok(MatchInfo::new(start..end, pattern.span())));
-            }
-            None
-        };
-
-        // Pattern did not match
-        Ok(MatchResult::failed(
-            CheckFailedError::MatchNoneButExpected {
-                span: pattern.span(),
-                match_file: context.match_file(),
-                note,
-            },
-        ))
-    }
-
-    fn match_substring<'context>(
         &mut self,
         matcher: &SubstringMatcher<'a>,
         context: &ContextGuard<'_, 'input, 'context>,
@@ -543,7 +504,13 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
             }),
             Right(s) => s,
         };
-        let pattern = Regex::new(&pattern)
+        let pattern = Regex::builder()
+            .syntax(
+                regex_automata::util::syntax::Config::new()
+                    .multi_line(true)
+                    .case_insensitive(context.config().ignore_case),
+            )
+            .build(&pattern)
             .map_err(|error| regex::build_error_to_diagnostic(error, 1, |_| span))?;
         self.match_regex(span, &pattern, context)
     }

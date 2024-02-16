@@ -53,6 +53,14 @@ impl<'a> Checker<'a> {
             source.clone(),
             buffer,
         );
+
+        if !self.config.allow_empty && buffer.is_empty() {
+            return TestResult::from_error(TestFailed::new(
+                vec![CheckFailedError::EmptyInput],
+                &context,
+            ));
+        }
+
         match discover_blocks(&self.program, &mut context) {
             Ok(blocks) => check_blocks(blocks, &self.program, &mut context),
             Err(failed) => TestResult::from_error(failed),

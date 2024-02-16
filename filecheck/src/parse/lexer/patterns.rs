@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, sync::Arc};
 
 use either::{
     Either,
@@ -49,11 +49,11 @@ impl Pattern {
         }
     }
 
-    pub fn generate_check_patterns(prefixes: &[Box<str>]) -> impl Iterator<Item = Pattern> + '_ {
+    pub fn generate_check_patterns(prefixes: &[Arc<str>]) -> impl Iterator<Item = Pattern> + '_ {
         PatternGen::new(Prefix::Check, prefixes)
     }
 
-    pub fn generate_comment_patterns(prefixes: &[Box<str>]) -> impl Iterator<Item = Pattern> + '_ {
+    pub fn generate_comment_patterns(prefixes: &[Arc<str>]) -> impl Iterator<Item = Pattern> + '_ {
         PatternGen::new(Prefix::Comment, prefixes)
     }
 }
@@ -69,7 +69,7 @@ struct PatternGen<'a> {
     checks: &'static [Check],
 }
 impl<'a> PatternGen<'a> {
-    fn new(prefix_ty: Prefix, prefixes: &[Box<str>]) -> Self {
+    fn new(prefix_ty: Prefix, prefixes: &[Arc<str>]) -> Self {
         let prefix_alt = if prefixes.is_empty() {
             match prefix_ty {
                 Prefix::Check => Cow::Borrowed("CHECK"),

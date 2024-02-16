@@ -11,11 +11,8 @@ use crate::{ast::Capture, common::*, expr::ValueType};
 ///
 /// If an op fails, the entire match attempt fails.
 pub enum MatchOp<'a> {
-    /// Match an literal string (always anchored)
-    Literal(Span<Cow<'a, str>>),
-    /// Match a literal string anywhere in the input
-    #[allow(dead_code)]
-    Substring(SubstringMatcher<'a>),
+    /// Match a literal string
+    Literal(SubstringMatcher<'a>),
     /// Match a regular expression, optionally capturing a string value.
     Regex {
         /// The original pattern as a string
@@ -76,7 +73,6 @@ impl<'a> fmt::Debug for MatchOp<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Literal(lit) => f.debug_tuple("Literal").field(lit).finish(),
-            Self::Substring(matcher) => f.debug_tuple("Substring").field(matcher).finish(),
             Self::Regex {
                 source,
                 pattern,

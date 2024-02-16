@@ -21,7 +21,7 @@ use litcheck::{
 use std::borrow::Cow;
 
 use super::{Lexed, Lexer, ParseError, ParseResult, ParserError, Token};
-use crate::ast::*;
+use crate::{ast::*, Config};
 
 macro_rules! lex {
     ($lexer:ident) => {
@@ -109,21 +109,12 @@ macro_rules! expect_ignore {
 }
 
 pub struct CheckFileParser<'config> {
-    pub check_prefixes: &'config [Box<str>],
-    pub comment_prefixes: &'config [Box<str>],
+    config: &'config Config,
     pub interner: &'config mut StringInterner,
 }
 impl<'config> CheckFileParser<'config> {
-    pub fn new(
-        check_prefixes: &'config [Box<str>],
-        comment_prefixes: &'config [Box<str>],
-        interner: &'config mut StringInterner,
-    ) -> Self {
-        Self {
-            check_prefixes,
-            comment_prefixes,
-            interner,
-        }
+    pub fn new(config: &'config Config, interner: &'config mut StringInterner) -> Self {
+        Self { config, interner }
     }
 
     pub fn parse<'a, S>(&mut self, code: &'a S) -> ParseResult<CheckFile<'a>>
@@ -131,7 +122,11 @@ impl<'config> CheckFileParser<'config> {
         S: SourceFile + ?Sized + 'a,
     {
         let source = code.source();
-        let mut lexer = Lexer::<'a>::new(code, self.check_prefixes, self.comment_prefixes);
+        let mut lexer = Lexer::<'a>::new(
+            code,
+            &self.config.check_prefixes,
+            &self.config.comment_prefixes,
+        );
         let mut comment = vec![];
         let mut lines = vec![];
         while let Some(lexed) = lexer.next() {
@@ -156,6 +151,11 @@ impl<'config> CheckFileParser<'config> {
                     })
                 }
             }
+        }
+
+        let unused_prefixes = lexer.unused_prefixes();
+        if !unused_prefixes.is_empty() && !self.config.allow_unused_prefixes {
+            return Err(ParserError::UnusedCheckPrefixes(unused_prefixes));
         }
 
         Ok(CheckFile::new(lines))

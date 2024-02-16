@@ -4,7 +4,7 @@ use crate::{
     pattern::{matcher::AlwaysMatch, PatternPrefix},
 };
 
-use super::{RegexSetMatcher, SubstringSetBuilder, SubstringSetMatcher};
+use super::{RegexSetMatcher, SubstringSetMatcher};
 
 #[derive(Debug)]
 pub enum MatchAll<'a> {
@@ -41,6 +41,7 @@ pub enum MatchAll<'a> {
 impl<'a> MatchAll<'a> {
     pub fn compile(
         mut unordered: Vec<CheckLine<'a>>,
+        config: &Config,
         interner: &mut StringInterner,
     ) -> DiagResult<Self> {
         use std::collections::BTreeMap;
@@ -63,7 +64,8 @@ impl<'a> MatchAll<'a> {
                 let pattern =
                     core::mem::replace(&mut unordered[id].pattern, CheckPattern::Empty(span));
                 if !pattern.is_empty() {
-                    suffixes[canonical_prefix_id].push(Pattern::compile(pattern, interner)?);
+                    suffixes[canonical_prefix_id]
+                        .push(Pattern::compile(pattern, config, interner)?);
                 } else {
                     suffixes[canonical_prefix_id].push(Pattern::Empty(AlwaysMatch::new(span)));
                 }
@@ -99,7 +101,7 @@ impl<'a> MatchAll<'a> {
             prefixes.push(pattern_prefix);
             let pattern = core::mem::replace(&mut unordered[id].pattern, CheckPattern::Empty(span));
             if !pattern.is_empty() {
-                suffixes.push(vec![Pattern::compile(pattern, interner)?]);
+                suffixes.push(vec![Pattern::compile(pattern, config, interner)?]);
             } else {
                 suffixes.push(vec![Pattern::Empty(AlwaysMatch::new(span))]);
             }
@@ -121,13 +123,13 @@ impl<'a> MatchAll<'a> {
         if is_literal {
             assert!(is_single_stage);
             // We can use a simple substring searcher in this case
-            return SubstringSetBuilder::new_with_patterns(
+            return SubstringSetMatcher::new(
                 prefixes
                     .into_iter()
                     .filter_map(PatternPrefix::into_str)
                     .collect(),
+                config,
             )
-            .build()
             .map(MatchAll::Literal);
         }
 
@@ -142,13 +144,13 @@ impl<'a> MatchAll<'a> {
             // By definition this must be a multi-stage match
             assert!(!is_single_stage);
 
-            let searcher = SubstringSetBuilder::new_with_patterns(
+            let searcher = SubstringSetMatcher::new(
                 prefixes
                     .into_iter()
                     .filter_map(PatternPrefix::into_str)
                     .collect(),
-            )
-            .build()?;
+                config,
+            )?;
 
             return Ok(Self::SubstringPrefix {
                 prefixes: searcher,
@@ -167,6 +169,7 @@ impl<'a> MatchAll<'a> {
                         .into_iter()
                         .filter_map(PatternPrefix::into_regex_pattern)
                         .collect(),
+                    config,
                     interner,
                 )
                 .map(MatchAll::Regex);
@@ -177,6 +180,7 @@ impl<'a> MatchAll<'a> {
                     .into_iter()
                     .filter_map(PatternPrefix::into_regex_pattern)
                     .collect(),
+                config,
                 interner,
             )?;
             return Ok(Self::RegexPrefix {
@@ -190,7 +194,7 @@ impl<'a> MatchAll<'a> {
         // entirely manually rather than delegating parts to other searchers
         let mut prefix_patterns = Vec::with_capacity(prefixes.len());
         for prefix in prefixes.into_iter() {
-            prefix_patterns.push(Pattern::from_prefix(prefix, interner)?);
+            prefix_patterns.push(Pattern::from_prefix(prefix, config, interner)?);
         }
 
         Ok(Self::AnyPrefix {

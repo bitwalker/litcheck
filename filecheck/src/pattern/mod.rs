@@ -45,6 +45,7 @@ impl<'a> Pattern<'a> {
 
     pub fn from_prefix(
         prefix: PatternPrefix<'a>,
+        config: &Config,
         interner: &mut StringInterner,
     ) -> DiagResult<Self> {
         match prefix {
@@ -60,23 +61,23 @@ impl<'a> Pattern<'a> {
                             prefix.span(),
                         )))
                     } else {
-                        Ok(Pattern::Regex(RegexMatcher::new_nocapture(Span::new(
-                            prefix.span(),
-                            Cow::Borrowed(r"\s+"),
-                        ))?))
+                        Ok(Pattern::Regex(RegexMatcher::new_nocapture(
+                            Span::new(prefix.span(), Cow::Borrowed(r"\s+")),
+                            config,
+                        )?))
                     }
                 } else {
-                    Ok(Pattern::Substring(SubstringMatcher::new(prefix)?))
+                    Ok(Pattern::Substring(SubstringMatcher::new(prefix, config)?))
                 }
             }
-            PatternPrefix::Regex { prefix, .. } if prefix.captures.is_empty() => {
-                Ok(Pattern::Regex(RegexMatcher::new_nocapture(prefix.pattern)?))
-            }
+            PatternPrefix::Regex { prefix, .. } if prefix.captures.is_empty() => Ok(
+                Pattern::Regex(RegexMatcher::new_nocapture(prefix.pattern, config)?),
+            ),
             PatternPrefix::Regex { prefix, .. } => {
-                Ok(Pattern::Regex(RegexMatcher::new(prefix, interner)?))
+                Ok(Pattern::Regex(RegexMatcher::new(prefix, config, interner)?))
             }
             PatternPrefix::Dynamic { prefix, .. } => {
-                let mut builder = SmartMatcher::build(prefix.span(), interner);
+                let mut builder = SmartMatcher::build(prefix.span(), config, interner);
                 builder.lower_match(prefix.into_owned())?;
                 Ok(Self::Smart(builder.build()))
             }
@@ -85,18 +86,21 @@ impl<'a> Pattern<'a> {
 
     pub fn compile(
         mut pattern: CheckPattern<'a>,
+        config: &Config,
         interner: &mut StringInterner,
     ) -> DiagResult<Self> {
         pattern.compact(interner);
         match pattern {
-            CheckPattern::Literal(s) => {
-                Self::from_prefix(PatternPrefix::Literal { prefix: s, id: 0 }, interner)
-            }
-            CheckPattern::Regex(s) => Ok(Pattern::Regex(RegexMatcher::new(s, interner)?)),
+            CheckPattern::Literal(s) => Self::from_prefix(
+                PatternPrefix::Literal { prefix: s, id: 0 },
+                config,
+                interner,
+            ),
+            CheckPattern::Regex(s) => Ok(Pattern::Regex(RegexMatcher::new(s, config, interner)?)),
             CheckPattern::Match(s) => {
                 // At least one part requires expression evaluation
                 let (span, parts) = s.into_parts();
-                let mut builder = SmartMatcher::build(span, interner);
+                let mut builder = SmartMatcher::build(span, config, interner);
                 for part in parts.into_iter() {
                     match part {
                         CheckPatternPart::Literal(s) => {
@@ -122,15 +126,18 @@ impl<'a> Pattern<'a> {
     pub fn compile_static(
         span: SourceSpan,
         mut pattern: CheckPattern<'a>,
+        config: &Config,
         interner: &mut StringInterner,
     ) -> DiagResult<SimpleMatcher<'a>> {
         pattern.compact(interner);
 
         match pattern {
-            CheckPattern::Literal(lit) => Ok(SimpleMatcher::Substring(SubstringMatcher::new(lit)?)),
-            CheckPattern::Regex(regex) if regex.captures.is_empty() => {
-                Ok(SimpleMatcher::Regex(RegexMatcher::new(regex, interner)?))
-            }
+            CheckPattern::Literal(lit) => Ok(SimpleMatcher::Substring(SubstringMatcher::new(
+                lit, config,
+            )?)),
+            CheckPattern::Regex(regex) if regex.captures.is_empty() => Ok(SimpleMatcher::Regex(
+                RegexMatcher::new(regex, config, interner)?,
+            )),
             pattern @ (CheckPattern::Regex(_) | CheckPattern::Match(_)) => {
                 let diag = Diag::new("invalid variable usage in pattern")
                     .with_label(Label::new(span, "occurs in this pattern"))
@@ -148,9 +155,11 @@ impl<'a> Pattern<'a> {
         }
     }
 
-    pub fn compile_literal(pattern: CheckPattern<'a>) -> DiagResult<Self> {
+    pub fn compile_literal(pattern: CheckPattern<'a>, config: &Config) -> DiagResult<Self> {
         match pattern {
-            CheckPattern::Literal(lit) => Ok(Pattern::Substring(SubstringMatcher::new(lit)?)),
+            CheckPattern::Literal(lit) => {
+                Ok(Pattern::Substring(SubstringMatcher::new(lit, config)?))
+            }
             CheckPattern::Regex(_) | CheckPattern::Match(_) => {
                 unreachable!("the lexer will never emit tokens for these non-terminals")
             }

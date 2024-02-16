@@ -96,18 +96,22 @@ entry:
 ",
             );
         let mut mctx = context.match_context();
-        let pattern =
-            SubstringMatcher::new(Span::new(SourceSpan::from(8..12), Cow::Borrowed("@inc4")))
-                .expect("expected pattern to be valid");
+        let pattern = SubstringMatcher::new(
+            Span::new(SourceSpan::from(8..12), Cow::Borrowed("@inc4")),
+            &mctx.config,
+        )
+        .expect("expected pattern to be valid");
         let rule = CheckPlain::new(pattern);
         let matches = rule
             .apply(&mut mctx)
             .expect("expected non-fatal application of rule");
         TestResult::from_matches(matches, &mctx).into_result()?;
 
-        let pattern =
-            SubstringMatcher::new(Span::new(SourceSpan::from(22..30), Cow::Borrowed("entry:")))
-                .expect("expected pattern to be valid");
+        let pattern = SubstringMatcher::new(
+            Span::new(SourceSpan::from(22..30), Cow::Borrowed("entry:")),
+            &mctx.config,
+        )
+        .expect("expected pattern to be valid");
         let rule = CheckNext::new(pattern);
         let matches = rule
             .apply(&mut mctx)

@@ -179,7 +179,7 @@ pub struct CheckProgram<'a> {
 impl<'a> CheckProgram<'a> {
     pub fn compile(
         check_file: CheckFile<'a>,
-        _config: &Config,
+        config: &Config,
         interner: &mut StringInterner,
     ) -> DiagResult<Self> {
         let lines = check_file.into_lines();
@@ -188,7 +188,7 @@ impl<'a> CheckProgram<'a> {
         }
 
         let mut program = Self::default();
-        program.compile_lines(lines, interner)?;
+        program.compile_lines(lines, config, interner)?;
 
         Ok(program)
     }
@@ -197,6 +197,7 @@ impl<'a> CheckProgram<'a> {
     fn compile_lines(
         &mut self,
         lines: Vec<CheckLine<'a>>,
+        config: &Config,
         interner: &mut StringInterner,
     ) -> DiagResult<()> {
         // Divide up input lines into blocks
@@ -245,13 +246,14 @@ impl<'a> CheckProgram<'a> {
             blocks.push_back((label.take(), block));
         }
 
-        self.compile_blocks(&mut blocks, interner)
+        self.compile_blocks(&mut blocks, config, interner)
     }
 
     /// Categorize and process blocks
     fn compile_blocks(
         &mut self,
         blocks: &mut VecDeque<(Option<CheckLine<'a>>, Vec<CheckLine<'a>>)>,
+        config: &Config,
         interner: &mut StringInterner,
     ) -> DiagResult<()> {
         let mut groups = vec![];
@@ -272,7 +274,7 @@ impl<'a> CheckProgram<'a> {
                                 break;
                             }
                         }
-                        let matcher = MatchAny::from(MatchAll::compile(nots, interner)?);
+                        let matcher = MatchAny::from(MatchAll::compile(nots, config, interner)?);
                         if body.is_empty() {
                             match groups.pop() {
                                 Some(CheckGroup::Tree(left)) => {
@@ -322,7 +324,8 @@ impl<'a> CheckProgram<'a> {
                                 break;
                             }
                         }
-                        let check_dag = Box::new(CheckDag::new(MatchAll::compile(dags, interner)?));
+                        let check_dag =
+                            Box::new(CheckDag::new(MatchAll::compile(dags, config, interner)?));
 
                         let group = if matches!(
                             body.front().map(|line| line.kind()),
@@ -333,10 +336,16 @@ impl<'a> CheckProgram<'a> {
                                 Check::Plain => CheckGroup::Ordered(vec![self.compile_rule(
                                     line.ty,
                                     line.pattern,
+                                    config,
                                     interner,
                                 )?]),
                                 Check::Count(count) => CheckGroup::Repeated {
-                                    rule: self.compile_rule(line.ty, line.pattern, interner)?,
+                                    rule: self.compile_rule(
+                                        line.ty,
+                                        line.pattern,
+                                        config,
+                                        interner,
+                                    )?,
                                     count,
                                 },
                                 _ => unsafe { std::hint::unreachable_unchecked() },
@@ -370,7 +379,7 @@ impl<'a> CheckProgram<'a> {
                     }
                     Check::Count(count) => {
                         let group = CheckGroup::Repeated {
-                            rule: self.compile_rule(line.ty, line.pattern, interner)?,
+                            rule: self.compile_rule(line.ty, line.pattern, config, interner)?,
                             count,
                         };
                         if let Some((maybe_left, root)) = pending_tree.take() {
@@ -409,6 +418,7 @@ impl<'a> CheckProgram<'a> {
                                     rules.push(self.compile_rule(
                                         next.ty,
                                         next.pattern,
+                                        config,
                                         interner,
                                     )?);
                                 }
@@ -439,7 +449,7 @@ impl<'a> CheckProgram<'a> {
             }
             assert!(pending_tree.is_none());
             if let Some(label) = maybe_label {
-                let label = Pattern::compile_static(label.span, label.pattern, interner)?;
+                let label = Pattern::compile_static(label.span, label.pattern, config, interner)?;
                 self.sections.push(CheckSection::Block {
                     label,
                     body: core::mem::take(&mut groups),
@@ -458,12 +468,13 @@ impl<'a> CheckProgram<'a> {
         &mut self,
         ty: CheckType,
         pattern: CheckPattern<'a>,
+        config: &Config,
         interner: &mut StringInterner,
     ) -> DiagResult<Box<dyn DynRule + 'a>> {
         let pattern = if ty.is_literal_match() {
-            Pattern::compile_literal(pattern)?
+            Pattern::compile_literal(pattern, config)?
         } else {
-            Pattern::compile(pattern, interner)?
+            Pattern::compile(pattern, config, interner)?
         };
 
         match ty.kind {

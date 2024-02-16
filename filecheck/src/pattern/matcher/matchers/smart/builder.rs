@@ -4,21 +4,27 @@ use crate::{
     ast::{Capture, RegexPattern},
     common::*,
     expr::{TypedVariable, ValueType},
-    pattern::matcher::regex,
+    pattern::matcher::{regex, SubstringMatcher},
 };
 
 use super::{CaptureGroup, MatchOp, SmartMatcher};
 
 pub struct SmartMatcherBuilder<'a, 'config> {
     span: SourceSpan,
+    config: &'config Config,
     interner: &'config mut StringInterner,
     parts: Vec<MatchOp<'a>>,
     raw_group_info: Vec<Vec<Option<Cow<'a, str>>>>,
 }
 impl<'a, 'config> SmartMatcherBuilder<'a, 'config> {
-    pub fn new(span: SourceSpan, interner: &'config mut StringInterner) -> Self {
+    pub fn new(
+        span: SourceSpan,
+        config: &'config Config,
+        interner: &'config mut StringInterner,
+    ) -> Self {
         Self {
             span,
+            config,
             interner,
             parts: vec![],
             raw_group_info: vec![vec![None]],
@@ -75,7 +81,23 @@ impl<'a, 'config> SmartMatcherBuilder<'a, 'config> {
 
     pub fn literal(&mut self, pattern: Span<Cow<'a, str>>) -> DiagResult<&mut Self> {
         self.register_empty_pattern_group();
-        self.parts.push(MatchOp::Literal(pattern));
+        // We support both anchored/unanchored searches when the pattern is the
+        // prefix for the overall SmartMatcher, because the SmartMatcher might
+        // be used in both ways. Otherwise, we know the searches are anchored.
+        let matcher = if self.parts.is_empty() {
+            SubstringMatcher::new_with_start_kind(
+                pattern,
+                aho_corasick::StartKind::Both,
+                self.config,
+            )?
+        } else {
+            SubstringMatcher::new_with_start_kind(
+                pattern,
+                aho_corasick::StartKind::Anchored,
+                self.config,
+            )?
+        };
+        self.parts.push(MatchOp::Literal(matcher));
         Ok(self)
     }
 
@@ -84,7 +106,13 @@ impl<'a, 'config> SmartMatcherBuilder<'a, 'config> {
     }
 
     pub fn regex_pattern(&mut self, source: RegexPattern<'a>) -> DiagResult<&mut Self> {
-        let pattern = Regex::new(source.as_ref())
+        let pattern = Regex::builder()
+            .syntax(
+                regex_automata::util::syntax::Config::new()
+                    .multi_line(true)
+                    .case_insensitive(self.config.ignore_case),
+            )
+            .build(source.as_ref())
             .map_err(|error| regex::build_error_to_diagnostic(error, 1, |_| source.span()))?;
 
         let groups = pattern.group_info();
@@ -178,7 +206,13 @@ impl<'a, 'config> SmartMatcherBuilder<'a, 'config> {
         let group_name = self.interner.resolve(symbol);
         let span = source.span();
         let source = format!("(?P<{group_name}>{source})");
-        let pattern = Regex::new(&source)
+        let pattern = Regex::builder()
+            .syntax(
+                regex_automata::util::syntax::Config::new()
+                    .multi_line(true)
+                    .case_insensitive(self.config.ignore_case),
+            )
+            .build(&source)
             .map_err(|error| regex::build_error_to_diagnostic(error, 1, |_| source.span()))?;
         let groups = pattern.group_info();
         let pattern_id = self.register_pattern_group(groups);
