@@ -638,7 +638,7 @@ checksum = "c4cd1a83af159aa67994778be9070f0ae1bd732942279cabb14f86f986a21456"
 
 [[package]]
 name = "litcheck"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -658,7 +658,7 @@ dependencies = [
 
 [[package]]
 name = "litcheck-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -677,7 +677,7 @@ dependencies = [
 
 [[package]]
 name = "litcheck-filecheck"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -704,7 +704,7 @@ dependencies = [
 
 [[package]]
 name = "litcheck-lit"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "assert_cmd",

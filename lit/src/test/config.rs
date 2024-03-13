@@ -165,12 +165,12 @@ impl TestConfig {
         // and depending on how it was invoked,
         let mut exe =
             std::env::current_exe().expect("unable to detect lit/filecheck executable path");
-        let filecheck = if exe.ends_with("filecheck") {
-            // We are running lit, so a filename of 'filecheck'
+        let filecheck = if exe.ends_with("litcheck") {
+            // We are running lit, so a filename of 'litcheck'
             // means that lit was invoked explicitly, thus we
             // should use a substitution that invokes filecheck
             // explicitly
-            StaticCow::Owned(format!("{} check", exe.display()))
+            StaticCow::Owned(format!("{} filecheck", exe.display()))
         } else if exe.ends_with("lit") {
             // We must have been invoked as a symlink, in
             // which case the filecheck symlink is in the
