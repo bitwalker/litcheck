@@ -9,7 +9,7 @@ members = [
 
 [workspace.package]
 version = "0.2.0"
-rust-version = "1.75"
+rust-version = "1.76"
 authors = ["Paul Schoenfelder"]
 repository = "https://github.com/bitwalker/litcheck"
 homepage = "https://github.com/bitwalker/litcheck"
