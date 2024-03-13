@@ -49,7 +49,7 @@ impl TestSuiteRegistry for DefaultTestSuiteRegistry {
                 &input_path
             };
 
-            if let Some(suite) = self.find_nearest_suite(&input_path, search_root)? {
+            if let Some(suite) = self.find_nearest_suite(&input_path, search_root, config)? {
                 log::debug!("resolved input {} to {}", input.display(), &suite.id());
                 let suite_source_dir = suite.source_dir();
                 let filter_path = input_path.strip_prefix(suite_source_dir).expect(
@@ -157,6 +157,7 @@ impl DefaultTestSuiteRegistry {
         &mut self,
         path: P,
         cwd: &Path,
+        config: &Config,
     ) -> DiagResult<Option<Arc<TestSuite>>> {
         let path = path.as_ref();
         // If the path is a directory, we need to check the cache for an exact
@@ -175,17 +176,18 @@ impl DefaultTestSuiteRegistry {
                 let entry = entry
                     .into_diagnostic()
                     .wrap_err("found test suite config, but it could not be read")?;
-                return self.load_without_cache(entry.path()).map(Some);
+                return self.load_without_cache(entry.path(), config).map(Some);
             }
         }
 
-        self.find_nearest_suite_containing(path, cwd)
+        self.find_nearest_suite_containing(path, cwd, config)
     }
 
     fn find_nearest_suite_containing(
         &mut self,
         path: &Path,
         cwd: &Path,
+        config: &Config,
     ) -> DiagResult<Option<Arc<TestSuite>>> {
         // If `dir` is not explicitly represented in `config_paths`, then it hasn't
         // been visited to check for a `lit.suite.toml` file yet, and we can't rely
@@ -210,7 +212,7 @@ impl DefaultTestSuiteRegistry {
             });
             if let Some(entry) = found.next() {
                 let entry = entry.into_diagnostic()?;
-                let suite = self.load_without_cache(entry.path())?;
+                let suite = self.load_without_cache(entry.path(), config)?;
                 // If the test suite source directory contains `dir`, we've found a match;
                 // otherwise, we must continue searching upwards.
                 if dir.starts_with(suite.source_dir()) {
@@ -227,8 +229,8 @@ impl DefaultTestSuiteRegistry {
         Ok(None)
     }
 
-    fn load_without_cache(&mut self, path: &Path) -> DiagResult<Arc<TestSuite>> {
-        let suite = TestSuite::parse(path)?;
+    fn load_without_cache(&mut self, path: &Path, config: &Config) -> DiagResult<Arc<TestSuite>> {
+        let suite = TestSuite::parse(path, config)?;
         self.suites.insert(suite.clone());
         self.tests_by_suite.insert(suite.id(), TestList::default());
         // Make lookups for the config path easy

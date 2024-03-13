@@ -21,7 +21,7 @@ use litcheck::{
 use parking_lot::Mutex;
 use serde::Deserialize;
 
-use crate::test::TestConfig;
+use crate::{Config, test::TestConfig};
 
 #[derive(Deserialize)]
 pub struct TestSuite {
@@ -104,7 +104,7 @@ impl TestSuite {
     }
 
     /// Load test suite configuration from `input`
-    pub fn parse<P: AsRef<Path>>(path: P) -> DiagResult<Arc<Self>> {
+    pub fn parse<P: AsRef<Path>>(path: P, config: &Config) -> DiagResult<Arc<Self>> {
         let path = path.as_ref();
         let path = if path.is_absolute() {
             path.to_path_buf()
@@ -177,6 +177,13 @@ impl TestSuite {
             })
             .with_source_code(source));
         }
+
+        // Ensure default test features/substitutions are present
+        let mut default_config = TestConfig::default();
+        default_config.set_default_features(config);
+        default_config.set_default_substitutions(config, &suite, path.as_path());
+        let suite_config = Arc::make_mut(&mut suite.config);
+        suite_config.inherit(&default_config);
 
         Ok(Arc::new(suite))
     }
