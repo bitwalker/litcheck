@@ -186,7 +186,7 @@ impl TestConfig {
         self.substitutions.insert("[Ff]ile[Cc]heck", filecheck);
 
         self.substitutions
-            .insert("%{pathsep}", if cfg!(windows) { ";" } else { ":" });
+            .insert(r"%\{pathsep\}", if cfg!(windows) { ";" } else { ":" });
 
         let test_root = source_dir
             .components()
@@ -195,7 +195,7 @@ impl TestConfig {
             .as_os_str()
             .to_string_lossy()
             .into_owned();
-        self.substitutions.insert("%{fs-src-root}", test_root);
+        self.substitutions.insert(r"%\{fs-src-root\}", test_root);
         let temp_root = suite
             .working_dir()
             .components()
@@ -204,9 +204,9 @@ impl TestConfig {
             .as_os_str()
             .to_string_lossy()
             .into_owned();
-        self.substitutions.insert("%{fs-tmp-root}", temp_root);
+        self.substitutions.insert(r"%\{fs-tmp-root\}", temp_root);
         self.substitutions
-            .insert("%{fs-sep}", std::path::MAIN_SEPARATOR_STR);
+            .insert(r"%\{fs-sep\}", std::path::MAIN_SEPARATOR_STR);
     }
 
     #[inline]

@@ -9,7 +9,7 @@ use serde::Deserialize;
 use crate::FxIndexMap;
 
 #[derive(Diagnostic, Debug, thiserror::Error)]
-#[error("invalid substitution pattern: '{pattern}'")]
+#[error("invalid substitution pattern: '{pattern}': {error}")]
 #[diagnostic()]
 pub struct InvalidSubstitutionPatternError {
     #[label("{error}")]
