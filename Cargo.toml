@@ -8,7 +8,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.2.1"
+version = "0.2.2"
 rust-version = "1.76"
 authors = ["Paul Schoenfelder"]
 repository = "https://github.com/bitwalker/litcheck"
@@ -38,9 +38,9 @@ target-lexicon = "0.12"
 thiserror = "1.0"
 toml = { version = "0.8", features = ["parse", "preserve_order"] }
 
-litcheck = { version = "0.2.0", package = "litcheck-core", path = "./core" }
-filecheck = { version = "0.2.0", package = "litcheck-filecheck", path = "./filecheck" }
-lit = { version = "0.2.0", package = "litcheck-lit", path = "./lit" }
+litcheck = { version = "0.2.2", package = "litcheck-core", path = "./core" }
+filecheck = { version = "0.2.2", package = "litcheck-filecheck", path = "./filecheck" }
+lit = { version = "0.2.2", package = "litcheck-lit", path = "./lit" }
 
 #[profile.dev]
 # Needed for 'inventory'
