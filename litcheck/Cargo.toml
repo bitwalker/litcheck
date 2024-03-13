@@ -1,23 +1,23 @@
 [package]
 name = "litcheck"
-version = "0.1.0"
 description = "A standalone implementation of the lit and FileCheck utilities in a single package"
-authors = ["Paul Schoenfelder"]
-repository = "https://github.com/bitwalker/litcheck"
-homepage = "https://github.com/bitwalker/litcheck"
-categories = ["Testing"]
-keywords = ["lit", "filecheck", "llvm"]
-edition = "2021"
-license = "Apache-2.0"
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+categories.workspace = true
+keywords.workspace = true
+edition.workspace = true
+license.workspace = true
 
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
 console.workspace = true
 env_logger = "0.9"
-filecheck.workspace = true
 indicatif = { version = "0.17", features = ["rayon"] }
 lit = { workspace = true, features = ["fancy-diagnostics"] }
+filecheck = { workspace = true, features = ["fancy-diagnostics"] }
 litcheck = { workspace = true, features = ["fancy-diagnostics"] }
 miette = { workspace = true, features = ["fancy"] }
 parking_lot.workspace = true

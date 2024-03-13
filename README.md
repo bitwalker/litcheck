@@ -56,7 +56,7 @@ so don't judge me too harshly.
 
 First, `cargo install` it:
 
-    $ cargo install --git https://github.com/bitwalker/litcheck
+    $ cargo install litcheck
     
 Then, you can use the tools using two different approaches:
 
