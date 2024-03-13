@@ -1,7 +1,4 @@
-use litcheck::diagnostics::DiagResult;
 use regex::Regex;
-
-use crate::config::BooleanExpr;
 
 use super::*;
 

@@ -1,6 +1,5 @@
 use std::{
     borrow::Cow,
-    convert::AsRef,
     path::{Path, PathBuf},
 };
 

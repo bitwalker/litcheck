@@ -1,7 +1,6 @@
 use std::{
     borrow::{Borrow, Cow},
     collections::BTreeMap,
-    convert::AsRef,
     fmt,
 };
 

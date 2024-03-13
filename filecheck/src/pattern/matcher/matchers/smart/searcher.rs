@@ -1,7 +1,3 @@
-use either::{
-    Either,
-    Either::{Left, Right},
-};
 use regex_automata::{
     util::{captures::Captures, primitives::NonMaxUsize},
     PatternID,
@@ -11,7 +7,7 @@ use crate::{
     ast::Capture,
     common::*,
     errors::{InvalidNumericCastError, UndefinedVariableError},
-    expr::{Number, ValueType},
+    expr::ValueType,
     pattern::matcher::{regex, SubstringMatcher},
 };
 

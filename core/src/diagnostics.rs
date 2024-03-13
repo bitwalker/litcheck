@@ -83,7 +83,6 @@ pub type DiagResult<T> = miette::Result<T>;
 
 use std::{
     borrow::{Borrow, Cow},
-    convert::{AsMut, AsRef},
     fmt,
     hash::{Hash, Hasher},
     ops::{Deref, DerefMut},

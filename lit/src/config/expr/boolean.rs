@@ -750,7 +750,7 @@ impl<'a> Iterator for Tokenizer<'a> {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::BTreeSet, fmt::Write};
+    use std::fmt::Write;
 
     use super::*;
     use litcheck::diagnostics::Report;

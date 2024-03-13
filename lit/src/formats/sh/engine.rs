@@ -1,11 +1,6 @@
 use std::time::Duration;
 
-use litcheck::diagnostics::{DiagResult, Span};
-
-use crate::{
-    test::{Test, TestResult, TestStatus},
-    Config,
-};
+use litcheck::diagnostics::Span;
 
 use super::{
     script::directives::{Directive, ScriptCommand},

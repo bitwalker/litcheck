@@ -1,4 +1,4 @@
-use std::{cmp::Ordering, collections::VecDeque, fmt};
+use std::{cmp::Ordering, collections::VecDeque};
 
 use crate::common::*;
 

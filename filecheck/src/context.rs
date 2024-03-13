@@ -65,6 +65,7 @@ pub trait Context<'input, 'context> {
 }
 
 pub trait ContextExt<'input, 'context>: Context<'input, 'context> {
+    #[allow(unused)]
     fn get_or_intern<S: AsRef<str>>(&mut self, value: S) -> Symbol;
 
     /// Get an [Input] that can be used to search an arbitrary range of the underlying buffer

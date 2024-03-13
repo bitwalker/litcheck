@@ -1,9 +1,6 @@
 use std::{fmt, ops::Range};
 
-use litcheck::diagnostics::{NamedSourceFile, SourceSpan, Span, Spanned};
 use regex::Regex;
-
-use crate::config::BooleanExpr;
 
 use super::*;
 

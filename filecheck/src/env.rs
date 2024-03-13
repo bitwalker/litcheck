@@ -1,5 +1,3 @@
-use std::fmt;
-
 use im_rc::OrdMap;
 
 use crate::common::*;
