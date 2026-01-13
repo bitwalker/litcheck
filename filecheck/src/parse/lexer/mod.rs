@@ -80,7 +80,7 @@ impl<'input> Lexer<'input> {
         Lexer {
             input,
             patterns,
-            check_prefixes: check_prefixes.iter().cloned().collect(),
+            check_prefixes: check_prefixes.to_vec(),
             seen_prefixes: vec![false; check_prefixes.len()],
             regex,
             searcher,

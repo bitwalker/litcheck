@@ -98,7 +98,7 @@ entry:
         let mut mctx = context.match_context();
         let pattern = SubstringMatcher::new(
             Span::new(SourceSpan::from(8..12), Cow::Borrowed("@inc4")),
-            &mctx.config,
+            mctx.config,
         )
         .expect("expected pattern to be valid");
         let rule = CheckPlain::new(pattern);
@@ -109,7 +109,7 @@ entry:
 
         let pattern = SubstringMatcher::new(
             Span::new(SourceSpan::from(22..30), Cow::Borrowed("entry:")),
-            &mctx.config,
+            mctx.config,
         )
         .expect("expected pattern to be valid");
         let rule = CheckNext::new(pattern);

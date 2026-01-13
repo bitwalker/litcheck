@@ -8,6 +8,7 @@ use either::{
 #[derive(Debug)]
 pub struct Pattern {
     pub raw: String,
+    #[allow(unused)]
     pub prefix: Prefix,
     pub ty: Check,
 }

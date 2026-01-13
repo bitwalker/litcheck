@@ -21,7 +21,7 @@ use litcheck::{
 use parking_lot::Mutex;
 use serde::Deserialize;
 
-use crate::{Config, test::TestConfig};
+use crate::{test::TestConfig, Config};
 
 #[derive(Deserialize)]
 pub struct TestSuite {

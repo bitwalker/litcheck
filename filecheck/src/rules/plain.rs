@@ -76,7 +76,7 @@ entry:
         let mut mctx = context.match_context();
         let pattern = SubstringMatcher::new(
             Span::new(SourceSpan::from(8..12), Cow::Borrowed("@inc4")),
-            &mctx.config,
+            mctx.config,
         )
         .expect("expected pattern to be valid");
         let rule = CheckPlain::new(pattern);

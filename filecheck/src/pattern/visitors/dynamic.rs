@@ -29,9 +29,8 @@ use crate::{ast::Capture, common::*, env::Bindings, pattern::search::Input as Se
 ///
 /// * No more matches can be found for any prefix pattern
 /// * We hit end-of-block/file before all matches have been found
-/// * One or more of the matches failed due to constraints or other
-/// post-processing, and no further successful matches for those patterns
-/// were found.
+/// * One or more of the matches failed due to constraints or other post-processing, and no further
+///   successful matches for those patterns were found.
 pub struct DynamicPatternSetVisitor<'a, S> {
     searcher: &'a mut S,
     suffix_patterns: &'a [Vec<Pattern<'a>>],

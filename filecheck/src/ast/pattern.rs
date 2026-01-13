@@ -703,13 +703,12 @@ pub enum Match<'a> {
     ///
     /// The precise format of this match type is `[[<name>:<pattern>]]`, where:
     ///
-    /// * `<name>` is a local variable name of the form `[A-Za-z_][A-Za-z0-9_]*`,
-    /// or a global variable name (prefixed with `$`). However, you are not permitted
-    /// to (re)bind global variables.
-    ///
-    /// * `:<pattern>`, is any valid, non-empty, regular expression pattern. When present,
-    /// it changes the semantics of this match type from string substitution to string
-    /// capture - i.e. `name` will be bound to the matched input string.
+    /// * `<name>` is a local variable name of the form `[A-Za-z_][A-Za-z0-9_]*`, or a global
+    ///   variable name (prefixed with `$`). However, you are not permitted to (re)bind global
+    ///   variables.
+    /// * `:<pattern>`, is any valid, non-empty, regular expression pattern. When present, it
+    ///   changes the semantics of this match type from string substitution to string capture - i.e.
+    ///   `name` will be bound to the matched input string.
     ///
     /// If `:<pattern>` is not present, then the entire `[[<name>]]` block will be
     /// substituted with the value of `<name>` as a literal pattern. The value will
@@ -736,24 +735,20 @@ pub enum Match<'a> {
     ///
     /// The unified format is `[[#%<fmtspec>,<NUMVAR>: <constraint> <expr]]` where:
     ///
-    /// * `%<fmtspec>` is the same format specifier as used for defining a variable, but
-    /// in this context it indicates how the numeric value should be matched. It is optional,
-    /// and if not present, both components of the format spec are inferred from the matching
-    /// format of the numeric variables used by the expression constraint (if any), and
-    /// defaults to `%u` (unsigned, no leading zeros) if no numeric variable is used. In
-    /// case of conflict between format specifiers of several numeric variables, the
-    /// conversion specifier becomes mandatory, but the precision specifier remains optional.
-    ///
-    /// * `<NUMVAR>:`, when present, indicates that `NUMVAR` will be (re)bound to the matched
-    /// value, if the match succeeds. If not present, no variable is defined.
-    ///
-    /// * `<constraint>` describes how the value to match must relate to the value of the
-    /// given expression. Currently, the only constraint type is `==` for equality. If present,
-    /// `<expr>` is mandatory; however the inverse is not true, `<expr>` can be provided
-    /// without `<constraint>`, implying a default equality constraint.
-    ///
+    /// * `%<fmtspec>` is the same format specifier as used for defining a variable, but in this
+    ///   context it indicates how the numeric value should be matched. It is optional, and if not
+    ///   present, both components of the format spec are inferred from the matching format of the
+    ///   numeric variables used by the expression constraint (if any), and defaults to `%u`
+    ///   (unsigned, no leading zeros) if no numeric variable is used. In case of conflict between
+    ///   format specifiers of several numeric variables, the conversion specifier becomes
+    ///   mandatory, but the precision specifier remains optional.
+    /// * `<NUMVAR>:`, when present, indicates that `NUMVAR` will be (re)bound to the matched value,
+    ///   if the match succeeds. If not present, no variable is defined.
+    /// * `<constraint>` describes how the value to match must relate to the value of the given
+    ///   expression. Currently, the only constraint type is `==` for equality. If present, `<expr>`
+    ///   is mandatory; however the inverse is not true, `<expr>` can be provided without
+    ///   `<constraint>`, implying a default equality constraint.
     /// * `<expr>` is an expression. An expression is in turn recursively defined as:
-    ///
     ///   - A numeric operand
     ///   - An expression followed by an operator and a numeric operand
     ///

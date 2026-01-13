@@ -1,3 +1,5 @@
+#![expect(unused_assignments)]
+
 mod lexer;
 mod parser;
 #[cfg(test)]

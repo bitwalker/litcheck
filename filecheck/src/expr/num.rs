@@ -1,3 +1,5 @@
+#![expect(unused_assignments)]
+
 use crate::common::*;
 
 #[derive(Debug, Diagnostic, thiserror::Error)]
@@ -74,7 +76,7 @@ impl Number {
                     })
                     .map_err(|error| ParseNumberError::InvalidFormat {
                         span,
-                        reason: error.kind().clone(),
+                        reason: *error.kind(),
                     })?;
                 if precision == 0 {
                     return Ok(value);
@@ -99,7 +101,7 @@ impl Number {
                     })
                     .map_err(|error| ParseNumberError::InvalidFormat {
                         span,
-                        reason: error.kind().clone(),
+                        reason: *error.kind(),
                     })?;
                 if precision == 0 {
                     return Ok(value);
@@ -136,7 +138,7 @@ impl Number {
                     })
                     .map_err(|error| ParseNumberError::InvalidFormat {
                         span,
-                        reason: error.kind().clone(),
+                        reason: *error.kind(),
                     })?;
                 if input.len() != precision as usize {
                     Err(ParseNumberError::PrecisionMismatch {
@@ -159,7 +161,7 @@ impl PartialEq for Number {
 }
 impl PartialOrd for Number {
     fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
-        Some(self.value.cmp(&other.value))
+        Some(self.cmp(other))
     }
 }
 impl Ord for Number {

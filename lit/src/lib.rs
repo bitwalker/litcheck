@@ -1,4 +1,4 @@
-#![feature(iter_intersperse)]
+//#![feature(iter_intersperse)]
 
 pub mod config;
 pub mod format;

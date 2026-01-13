@@ -1,3 +1,5 @@
+#![expect(unused_assignments)]
+
 use std::{borrow::Borrow, collections::BTreeSet, fmt, ops::Range, str::FromStr};
 
 use regex::Regex;
@@ -219,7 +221,7 @@ impl<'a> BooleanExprParser<'a> {
     pub fn new(input: &'a str) -> Self {
         Self {
             tokenizer: Tokenizer::new(input),
-            current: Span::new(SourceSpan::from(input.as_bytes().len()), Token::Eof),
+            current: Span::new(SourceSpan::from(input.len()), Token::Eof),
             expr: BooleanExpr::default(),
         }
     }

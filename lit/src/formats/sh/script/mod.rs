@@ -1,3 +1,5 @@
+#![expect(unused_assignments)]
+
 pub mod directives;
 mod parser;
 #[cfg(test)]

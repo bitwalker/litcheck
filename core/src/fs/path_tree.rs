@@ -346,7 +346,7 @@ fn canonicalize_and_type<'a>(path: &'a Path) -> (Cow<'a, Path>, PathType) {
     use smallvec::SmallVec;
     use std::path::Component;
 
-    const PATH_SEPARATOR_SIZE: usize = std::path::MAIN_SEPARATOR_STR.as_bytes().len();
+    const PATH_SEPARATOR_SIZE: usize = std::path::MAIN_SEPARATOR_STR.len();
 
     if let Ok(path) = path.canonicalize() {
         let path: Cow<'a, Path> = Cow::Owned(path);
@@ -641,13 +641,13 @@ impl Node {
     /// For example, consider a tree in which `/foo/bar/baz/qux.txt` and
     /// `/foo/bar/qux2.txt` are both inserted:
     ///
-    /// * Given `/foo/bar/baz/other.txt` this function will select `/foo/bar/qux2.txt`,
-    /// because `/foo/bar/baz/qux.txt` is a sibling, but not an ancestor.
-    /// * Given `/foo/bar/qux2.txt`, it will select None, because there is no ancestor
-    /// explicitly represented in the tree for this path
+    /// * Given `/foo/bar/baz/other.txt` this function will select `/foo/bar/qux2.txt`, because
+    ///   `/foo/bar/baz/qux.txt` is a sibling, but not an ancestor.
+    /// * Given `/foo/bar/qux2.txt`, it will select None, because there is no ancestor explicitly
+    ///   represented in the tree for this path
     /// * Given `/foo/bar/baz/qux.txt`, it will select `/foo/bar/qux2.txt`, because
-    /// `/foo/bar/baz/qux.txt` is not an ancestor of itself, and its nearest ancestor
-    /// is the selected path.
+    ///   `/foo/bar/baz/qux.txt` is not an ancestor of itself, and its nearest ancestor is the
+    ///   selected path.
     pub fn nearest_ancestor(&self, mut path: &Path) -> Option<(PathBuf, DataKey)> {
         use smallvec::SmallVec;
         if !self.has_common_prefix(path) {
@@ -1128,7 +1128,7 @@ impl<'a, V> Dfs<'a, V> {
             .iter()
             .find(|root| root.has_common_prefix(path))
         {
-            None => return Self::empty(tree, only_leaves, max_depth),
+            None => Self::empty(tree, only_leaves, max_depth),
             Some(root) => {
                 let mut next = Some(root);
                 let mut input_path = path;

@@ -1,7 +1,6 @@
-#[cfg(test)]
-use std::assert_matches::assert_matches;
-
 use pretty_assertions::assert_eq;
+
+use litcheck::assert_matches;
 
 use crate::{
     ast::*,

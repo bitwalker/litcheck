@@ -84,7 +84,7 @@ impl<'check> Rule for CheckDag<'check> {
 mod tests {
     use super::*;
     use crate::check::CheckSection;
-    use std::assert_matches::assert_matches;
+    use litcheck::assert_matches;
     use std::collections::VecDeque;
 
     /// This test ensures that the ordering of CHECK-DAG patterns is not
@@ -131,7 +131,7 @@ block3(v11):
         let lines = check_file.into_lines();
 
         let mut mctx = context.match_context();
-        let match_all = MatchAll::compile(lines, &mctx.config, mctx.env.interner())?;
+        let match_all = MatchAll::compile(lines, mctx.config, mctx.env.interner())?;
         let rule = CheckDag::new(match_all);
         let result = rule
             .apply(&mut mctx)
@@ -183,7 +183,7 @@ block3(v11):
         let lines = check_file.into_lines();
 
         let mut mctx = context.match_context();
-        let match_all = MatchAll::compile(lines, &mctx.config, mctx.env.interner())?;
+        let match_all = MatchAll::compile(lines, mctx.config, mctx.env.interner())?;
         let rule = CheckDag::new(match_all);
         let result = rule
             .apply(&mut mctx)
@@ -249,7 +249,7 @@ block3(v11):
         let lines = Vec::from(lines);
 
         let mut mctx = context.match_context();
-        let match_all = MatchAll::compile(lines, &mctx.config, mctx.env.interner())?;
+        let match_all = MatchAll::compile(lines, mctx.config, mctx.env.interner())?;
         let rule = CheckDag::new(match_all);
         let result = rule
             .apply(&mut mctx)

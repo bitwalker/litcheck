@@ -8,10 +8,9 @@ use crate::{ast::Capture, common::*};
 /// Static patterns are those which meet one of the following criteria:
 ///
 /// * The patterns involved are of a single pattern type (e.g. regex)
-/// * The patterns do not contain any match blocks or substitutions,
-/// however regex patterns may contain variable bindings, in the form
-/// of captures, which will be bound according to the capture metadata
-/// as matches are found.
+/// * The patterns do not contain any match blocks or substitutions, however regex patterns may
+///   contain variable bindings, in the form of captures, which will be bound according to the
+///   capture metadata as matches are found.
 ///
 /// Currently, this visitor is used for evaluating sets of patterns
 /// which are either sets of literal strings, or sets of regexes.

@@ -163,7 +163,7 @@ where
         (**self).resolve(symbol)
     }
 }
-impl<'a, S> LexicalScope for &'a mut S
+impl<S> LexicalScope for &mut S
 where
     S: LexicalScope + ?Sized,
 {
@@ -212,7 +212,7 @@ pub trait LexicalScopeMut: LexicalScope {
     /// Clear the local bindings of this scope
     fn clear(&mut self);
 }
-impl<'a, S> LexicalScopeMut for &'a mut S
+impl<S> LexicalScopeMut for &mut S
 where
     S: LexicalScopeMut + ?Sized,
 {
@@ -271,7 +271,7 @@ pub trait LexicalScopeExtend {
     where
         I: IntoIterator<Item = (VariableName, Self::Value)>;
 }
-impl<'a, S> LexicalScopeExtend for &'a mut S
+impl<S> LexicalScopeExtend for &mut S
 where
     S: LexicalScopeExtend + ?Sized,
 {

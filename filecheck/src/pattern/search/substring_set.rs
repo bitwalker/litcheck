@@ -9,7 +9,7 @@ pub struct SubstringSetSearcher<'a, 'patterns, 'input> {
     crlf: bool,
     /// The set of raw input patterns from which
     /// this matcher was constructed
-    patterns: Cow<'patterns, Vec<Span<Cow<'a, str>>>>,
+    patterns: Cow<'patterns, [Span<Cow<'a, str>>]>,
     /// The compiled regex which will be used to search the input buffer
     pattern: AhoCorasick,
     /// The searcher used to maintain the search state in the buffer
@@ -18,7 +18,7 @@ pub struct SubstringSetSearcher<'a, 'patterns, 'input> {
 impl<'a, 'patterns, 'input> SubstringSetSearcher<'a, 'patterns, 'input> {
     pub fn new(
         input: Input<'input>,
-        patterns: Cow<'patterns, Vec<Span<Cow<'a, str>>>>,
+        patterns: Cow<'patterns, [Span<Cow<'a, str>>]>,
     ) -> DiagResult<Self> {
         let buffer = input.buffer();
         let crlf = input.is_crlf();

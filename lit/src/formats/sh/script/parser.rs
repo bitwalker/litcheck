@@ -101,12 +101,12 @@ where
         } else {
             needs_continuation = false;
             rest = directive.content.trim_end();
-            let num_trimmed_bytes = directive.content.as_bytes().len() - rest.as_bytes().len();
+            let num_trimmed_bytes = directive.content.len() - rest.len();
             stripped_eol -= num_trimmed_bytes;
         };
 
         let trimmed = rest.trim_start();
-        let start = directive.start() + (rest.as_bytes().len() - trimmed.as_bytes().len());
+        let start = directive.start() + (rest.len() - trimmed.len());
         let mut span = start..stripped_eol;
         let mut output = StringRewriter::<'a>::new("");
         push_str_replacing_line_numbers(
@@ -159,7 +159,7 @@ where
             } else {
                 needs_continuation = false;
                 rest = line.trim_end();
-                span.end -= line.as_bytes().len() - rest.as_bytes().len();
+                span.end -= line.len() - rest.len();
                 if collapse_whitespace {
                     output.push(' ');
                     rest = rest.trim_start();
@@ -225,12 +225,12 @@ where
     fn parse_bools(&mut self, directive: Span<RawDirective<'a>>) {
         let start = directive.start();
         for expr in directive.content.split(',') {
-            let len = expr.as_bytes().len();
+            let len = expr.len();
             let expr = expr.trim_start();
-            let trimmed_len = expr.as_bytes().len();
+            let trimmed_len = expr.len();
             let start = start + (len - trimmed_len);
             let expr = expr.trim_end();
-            let end = start + expr.as_bytes().len();
+            let end = start + expr.len();
             let span = SourceSpan::from(start..end);
             let expr = if expr == "*" {
                 Ok(Span::new(span, BooleanExpr::Lit(true)))
@@ -369,7 +369,7 @@ impl<'a> Iterator for Lines<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         let line = self.iter.next()?;
         let start = self.offset;
-        self.offset += line.as_bytes().len();
+        self.offset += line.len();
         let (stripped, line) = line
             .strip_suffix('\n')
             .map(|line| (1, line))

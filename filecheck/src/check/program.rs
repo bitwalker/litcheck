@@ -64,7 +64,7 @@ pub enum CheckGroup<'a> {
     /// except for a CHECK-NOT in a logical group. This is
     /// a special case, but is preferable to representing
     /// this using [CheckTree]
-    Never(MatchAny<'a>),
+    Never(Box<MatchAny<'a>>),
     /// A group of rules that can be matched in any order,
     /// but must not overlap each other, and must not extend
     /// past any matches in subsequent groups. This latter
@@ -160,15 +160,12 @@ pub enum CheckSection<'a> {
     ///
     /// Groups are formed in one of the following ways:
     ///
-    /// * Rules following a CHECK or CHECK-COUNT directive belong
-    /// to the same logical group, until a CHECK-NOT, CHECK-DAG,
-    /// or the next CHECK/CHECK-COUNT/CHECK-LABEL
-    ///
-    /// * A set of CHECK-NOT rules is its own special type of group,
-    /// see the Exclude* variants for details.
-    ///
-    /// * A set of CHECK-DAG rules is its own special type of group,
-    /// see the Unordered* variants for details.
+    /// * Rules following a `CHECK` or `CHECK-COUNT` directive belong to the same logical group,
+    ///   until a  `CHECK-NOT`, `CHECK-DAG`, or the next `CHECK`/`CHECK-COUNT`/`CHECK-LABEL`
+    /// * A set of `CHECK-NOT` rules is its own special type of group, see the Exclude* variants for
+    ///   details.
+    /// * A set of `CHECK-DAG` rules is its own special type of group, see the Unordered* variants
+    ///   for details.
     Group { body: CheckGroup<'a> },
 }
 
@@ -291,9 +288,9 @@ impl<'a> CheckProgram<'a> {
                                 }
                                 Some(group) => {
                                     groups.push(group);
-                                    groups.push(CheckGroup::Never(matcher));
+                                    groups.push(CheckGroup::Never(Box::new(matcher)));
                                 }
-                                None => groups.push(CheckGroup::Never(matcher)),
+                                None => groups.push(CheckGroup::Never(Box::new(matcher))),
                             }
                         } else {
                             match groups.pop() {

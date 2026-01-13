@@ -20,7 +20,7 @@ pub trait Rule: fmt::Debug + Spanned {
     where
         C: Context<'input, 'context> + ?Sized;
 }
-impl<'r, R> Rule for &'r R
+impl<R> Rule for &R
 where
     R: ?Sized + Rule,
 {
@@ -60,7 +60,7 @@ pub trait DynRule: fmt::Debug + Spanned {
         context: &mut dyn Context<'input, '_>,
     ) -> DiagResult<Matches<'input>>;
 }
-impl<'context> Rule for (dyn DynRule + 'context) {
+impl<'context> Rule for dyn DynRule + 'context {
     #[inline(always)]
     fn kind(&self) -> Check {
         Self::kind(self)

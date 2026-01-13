@@ -1,3 +1,5 @@
+#![expect(unused_assignments)]
+
 use std::{borrow::Borrow, borrow::Cow, hash::Hash};
 
 use litcheck::{

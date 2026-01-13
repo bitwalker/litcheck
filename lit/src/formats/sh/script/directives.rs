@@ -80,6 +80,7 @@ impl fmt::Display for DirectiveKind {
 }
 
 pub trait Directive: Any + fmt::Debug + Spanned {
+    #[allow(unused)]
     fn kind(&self) -> DirectiveKind;
     fn line(&self) -> usize;
 }
@@ -240,6 +241,7 @@ impl Substitution {
         substitutions: &mut ScopedSubstitutionSet<'_>,
     ) -> Result<(), InvalidSubstitutionError> {
         use crate::config::substitutions::Matches;
+        use itertools::Itertools;
 
         match substitutions.find_matching(&self.key) {
             Matches::Empty if !self.replace => {
@@ -258,6 +260,7 @@ impl Substitution {
                 span: self.span,
                 key: self.key.clone(),
             }),
+            #[allow(unstable_name_collisions)] // For intersperse: remove when stable
             matches => {
                 let existing = matches.intersperse(", ").collect::<String>();
                 Err(InvalidSubstitutionError::Conflicts {

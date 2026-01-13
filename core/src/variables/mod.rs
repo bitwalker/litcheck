@@ -128,7 +128,7 @@ where
 
     fn try_parse(input: Span<&str>) -> DiagResult<Self::Value<'_>> {
         let (span, s) = input.into_parts();
-        let len = s.as_bytes().len();
+        let len = s.len();
         let (prefix, unprefixed) = if let Some(name) = s.strip_prefix('$') {
             (Some('$'), name)
         } else if let Some(name) = s.strip_prefix('@') {
@@ -269,14 +269,14 @@ where
 
     fn try_parse(input: Span<&str>) -> Result<Self, VariableError> {
         let (span, s) = input.into_parts();
-        let len = s.as_bytes().len();
+        let len = s.len();
         if s.is_empty() {
             Err(VariableError::Empty(span))
         } else if let Some((k, v)) = s.split_once('=') {
             if k.is_empty() {
                 return Err(VariableError::EmptyName(span));
             }
-            let key_len = k.as_bytes().len();
+            let key_len = k.len();
             let key_span = SourceSpan::from(0..key_len);
             if !is_valid_variable_name(k) {
                 return Err(VariableError::Name(miette::miette!(
@@ -345,7 +345,7 @@ where
             .to_str()
             .ok_or_else(|| Error::new(ErrorKind::InvalidUtf8))?;
 
-        let span = SourceSpan::from(0..raw.as_bytes().len());
+        let span = SourceSpan::from(0..raw.len());
         <T as TypedVariable>::try_parse(Span::new(span, raw)).map_err(|err| {
             let err = err.into_report().with_source_code(raw.to_string());
             let diag = diagnostics::reporting::PrintDiagnostic::new(err);

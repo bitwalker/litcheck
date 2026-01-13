@@ -80,7 +80,7 @@ impl<'input> Operand<'input> {
                             i64::from_str_radix(trimmed, 16).map_err(|err| {
                                 InvalidNumericCastError {
                                     span: Some(span),
-                                    kind: err.kind().clone(),
+                                    kind: *err.kind(),
                                     specific_span: None,
                                     match_file: context.match_file(),
                                 }
@@ -129,7 +129,7 @@ fn parse_number(
         .parse::<i64>()
         .map_err(|err| InvalidNumericCastError {
             span: Some(span),
-            kind: err.kind().clone(),
+            kind: *err.kind(),
             specific_span: None,
             match_file: context.match_file(),
         })?;

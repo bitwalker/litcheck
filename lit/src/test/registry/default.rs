@@ -13,11 +13,10 @@ use super::TestRegistry;
 ///
 /// It has the following behavior:
 ///
-/// * Tests are discovered by traversing the contents of the test suite's `source_dir`,
-/// using the patterns in the [TestSuite] `patterns` field to determine if a file is
-/// a valid test
-/// * Tests are then selected/rejected based on the `filter`/`filter_out` fields
-/// of [Config], if unset, the default is to select all tests.
+/// * Tests are discovered by traversing the contents of the test suite's `source_dir`, using the
+///   patterns in the [TestSuite] `patterns` field to determine if a file is a valid test
+/// * Tests are then selected/rejected based on the `filter`/`filter_out` fields of [Config], if
+///   unset, the default is to select all tests.
 /// * Hidden files are ignored
 pub struct DefaultTestRegistry;
 impl TestRegistry for DefaultTestRegistry {

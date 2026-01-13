@@ -1,3 +1,5 @@
+#![expect(unused_assignments)]
+
 use crate::common::*;
 use crate::test::TestInputType;
 

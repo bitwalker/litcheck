@@ -1,4 +1,3 @@
-#![cfg_attr(test, feature(assert_matches))]
 pub mod ast;
 pub mod check;
 mod context;

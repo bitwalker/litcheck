@@ -15,7 +15,7 @@ impl FromStr for CliVariable {
     type Err = VariableError;
 
     fn from_str(input: &str) -> Result<Self, Self::Err> {
-        let span = SourceSpan::from(0..input.as_bytes().len());
+        let span = SourceSpan::from(0..input.len());
         <CliVariable as TypedVariable>::try_parse(Span::new(span, input))
     }
 }
@@ -53,7 +53,7 @@ impl TypedVariable for CliVariable {
             }
             if !variables::is_valid_variable_name(k) {
                 return Err(VariableError::Name(miette::miette!(
-                    labels = vec![Label::at(0..k.as_bytes().len()).into()],
+                    labels = vec![Label::at(0..k.len()).into()],
                     help = "must be non-empty, and match the pattern `[A-Za-z_][A-Za-z0-9_]*`",
                     "invalid variable name"
                 )));
@@ -64,7 +64,7 @@ impl TypedVariable for CliVariable {
             } else {
                 Value::Str(Cow::Owned(v.to_string()))
             };
-            let span = SourceSpan::from(0..(k.as_bytes().len()));
+            let span = SourceSpan::from(0..(k.len()));
             Ok(CliVariable {
                 name: variables::VariableName::User(Span::new(span, k)),
                 value: v,

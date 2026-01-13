@@ -244,7 +244,7 @@ pub trait SourceFile {
 }
 impl SourceFile for str {
     fn span(&self) -> SourceSpan {
-        let len = self.as_bytes().len();
+        let len = self.len();
         SourceSpan::from(0..len)
     }
     fn source(&self) -> &str {
@@ -254,7 +254,7 @@ impl SourceFile for str {
 impl NamedSourceFile for str {}
 impl SourceFile for String {
     fn span(&self) -> SourceSpan {
-        let len = self.as_bytes().len();
+        let len = self.len();
         SourceSpan::from(0..len)
     }
     fn source(&self) -> &str {

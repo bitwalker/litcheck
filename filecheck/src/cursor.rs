@@ -14,8 +14,8 @@ pub struct CursorPosition {
 /// * The full underlying buffer can be accessed
 /// * The cursor itself can be constrained to a sub-range of the buffer
 /// * The current end-of-line position is made available
-/// * Look-around assertions, like in regular expressions, can be queried
-/// from the current cursor position
+/// * Look-around assertions, like in regular expressions, can be queried from the current cursor
+///   position
 /// * A searchable [Input] can be started from a cursor
 #[derive(Debug, Clone)]
 pub struct Cursor<'a> {

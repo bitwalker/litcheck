@@ -1,8 +1,6 @@
-#![feature(assert_matches)]
+use std::sync::Arc;
 
-use std::{assert_matches::assert_matches, sync::Arc};
-
-use litcheck::diagnostics::DiagResult;
+use litcheck::{assert_matches, diagnostics::DiagResult};
 use litcheck_filecheck as filecheck;
 
 use filecheck::{CheckFailedError, Config, Test, TestFailed};

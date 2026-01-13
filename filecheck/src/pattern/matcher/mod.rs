@@ -24,7 +24,7 @@ pub trait Matcher: MatcherMut {
     where
         C: Context<'input, 'context> + ?Sized;
 }
-impl<'a, M> Matcher for &'a M
+impl<M> Matcher for &M
 where
     M: ?Sized + Matcher,
 {
@@ -78,7 +78,7 @@ pub trait MatcherMut: fmt::Debug + Spanned {
     where
         C: Context<'input, 'context> + ?Sized;
 }
-impl<'a, M> MatcherMut for &'a M
+impl<M> MatcherMut for &M
 where
     M: ?Sized + MatcherMut,
 {
@@ -93,7 +93,7 @@ where
         <M as MatcherMut>::try_match_mut(self, input, context)
     }
 }
-impl<'a> MatcherMut for (dyn DynMatcher + 'a) {
+impl<'a> MatcherMut for dyn DynMatcher + 'a {
     #[inline]
     fn try_match_mut<'input, 'context, C>(
         &self,
@@ -140,7 +140,7 @@ where
         self.try_match_mut(input, context)
     }
 }
-impl<'a> MatcherMut for (dyn DynMatcherMut + 'a) {
+impl<'a> MatcherMut for dyn DynMatcherMut + 'a {
     #[inline]
     fn try_match_mut<'input, 'context, C>(
         &self,
