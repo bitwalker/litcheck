@@ -17,7 +17,6 @@ fancy-diagnostics = ["miette/fancy", "litcheck/fancy-diagnostics", "dep:console"
 
 [dependencies]
 anyhow.workspace = true
-assert_cmd = "2.0"
 clap.workspace = true
 console = { workspace = true, optional = true }
 indexmap = { version = "2.1", features = ["serde"] }
@@ -40,4 +39,4 @@ thiserror.workspace = true
 toml.workspace = true
 
 [dev-dependencies]
-pretty_assertions = "1.0"
+pretty_assertions.workspace = true

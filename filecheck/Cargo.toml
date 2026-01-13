@@ -22,10 +22,10 @@ bitflags = "2.4"
 bstr = { version = "1.9", default-features = false }
 clap.workspace = true
 either.workspace = true
-lalrpop-util = "0.20"
+lalrpop-util = "0.22"
 litcheck.workspace = true
 log.workspace = true
-logos = "0.13"
+logos = "0.16"
 im-rc = "15.1"
 miette.workspace = true
 memchr.workspace = true
@@ -37,8 +37,8 @@ smallvec.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
-pretty_assertions = "1.0"
+pretty_assertions.workspace = true
 itertools.workspace = true
 
 [build-dependencies]
-lalrpop = { version = "0.20", default-features = false }
+lalrpop = { version = "0.22", default-features = false }

@@ -6,7 +6,7 @@ use super::Test;
 
 pub type TestCursor<'a> = intrusive_collections::linked_list::Cursor<'a, TestAdapter>;
 
-intrusive_adapter!(pub TestAdapter = Arc<Test>: Test { link: LinkedListAtomicLink });
+intrusive_adapter!(pub TestAdapter = Arc<Test>: Test { link => LinkedListAtomicLink });
 
 #[derive(Default)]
 pub struct TestList {

@@ -7,7 +7,7 @@ use super::TestSuite;
 
 pub type TestSuiteCursor<'a> = intrusive_collections::rbtree::Cursor<'a, TestSuiteAdapter>;
 
-intrusive_adapter!(pub TestSuiteAdapter = Arc<TestSuite>: TestSuite { link: RBTreeAtomicLink });
+intrusive_adapter!(pub TestSuiteAdapter = Arc<TestSuite>: TestSuite { link => RBTreeAtomicLink });
 impl<'a> intrusive_collections::KeyAdapter<'a> for TestSuiteAdapter {
     type Key = TestSuiteKey;
 

@@ -21,23 +21,24 @@ license = "Apache-2.0"
 [workspace.dependencies]
 anyhow = "1.0"
 clap = { version = "4.1", features = ["derive", "env", "cargo", "wrap_help"] }
-console = "0.15"
+console = "0.16"
 either = "1.9"
 log = "0.4"
-intrusive-collections = "0.9"
+intrusive-collections = "0.10"
 itertools = { version = "0.14", default-features = false, features = ["use_alloc"] }
 parking_lot = "0.12"
+pretty_assertions = "1.0"
 memchr = "2.7"
-miette = { version = "5.10", default-features = false }
+miette = { version = "7.6", default-features = false, features = ["derive"] }
 rayon = "1.8"
 regex = "1.10"
 regex-syntax = "0.8"
-rustc-hash = "1.1"
+rustc-hash = "2.1"
 serde = { version = "1.0", features = ["derive", "rc"] }
 smallvec = { version = "1.9", features = ["union", "const_generics", "const_new"] }
-target-lexicon = "0.12"
-thiserror = "1.0"
-toml = { version = "0.8", features = ["parse", "preserve_order"] }
+target-lexicon = "0.13"
+thiserror = "2.0"
+toml = { version = "0.9", features = ["parse", "preserve_order"] }
 
 litcheck = { version = "0.3.0", package = "litcheck-core", path = "./core" }
 filecheck = { version = "0.3.0", package = "litcheck-filecheck", path = "./filecheck" }

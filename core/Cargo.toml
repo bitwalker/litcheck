@@ -25,9 +25,9 @@ memchr.workspace = true
 rustc-hash.workspace = true
 serde.workspace = true
 smallvec.workspace = true
-string-interner = "0.14"
+string-interner = "0.19"
 thiserror.workspace = true
 walkdir = "2.4"
 
 [dev-dependencies]
-pretty_assertions = "1.0"
+pretty_assertions.workspace = true

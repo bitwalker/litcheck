@@ -124,7 +124,7 @@ impl TestConfig {
             Architecture::X86_64 | Architecture::X86_64h => {
                 self.available_features.insert("target-x86_64");
                 match target.operating_system {
-                    OperatingSystem::Darwin => {
+                    OperatingSystem::Darwin(_) => {
                         self.available_features.insert("x86_64-apple");
                     }
                     OperatingSystem::Linux => {
@@ -147,7 +147,7 @@ impl TestConfig {
             }
         }
         match target.operating_system {
-            OperatingSystem::Darwin | OperatingSystem::MacOSX { .. } => {
+            OperatingSystem::Darwin(_) | OperatingSystem::MacOSX { .. } => {
                 self.available_features.insert("system-linker-mach-o");
             }
             _ => (),
