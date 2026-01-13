@@ -25,6 +25,7 @@ console = "0.15"
 either = "1.9"
 log = "0.4"
 intrusive-collections = "0.9"
+itertools = { version = "0.14", default-features = false, features = ["use_alloc"] }
 parking_lot = "0.12"
 memchr = "2.7"
 miette = { version = "5.10", default-features = false }

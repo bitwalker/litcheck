@@ -38,6 +38,7 @@ thiserror.workspace = true
 
 [dev-dependencies]
 pretty_assertions = "1.0"
+itertools.workspace = true
 
 [build-dependencies]
 lalrpop = { version = "0.20", default-features = false }

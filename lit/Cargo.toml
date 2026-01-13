@@ -21,7 +21,7 @@ assert_cmd = "2.0"
 clap.workspace = true
 console = { workspace = true, optional = true }
 indexmap = { version = "2.1", features = ["serde"] }
-itertools = { version = "0.14", default-features = false, features = ["use_alloc"] }
+itertools.workspace = true
 litcheck.workspace = true
 log.workspace = true
 intrusive-collections.workspace = true

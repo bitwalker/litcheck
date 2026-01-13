@@ -19,6 +19,9 @@ pub use self::test::{Test, TestResult};
 use clap::{builder::ValueParser, ArgAction, Args, ColorChoice, ValueEnum};
 use std::sync::Arc;
 
+#[doc(hidden)]
+pub use litcheck;
+
 pub(crate) mod common {
     pub use std::{
         borrow::Cow,
@@ -259,4 +262,70 @@ fn re_value_parser(r: &'static str) -> ValueParser {
             ))
         }
     })
+}
+
+/// Use `filecheck` in a Rust test directly against an input value that implements `Display`.
+///
+/// ## Example
+///
+/// ```rust
+/// #![expect(unstable_name_collisions)]
+/// use litcheck_filecheck::filecheck;
+/// use itertools::Itertools;
+///
+/// let original = "abbc";
+/// let modified = original.chars().intersperse('\n').collect::<String>();
+///
+/// filecheck!(modified, "
+/// ; CHECK: a
+/// ; CHECK-NEXT: b
+/// ; CHECK-NEXT: b
+/// ; CHECK-NEXT: c
+/// ");
+/// ```
+///
+/// If custom configuration is desired, you may instantiate the `filecheck` configuration (see
+/// [Config]) and pass it as an additional parameter:
+///
+/// ```rust
+/// #![expect(unstable_name_collisions)]
+/// use litcheck_filecheck::{filecheck, Config};
+/// use itertools::Itertools;
+///
+/// let original = "abbc";
+/// let modified = original.chars().intersperse('\n').collect::<String>();
+/// let config = Config {
+///     match_full_lines: true,
+///     ..Config::default()
+/// };
+///
+/// filecheck!(modified, "
+/// ; CHECK: a
+/// ; CHECK-NEXT: b
+/// ; CHECK-NEXT: b
+/// ; CHECK-NEXT: c
+/// ");
+/// ```
+///
+/// If successful, the `filecheck!` macro returns the pattern matches produced by verifying the
+/// checks, allowing you to examine them in more detail.
+#[macro_export]
+macro_rules! filecheck {
+    ($input:expr, $checks:expr) => {
+        $crate::filecheck!($input, $checks, $crate::Config::default())
+    };
+
+    ($input:expr, $checks:expr, $config:expr) => {{
+        let config = $config;
+        let input = $input.to_string();
+        let checks = $checks.to_string();
+        let mut test = $crate::Test::new(checks, &config);
+        match test.verify(input) {
+            Err(err) => {
+                let printer = $crate::litcheck::diagnostics::reporting::PrintDiagnostic::new(err);
+                panic!("{printer}");
+            }
+            Ok(matches) => matches,
+        }
+    }};
 }

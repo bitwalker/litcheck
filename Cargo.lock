@@ -676,6 +676,7 @@ dependencies = [
  "clap",
  "either",
  "im-rc",
+ "itertools 0.14.0",
  "lalrpop",
  "lalrpop-util",
  "litcheck-core",
