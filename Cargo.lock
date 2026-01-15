@@ -639,6 +639,7 @@ dependencies = [
  "bstr",
  "clap",
  "either",
+ "env_logger",
  "im-rc",
  "itertools",
  "lalrpop",

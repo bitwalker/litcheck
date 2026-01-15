@@ -37,6 +37,7 @@ smallvec.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+env_logger.workspace = true
 pretty_assertions.workspace = true
 itertools.workspace = true
 
