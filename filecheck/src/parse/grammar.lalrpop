@@ -71,9 +71,9 @@ Comma<T>: Vec<T> = {
 /// MATCH
 
 pub Match: Match<'input> = {
-    <l:@L> "[[" <name:Var> "]]" <r:@R> => Match::Substitution { span: span!(l, r), name, pattern: None },
+    <l:@L> "[[" <name:PatternVar> "]]" <r:@R> => Match::Substitution { span: span!(l, r), name, pattern: None },
 
-    <l:@L> "[[" <name:Var> ":" <pattern:String>  "]]" <r:@R> => Match::Substitution { span: span!(l, r), name, pattern: Some(pattern.map(Cow::Borrowed)) },
+    <l:@L> "[[" <name:MaybeGlobalVar> ":" <pattern:String>  "]]" <r:@R> => Match::Substitution { span: span!(l, r), name, pattern: Some(pattern.map(Cow::Borrowed)) },
 
     <l:@L> "[[" "#" <format:(<NumberFormat> ",")?> <capture:CaptureNumericOrExpr?> "]]" <r:@R> => {
         let format = format.unwrap_or_default();
@@ -231,6 +231,11 @@ PatternVar: VariableName = {
 
 GlobalVar: VariableName = {
     <l:@L> "$" <name:Ident> <r:@R> => VariableName::Global(Span::new(l..r, name)),
+}
+
+MaybeGlobalVar: VariableName = {
+    <l:@L> "$" <name:Ident> <r:@R> => VariableName::Global(Span::new(l..r, name)),
+    Var,
 }
 
 PseudoVar: VariableName = {
