@@ -94,7 +94,10 @@ impl<'a> MatcherMut for SmartMatcher<'a> {
         let searcher = SmartSearcher::new(self.span, input, &mut captures);
         searcher.search_captures(&self.parts, context)?;
         if let Some(matched) = captures.get_match() {
-            extract_captures_from_match(self.span, matched, &captures, &self.parts, context)
+            let matched =
+                extract_captures_from_match(self.span, matched, &captures, &self.parts, context)?;
+            matched.bind_captures_in(context);
+            Ok(matched)
         } else {
             Ok(MatchResult::failed(
                 CheckFailedError::MatchNoneButExpected {

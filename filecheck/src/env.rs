@@ -4,12 +4,14 @@ use crate::common::*;
 
 pub struct Bindings<V: Clone> {
     system: OrdMap<Symbol, V>,
+    global: OrdMap<Symbol, V>,
     bound: OrdMap<VariableName, V>,
 }
 impl<V: Clone + fmt::Debug> fmt::Debug for Bindings<V> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("Bindings")
             .field("system", &self.system)
+            .field("system", &self.global)
             .field("bound", &self.bound)
             .finish()
     }
@@ -18,6 +20,7 @@ impl<V: Clone> Default for Bindings<V> {
     fn default() -> Self {
         Self {
             system: OrdMap::new(),
+            global: OrdMap::new(),
             bound: OrdMap::new(),
         }
     }
@@ -26,6 +29,7 @@ impl<V: Clone> Clone for Bindings<V> {
     fn clone(&self) -> Self {
         Self {
             system: self.system.clone(),
+            global: self.global.clone(),
             bound: self.bound.clone(),
         }
     }
@@ -46,6 +50,7 @@ impl<V: Clone + fmt::Debug> Bindings<V> {
     pub fn new_with_system(system: OrdMap<Symbol, V>) -> Self {
         Self {
             system,
+            global: OrdMap::new(),
             bound: OrdMap::new(),
         }
     }
@@ -53,7 +58,7 @@ impl<V: Clone + fmt::Debug> Bindings<V> {
     pub fn get(&self, name: &VariableName) -> Option<&V> {
         match name {
             VariableName::User(_) => self.bound.get(name),
-            VariableName::Global(sym) => self.bound.get(name).or_else(|| self.system.get(sym)),
+            VariableName::Global(sym) => self.global.get(sym).or_else(|| self.system.get(sym)),
             VariableName::Pseudo(_) => {
                 panic!("expected pseudo-variable to have been expanded by caller")
             }
@@ -65,23 +70,31 @@ impl<V: Clone + fmt::Debug> Bindings<V> {
     }
 
     pub fn get_global(&self, name: Symbol) -> Option<&V> {
-        self.bound
-            .get(&VariableName::Global(Span::new(0..0, name)))
-            .or_else(|| self.system.get(&name))
+        self.global.get(&name).or_else(|| self.system.get(&name))
     }
 
     pub fn insert(&mut self, name: VariableName, value: V) {
-        self.bound.insert(name, value);
+        match name {
+            VariableName::Global(name) => {
+                self.global.insert(name.into_inner(), value);
+            }
+            _ => {
+                self.bound.insert(name, value);
+            }
+        }
     }
 
     pub fn extend<I>(&mut self, bindings: I)
     where
         I: IntoIterator<Item = (VariableName, V)>,
     {
-        self.bound.extend(bindings);
+        for (name, value) in bindings {
+            self.insert(name, value);
+        }
     }
 
     pub fn merge(&mut self, other: Self) {
+        self.global = other.global.union(core::mem::take(&mut self.global));
         self.bound = other.bound.union(core::mem::take(&mut self.bound));
     }
 

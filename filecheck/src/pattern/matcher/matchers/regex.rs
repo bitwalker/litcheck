@@ -108,7 +108,9 @@ impl<'a> MatcherMut for RegexMatcher<'a> {
     where
         C: Context<'input, 'context> + ?Sized,
     {
-        self.try_match(input, context)
+        let matched = self.try_match(input, context)?;
+        matched.bind_captures_in(context);
+        Ok(matched)
     }
 }
 impl<'a> Matcher for RegexMatcher<'a> {

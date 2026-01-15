@@ -86,6 +86,21 @@ impl<'input> MatchResult<'input> {
             Self { info: None, .. } => Ok(None),
         }
     }
+
+    pub fn bind_captures_in<'context, C>(&self, context: &mut C)
+    where
+        C: Context<'input, 'context> + ?Sized,
+    {
+        if matches!(self.ty, MatchType::MatchFoundAndExpected) {
+            if let Some(info) = self.info.as_ref() {
+                for capture in info.captures.iter() {
+                    if let Some(var) = capture.capture.variable_name() {
+                        context.env_mut().insert(var, capture.value.clone());
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug)]

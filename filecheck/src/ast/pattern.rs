@@ -67,9 +67,13 @@ impl Ord for Capture {
 }
 impl Capture {
     pub fn name(&self) -> Option<Symbol> {
+        self.variable_name().map(|v| v.into_inner())
+    }
+
+    pub fn variable_name(&self) -> Option<VariableName> {
         match self {
             Self::Implicit(tv) | Self::Mapped { with: tv, .. } | Self::Explicit(tv) => {
-                Some(tv.name.into_inner())
+                Some(tv.name)
             }
             Self::Ignore(_) | Self::All(_) => None,
         }

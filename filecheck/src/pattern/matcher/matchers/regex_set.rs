@@ -327,7 +327,9 @@ impl<'a, A: Automaton + Clone> MatcherMut for RegexSetMatcher<'a, A> {
         C: Context<'input, 'context> + ?Sized,
     {
         let mut searcher = self.search(input);
-        searcher.try_match_next(context)
+        let matched = searcher.try_match_next(context)?;
+        matched.bind_captures_in(context);
+        Ok(matched)
     }
 }
 impl<'a, 'input, A> PatternSearcher<'input> for RegexSetSearcher<'a, 'input, A>
