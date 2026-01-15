@@ -38,7 +38,7 @@ impl<V: Clone> IntoIterator for Bindings<V> {
         self.bound.into_iter()
     }
 }
-impl<V: Clone> Bindings<V> {
+impl<V: Clone + fmt::Debug> Bindings<V> {
     pub fn new() -> Self {
         Self::default()
     }
@@ -86,6 +86,7 @@ impl<V: Clone> Bindings<V> {
     }
 
     pub fn clear(&mut self) {
+        log::trace!(target: "context:bindings", "clearing bindings in the current scope");
         self.bound.clear();
     }
 }
@@ -104,7 +105,7 @@ impl<V: Clone> Bindings<V> {
 /// for the set of mutable operations that can be performed.
 pub trait LexicalScope {
     /// The value type bound by variables
-    type Value: Clone;
+    type Value: Clone + fmt::Debug;
 
     fn bindings(&self) -> &Bindings<Self::Value>;
 
@@ -241,7 +242,7 @@ where
         (**self).clear();
     }
 }
-impl<V: Clone> dyn LexicalScopeMut<Value = V> {
+impl<V: Clone + fmt::Debug> dyn LexicalScopeMut<Value = V> {
     #[inline(always)]
     pub fn get_or_intern<S>(&mut self, value: S) -> Symbol
     where
@@ -334,6 +335,7 @@ impl<'input, 'context: 'input> Env<'input, 'context> {
     pub fn protect<'guard, 'this: 'guard>(
         &'this mut self,
     ) -> ScopeGuard<'guard, 'input, Value<'input>> {
+        log::trace!(target: "lexical-scope", "entering new protected scope");
         let bindings = self.bindings.clone();
         ScopeGuard {
             interner: self.interner,
@@ -378,6 +380,7 @@ impl<'input, 'context: 'input> LexicalScopeMut for Env<'input, 'context> {
     }
 
     fn insert(&mut self, name: VariableName, value: Self::Value) {
+        log::trace!(target: "lexical-scope", "binding {} to {value:#?}", self.interner.resolve(name.into_inner()));
         self.bindings.insert(name, value);
     }
 
@@ -396,7 +399,10 @@ impl<'input, 'context: 'input> LexicalScopeExtend for Env<'input, 'context> {
     where
         I: IntoIterator<Item = (VariableName, Self::Value)>,
     {
-        self.bindings.extend(bindings);
+        self.bindings.extend(bindings.into_iter().map(|(k, v)| {
+            log::trace!(target: "lexical-scope", "binding {} to {v:#?}", self.interner.resolve(k.into_inner()));
+            (k, v)
+        }));
     }
 }
 
@@ -424,6 +430,7 @@ impl<'a, 'input> ScopeGuard<'a, 'input, Value<'input>> {
     /// Consume this [ScopeGuard] and persist any changes to the
     /// parent [LexicalScope].
     pub fn save(mut self) {
+        log::trace!(target: "scope-guard", "exiting scope, and saving bindings to parent");
         let bindings = core::mem::take(&mut self.bindings);
         self.parent.merge(bindings);
     }
@@ -431,6 +438,7 @@ impl<'a, 'input> ScopeGuard<'a, 'input, Value<'input>> {
     pub fn protect<'guard, 'this: 'guard>(
         &'this mut self,
     ) -> ScopeGuard<'guard, 'input, Value<'input>> {
+        log::trace!(target: "scope-guard", "entering new nested scope");
         let bindings = self.bindings.clone();
         ScopeGuard {
             interner: self.interner,
@@ -440,7 +448,7 @@ impl<'a, 'input> ScopeGuard<'a, 'input, Value<'input>> {
         }
     }
 }
-impl<'a, 'input: 'a, V: Clone + 'input> LexicalScope for ScopeGuard<'a, 'input, V> {
+impl<'a, 'input: 'a, V: Clone + fmt::Debug + 'input> LexicalScope for ScopeGuard<'a, 'input, V> {
     type Value = V;
 
     #[inline(always)]
@@ -462,7 +470,7 @@ impl<'a, 'input: 'a, V: Clone + 'input> LexicalScope for ScopeGuard<'a, 'input, 
         self.interner.resolve(symbol)
     }
 }
-impl<'a, 'input: 'a, V: Clone + 'input> LexicalScopeMut for ScopeGuard<'a, 'input, V> {
+impl<'a, 'input: 'a, V: Clone + fmt::Debug + 'input> LexicalScopeMut for ScopeGuard<'a, 'input, V> {
     #[inline(always)]
     fn interner(&mut self) -> &mut StringInterner {
         self.interner
@@ -474,6 +482,7 @@ impl<'a, 'input: 'a, V: Clone + 'input> LexicalScopeMut for ScopeGuard<'a, 'inpu
     }
 
     fn insert(&mut self, name: VariableName, value: Self::Value) {
+        log::trace!(target: "scope-guard", "binding {} to {value:#?}", self.interner.resolve(name.into_inner()));
         self.bindings.insert(name, value);
     }
 
@@ -483,16 +492,22 @@ impl<'a, 'input: 'a, V: Clone + 'input> LexicalScopeMut for ScopeGuard<'a, 'inpu
     }
 
     fn clear(&mut self) {
+        log::trace!(target: "scope-guard", "clearing all bindings in the current scope");
         self.bindings.clear();
     }
 }
-impl<'a, 'input: 'a, V: Clone + 'input> LexicalScopeExtend for ScopeGuard<'a, 'input, V> {
+impl<'a, 'input: 'a, V: Clone + fmt::Debug + 'input> LexicalScopeExtend
+    for ScopeGuard<'a, 'input, V>
+{
     type Value = V;
 
     fn extend<I>(&mut self, bindings: I)
     where
         I: IntoIterator<Item = (VariableName, Self::Value)>,
     {
-        self.bindings.extend(bindings);
+        self.bindings.extend(bindings.into_iter().map(|(k, v)| {
+            log::trace!(target: "scope-guard", "binding {} to {v:#?}", self.interner.resolve(k.into_inner()));
+            (k, v)
+        }));
     }
 }
