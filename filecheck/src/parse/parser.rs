@@ -122,11 +122,7 @@ impl<'config> CheckFileParser<'config> {
         S: SourceFile + ?Sized + 'a,
     {
         let source = code.source();
-        let mut lexer = Lexer::<'a>::new(
-            code,
-            &self.config.check_prefixes,
-            &self.config.comment_prefixes,
-        );
+        let mut lexer = Lexer::<'a>::new(code, self.config);
         let mut comment = vec![];
         let mut lines = vec![];
         while let Some(lexed) = lexer.next() {

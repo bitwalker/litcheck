@@ -33,6 +33,8 @@ pub struct Lexer<'input> {
     captures: regex_automata::util::captures::Captures,
     delimiter_patterns: aho_corasick::AhoCorasick,
     delimiter_searcher: AhoCorasickSearcher<'input>,
+    /// The token buffer, used when tokenizing lines
+    buffer: VecDeque<Lexed<'input>>,
     /// When we have reached true Eof, this gets set to true, and the only token
     /// produced after that point is Token::Eof, or None, depending on how you are
     /// consuming the lexer
@@ -42,24 +44,21 @@ pub struct Lexer<'input> {
     /// will just be ignored anyway. This simplifies parsing by ensuring the
     /// rules only need to account for actual content lines in the file.
     leading_lf: bool,
-    /// The token buffer, used when tokenizing lines
-    buffer: VecDeque<Lexed<'input>>,
+    /// Is --strict-whitespace enabled
+    strict_whitespace: bool,
 }
 impl<'input> Lexer<'input> {
     /// Produces an instance of the lexer with the lexical analysis to be performed on the `input`
     /// string. Note that no lexical analysis occurs until the lexer has been iterated over.
-    pub fn new<S>(
-        source: &'input S,
-        check_prefixes: &[Arc<str>],
-        comment_prefixes: &[Arc<str>],
-    ) -> Self
+    pub fn new<S>(source: &'input S, config: &Config) -> Self
     where
         S: SourceFile + ?Sized + 'input,
     {
         let buffer = source.source().as_bytes();
         let input = Input::new(buffer, false);
-        let mut patterns = Pattern::generate_check_patterns(check_prefixes).collect::<Vec<_>>();
-        patterns.extend(Pattern::generate_comment_patterns(comment_prefixes));
+        let mut patterns =
+            Pattern::generate_check_patterns(&config.check_prefixes).collect::<Vec<_>>();
+        patterns.extend(Pattern::generate_comment_patterns(&config.comment_prefixes));
         let regex =
             Regex::new_many(&patterns).expect("expected valid prefix searcher configuration");
         let searcher = RegexSearcher::new(input.into());
@@ -80,17 +79,18 @@ impl<'input> Lexer<'input> {
         Lexer {
             input,
             patterns,
-            check_prefixes: check_prefixes.to_vec(),
-            seen_prefixes: vec![false; check_prefixes.len()],
+            check_prefixes: config.check_prefixes.to_vec(),
+            seen_prefixes: vec![false; config.check_prefixes.len()],
             regex,
             searcher,
             cache,
             captures,
             delimiter_patterns,
             delimiter_searcher,
+            buffer: VecDeque::with_capacity(128),
             eof,
             leading_lf: true,
-            buffer: VecDeque::with_capacity(128),
+            strict_whitespace: config.strict_whitespace,
         }
     }
 
@@ -289,7 +289,7 @@ impl<'input> Lexer<'input> {
     /// for `[[` `]]` and `{{` `}}` markers indicating substitution/capture and regex
     /// matches respectively.
     fn tokenize_check_pattern(&mut self, literal: bool) {
-        let start = self.input.start();
+        let mut start = self.input.start();
         let eol = self.input.next_newline().unwrap_or(self.input.end());
 
         if literal {
@@ -301,6 +301,13 @@ impl<'input> Lexer<'input> {
             }
             self.input.set_start(eol);
             return;
+        } else if !self.strict_whitespace {
+            // If --strict-whitespace is not in use, remove leading whitespace
+            let raw = self.input.as_str(start..eol);
+            let stripped = raw.trim_ascii_start();
+            let shift = raw.len().abs_diff(stripped.len());
+            start += shift;
+            self.input.set_start(start);
         }
 
         let mut in_match: Option<Span<Delimiter>> = None;

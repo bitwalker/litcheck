@@ -114,11 +114,7 @@ impl TestContext {
     pub fn lex<'a, S: SourceFile + ?Sized>(&self, source: &'a S) -> Tokens<'a, S> {
         Tokens {
             source,
-            lexer: Lexer::<'a>::new(
-                source,
-                &self.config.check_prefixes,
-                &self.config.comment_prefixes,
-            ),
+            lexer: Lexer::<'a>::new(source, &self.config),
         }
     }
 
@@ -128,11 +124,7 @@ impl TestContext {
         source: &'a S,
     ) -> TokensWithErrors<'a> {
         TokensWithErrors {
-            lexer: Lexer::<'a>::new(
-                source,
-                &self.config.check_prefixes,
-                &self.config.comment_prefixes,
-            ),
+            lexer: Lexer::<'a>::new(source, &self.config),
         }
     }
 
