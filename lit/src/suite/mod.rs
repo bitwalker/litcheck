@@ -27,10 +27,6 @@ use crate::{test::TestConfig, Config};
 pub struct TestSuite {
     #[serde(skip, default)]
     link: RBTreeAtomicLink,
-    /// The unique identifier for this suite, a combination of test suite name
-    /// and the source path from which it was loaded
-    //#[serde(flatten)]
-    //pub id: TestSuiteKey,
     /// The name of the test suite, may not be empty.
     pub name: toml::Spanned<Arc<str>>,
     /// The source path from which the test suite configuration was loaded
