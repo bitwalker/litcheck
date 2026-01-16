@@ -1,0 +1,4 @@
+; RUN: echo "${FOO}" 2>&1 | filecheck %s
+
+; COM: We're assuming this is run with `BAR=bar bin/lit run tests/lit/environment`
+; CHECK{LITERAL}: bar

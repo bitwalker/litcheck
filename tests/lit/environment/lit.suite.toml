@@ -1,0 +1,7 @@
+name = "lit-env"
+patterns = ["*.txt"]
+
+[substitutions]
+FOO = "BAR"
+
+[format.shtest]

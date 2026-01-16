@@ -174,6 +174,12 @@ where
             let padding = max_width - k.len();
             println!("        - {k}{1:0$}: {v}", padding, "");
         }
+        let max_width = suite.config.env.keys().map(|k| k.len()).max().unwrap_or(0);
+        println!("    Environment Variables:");
+        for (k, v) in suite.config.env.iter() {
+            let padding = max_width - k.len();
+            println!("        - {k}{1:0$}: {v}", padding, "");
+        }
     }
 }
 
