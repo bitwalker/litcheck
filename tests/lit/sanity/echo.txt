@@ -1,5 +1,9 @@
-; RUN: cat < %s
+; RUN: cat < %s | filecheck %s
 
 Some random
 
 content to show output
+
+; CHECK: Some random
+; CHECK-EMPTY:
+; CHECK-NEXT: content to show output
