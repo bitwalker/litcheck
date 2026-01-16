@@ -72,6 +72,7 @@ pub const DEFAULT_COMMENT_PREFIXES: &[&str] = &["COM", "RUN"];
 pub struct Config {
     /// Allow checking empty input. By default, empty input is rejected.
     #[arg(
+        long,
         default_value_t = false,
         action(clap::ArgAction::SetTrue),
         help_heading = "Input"
