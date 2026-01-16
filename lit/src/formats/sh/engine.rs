@@ -94,5 +94,6 @@ fn write_script(script: &TestScript, pipefail: bool) -> Vec<u8> {
         buf.push_str("\n};\n}");
     }
     buf.push('\n');
+    log::trace!(target: "lit:shtest", "generated shell script:\n{buf}");
     buf.into_bytes()
 }

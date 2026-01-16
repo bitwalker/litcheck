@@ -88,7 +88,7 @@ impl TestFormat for ShTest {
         }
 
         if config.no_execute {
-            log::debug!("--no-execute was set, automatically passing test");
+            log::debug!(target: "lit:shtest", "--no-execute was set, automatically passing test");
             return Ok(TestResult::new(TestStatus::Pass));
         }
 
@@ -140,6 +140,8 @@ impl TestFormat for ShTest {
         script
             .apply_substitutions(&mut substitutions)
             .map_err(|err| err.with_source_code(script_source.clone()))?;
+
+        log::trace!(target: "lit:shtest", "compiled test script and applied substitutions: {script:#?}");
 
         let mut result = engine::run_test(&script, test, config, self)
             .map_err(|err| err.with_source_code(script_source))?;
