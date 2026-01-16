@@ -21,6 +21,7 @@ use super::TestRegistry;
 pub struct DefaultTestRegistry;
 impl TestRegistry for DefaultTestRegistry {
     fn all(&self, suite: Arc<TestSuite>) -> DiagResult<TestList> {
+        log::debug!(target: "lit:test:registry", "finding all tests for suite '{}'", suite.name());
         let source_dir = suite.source_dir();
         get_file_based_tests(source_dir, suite.clone(), suite.config.clone())
     }
@@ -31,12 +32,14 @@ impl TestRegistry for DefaultTestRegistry {
         suite: Arc<TestSuite>,
         config: Arc<TestConfig>,
     ) -> DiagResult<TestList> {
+        log::debug!(target: "lit:test:registry", "finding tests for suite '{}' in {}", suite.name(), path_in_suite.display());
         let source_dir = suite.source_dir();
         let absolute_path = source_dir.join(path_in_suite);
         if absolute_path.is_dir() {
             return get_file_based_tests(&absolute_path, suite, config);
         }
         log::debug!(
+            target: "lit:test:registry",
             "checking if {} is a valid test file using default registry",
             absolute_path.display()
         );
@@ -44,6 +47,7 @@ impl TestRegistry for DefaultTestRegistry {
         let mut tests = TestList::default();
         if is_file_based_test(&absolute_path, &suite, &config) {
             log::debug!(
+                target: "lit:test:registry",
                 "{} is a valid test, adding it to registry",
                 absolute_path.display()
             );
@@ -66,19 +70,20 @@ fn get_file_based_tests(
     debug_assert!(search_path.is_absolute());
 
     log::debug!(
+        target: "lit:test:registry",
         "searching for tests in {} using default registry",
         search_path.display()
     );
     let results = fs::search_directory(search_path, true, |entry| {
         let path = entry.path();
-        log::trace!("checking if file is valid test: {}", path.display());
+        log::trace!(target: "lit:test:registry", "checking if file is valid test: {}", path.display());
         is_file_based_test(path, &suite, &config)
     });
 
     let mut tests = TestList::default();
     for result in results {
         let test_path = result.into_diagnostic()?.into_path();
-        log::trace!("found test file: {}", test_path.display());
+        log::trace!(target: "lit:test:registry", "found test file: {}", test_path.display());
         let relative_path = test_path
             .strip_prefix(search_path)
             .expect("expected path relative to search_path");

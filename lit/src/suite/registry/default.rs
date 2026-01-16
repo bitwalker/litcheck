@@ -28,6 +28,8 @@ pub struct DefaultTestSuiteRegistry {
 }
 impl TestSuiteRegistry for DefaultTestSuiteRegistry {
     fn load(&mut self, config: &Config) -> DiagResult<()> {
+        log::debug!(target: "lit:suite:registry", "loading test suites for {config:#?}");
+
         let cwd = std::env::current_dir().expect("unable to access current working directory");
 
         self.clear();
@@ -160,12 +162,14 @@ impl DefaultTestSuiteRegistry {
         config: &Config,
     ) -> DiagResult<Option<Arc<TestSuite>>> {
         let path = path.as_ref();
+        log::debug!(target: "lit:suite:registry", "finding nearest suite to {}", path.display());
         // If the path is a directory, we need to check the cache for an exact
         // match, and failing that, check the directory itself for a lit.suite.toml.
         // If successful, we're done; otherwise, we fallback to the same search
         // used for file paths
         if path.is_dir() {
             if let Some(cache_key) = self.config_cache.get(path) {
+                log::debug!(target: "lit:suite:registry", "found in cache: '{}'", cache_key.name());
                 return Ok(Some(self.get(cache_key)));
             }
 
@@ -176,6 +180,7 @@ impl DefaultTestSuiteRegistry {
                 let entry = entry
                     .into_diagnostic()
                     .wrap_err("found test suite config, but it could not be read")?;
+                log::debug!(target: "lit:suite:registry", "found lit.suite.toml at {}", entry.path().display());
                 return self.load_without_cache(entry.path(), config).map(Some);
             }
         }
@@ -189,11 +194,13 @@ impl DefaultTestSuiteRegistry {
         cwd: &Path,
         config: &Config,
     ) -> DiagResult<Option<Arc<TestSuite>>> {
+        log::debug!(target: "lit:suite:registry", "finding nearest suite containing {}", path.display());
         // If `dir` is not explicitly represented in `config_paths`, then it hasn't
         // been visited to check for a `lit.suite.toml` file yet, and we can't rely
         // on the nearest ancestor to be correct. Otherwise, the nearest ancestor
         // refers to the nearest path in `config_paths`
         if let Some(cache_key) = self.config_cache.nearest_ancestor(path) {
+            log::debug!(target: "lit:suite:registry", "found nearest ancestor suite in cache: '{}'", cache_key.data.name());
             return Ok(Some(self.get(cache_key.into_value())));
         }
 
@@ -205,6 +212,7 @@ impl DefaultTestSuiteRegistry {
 
         // Search the ancestors of `path` until we find a `lit.suite.toml` whose source
         // directory contains `path`.
+        log::debug!(target: "lit:suite:registry", "searching ancestors of {}", dir.display());
         for ancestor in dir.ancestors() {
             let is_cwd = ancestor == cwd;
             let mut found = fs::search_directory(ancestor, false, |entry| {
@@ -212,19 +220,23 @@ impl DefaultTestSuiteRegistry {
             });
             if let Some(entry) = found.next() {
                 let entry = entry.into_diagnostic()?;
+                log::debug!(target: "lit:suite:registry", "found possible ancestor at {}", entry.path().display());
                 let suite = self.load_without_cache(entry.path(), config)?;
                 // If the test suite source directory contains `dir`, we've found a match;
                 // otherwise, we must continue searching upwards.
                 if dir.starts_with(suite.source_dir()) {
+                    log::debug!(target: "lit:suite:registry", "ancestor is a match!");
                     return Ok(Some(suite));
                 }
             }
 
             // If we've reached the current working directory, ascend no further
             if is_cwd {
+                log::debug!(target: "lit:suite:registry", "terminating search as we've reached the current working directory");
                 break;
             }
         }
+        log::debug!(target: "lit:suite:registry", "no matching ancestor found");
 
         Ok(None)
     }
@@ -247,10 +259,10 @@ impl DefaultTestSuiteRegistry {
     /// This is safe to call multiple times, each subsequent load will clear all previously
     /// loaded tests, and run discovery on an empty test set for each suite.
     fn load_tests(&mut self, config: &Config) -> DiagResult<()> {
-        log::debug!("loading tests into registry..");
+        log::debug!(target: "lit:suite:registry", "loading tests into registry..");
 
         for suite in self.suites.iter() {
-            log::debug!("loading tests for '{}'", &suite.id());
+            log::debug!(target: "lit:suite:registry", "loading tests for '{}'", &suite.id());
             // Now that all specified test suites are loaded and have filters applied,
             // perform test discovery for each suite taking those filters into account.
             let tests = self
@@ -266,18 +278,20 @@ impl DefaultTestSuiteRegistry {
             };
             if search_paths.is_empty() {
                 log::debug!(
+                    target: "lit:suite:registry",
                     "no search paths given, searching entire suite source directory for tests"
                 );
                 let found = suite.config.format.registry().all(suite.clone())?;
-                log::debug!("found {} tests", found.len());
+                log::debug!(target: "lit:suite:registry", "found {} tests", found.len());
                 tests.append(found);
             } else {
                 log::debug!(
+                    target: "lit:suite:registry",
                     "{} search paths were given, searching just those paths for tests",
                     search_paths.len()
                 );
                 for path in search_paths.iter() {
-                    log::debug!("searching {} for tests..", path.display());
+                    log::debug!(target: "lit:suite:registry", "searching {} for tests..", path.display());
                     // Look for local configuration that applies to these tests,
                     // using the suite config if no local config is present
                     let local_config =
@@ -287,7 +301,7 @@ impl DefaultTestSuiteRegistry {
                         suite.clone(),
                         local_config.clone(),
                     )?;
-                    log::debug!("found {} tests", found.len());
+                    log::debug!(target: "lit:suite:registry", "found {} tests", found.len());
                     tests.append(found);
                 }
             }
@@ -295,7 +309,7 @@ impl DefaultTestSuiteRegistry {
             *suite.search_paths() = search_paths;
         }
 
-        log::debug!("loading complete!");
+        log::debug!(target: "lit:suite:registry", "loading complete!");
 
         Ok(())
     }
