@@ -8,7 +8,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.3.1"
+version = "0.3.2"
 rust-version = "1.90"
 authors = ["Paul Schoenfelder"]
 repository = "https://github.com/bitwalker/litcheck"
