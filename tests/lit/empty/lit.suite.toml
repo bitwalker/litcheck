@@ -1,0 +1,4 @@
+name = "lit-empty"
+patterns = ["*.txt"]
+
+[format.shtest]

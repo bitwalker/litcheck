@@ -80,7 +80,7 @@ impl TestSuiteRegistry for DefaultTestSuiteRegistry {
     }
 
     fn is_empty(&self) -> bool {
-        !self.tests_by_suite.values().any(|suite| !suite.is_empty())
+        self.tests_by_suite.is_empty()
     }
 
     fn num_suites(&self) -> usize {
