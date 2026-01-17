@@ -12,9 +12,12 @@ use crate::{
     Config,
 };
 
-pub trait TestSuiteRegistry: IntoIterator<Item = Arc<Test>> {
+pub trait TestSuiteRegistry {
     /// Load all available test suites
     fn load(&mut self, config: &Config) -> DiagResult<()>;
+
+    /// Load test suites recursively from `path`
+    fn load_from_path(&mut self, path: &Path, config: &Config) -> DiagResult<()>;
 
     /// Returns true if there are no suites/tests in the registry
     fn is_empty(&self) -> bool;
@@ -33,7 +36,9 @@ pub trait TestSuiteRegistry: IntoIterator<Item = Arc<Test>> {
 
     /// Get a [TestSuite] given the path at which it's configuration resides
     fn get_by_path(&self, path: &Path) -> Option<Arc<TestSuite>>;
+}
 
+pub trait TestSuiteRegistryExt: TestSuiteRegistry + IntoIterator<Item = Arc<Test>> {
     /// Get an iterator over the tests in the registry
     fn tests(&self) -> impl Iterator<Item = Arc<Test>> + '_;
 

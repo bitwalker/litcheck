@@ -27,7 +27,7 @@ impl<P> Searcher<P>
 where
     P: FnMut(&walkdir::DirEntry) -> bool,
 {
-    fn new(path: &Path, recursive: bool, predicate: P) -> Self {
+    pub fn new(path: &Path, recursive: bool, predicate: P) -> Self {
         use walkdir::WalkDir;
 
         let mut walker = WalkDir::new(path).follow_links(true);
@@ -38,7 +38,13 @@ where
 
         Self { walker }
     }
+
+    #[inline(always)]
+    pub fn into_walker(self) -> walkdir::FilterEntry<walkdir::IntoIter, P> {
+        self.walker
+    }
 }
+
 impl<P> Iterator for Searcher<P>
 where
     P: FnMut(&walkdir::DirEntry) -> bool,

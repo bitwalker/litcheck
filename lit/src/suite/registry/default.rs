@@ -12,7 +12,7 @@ use crate::{
     Config, LitError,
 };
 
-use super::TestSuiteRegistry;
+use super::{TestSuiteRegistry, TestSuiteRegistryExt};
 
 #[derive(Default)]
 pub struct DefaultTestSuiteRegistry {
@@ -26,11 +26,84 @@ pub struct DefaultTestSuiteRegistry {
     config_cache: PathPrefixTree<TestSuiteKey>,
     local_config_cache: PathPrefixTree<Arc<TestConfig>>,
 }
+
+impl DefaultTestSuiteRegistry {
+    fn load_tests_for_suite(
+        &mut self,
+        suite: Arc<TestSuite>,
+        _cwd: &Path,
+        config: &Config,
+    ) -> DiagResult<()> {
+        log::debug!(target: "lit:suite:registry", "loading tests for '{}'", suite.id());
+
+        // Now that all specified test suites are loaded and have filters applied,
+        // perform test discovery for each suite taking those filters into account.
+        {
+            let tests = self
+                .tests_by_suite
+                .get_mut(&suite.id())
+                .expect("invalid test suite key");
+            tests.clear();
+        }
+
+        // If we have no specific selections, select everything
+        let search_paths = {
+            let mut lock = suite.search_paths();
+            core::mem::take(&mut *lock)
+        };
+        if search_paths.is_empty() {
+            log::debug!(
+                target: "lit:suite:registry",
+                "no search paths given, searching entire suite source directory for tests"
+            );
+            let found = suite
+                .config
+                .format
+                .registry()
+                .all(suite.clone(), config, self)?;
+            log::debug!(target: "lit:suite:registry", "found {} tests", found.len());
+            self.tests_by_suite
+                .get_mut(&suite.id())
+                .expect("invalid test suite key")
+                .append(found);
+        } else {
+            log::debug!(
+                target: "lit:suite:registry",
+                "{} search paths were given, searching just those paths for tests",
+                search_paths.len()
+            );
+            for path in search_paths.iter() {
+                log::debug!(target: "lit:suite:registry", "searching {} for tests..", path.display());
+                // Look for local configuration that applies to these tests,
+                // using the suite config if no local config is present
+                let local_config =
+                    get_local_config(&suite, path, config, &mut self.local_config_cache)?;
+                let found = local_config.format.registry().find(
+                    path,
+                    suite.clone(),
+                    config,
+                    local_config.clone(),
+                    self,
+                )?;
+                log::debug!(target: "lit:suite:registry", "found {} tests", found.len());
+                self.tests_by_suite
+                    .get_mut(&suite.id())
+                    .expect("invalid test suite key")
+                    .append(found);
+            }
+        }
+
+        *suite.search_paths() = search_paths;
+
+        log::debug!(target: "lit:suite:registry", "loading complete!");
+
+        Ok(())
+    }
+}
+
 impl TestSuiteRegistry for DefaultTestSuiteRegistry {
     fn load(&mut self, config: &Config) -> DiagResult<()> {
         log::debug!(target: "lit:suite:registry", "loading test suites for {config:#?}");
-
-        let cwd = std::env::current_dir().expect("unable to access current working directory");
 
         self.clear();
 
@@ -38,44 +111,50 @@ impl TestSuiteRegistry for DefaultTestSuiteRegistry {
         // and add the input path as a filter for the tests in that suite,
         // if applicable.
         for input in config.tests.iter().map(Path::new) {
-            let input_path = input
-                .canonicalize()
-                .into_diagnostic()
-                .wrap_err("test input does not exist")?;
-            if !input_path.starts_with(&cwd) {
-                return Err(Report::new(LitError::TestPath(input_path)));
-            }
-            let search_root = if input_path.starts_with(&cwd) {
-                &cwd
-            } else {
-                &input_path
-            };
-
-            if let Some(suite) = self.find_nearest_suite(&input_path, search_root, config)? {
-                log::debug!("resolved input {} to {}", input.display(), &suite.id());
-                let suite_source_dir = suite.source_dir();
-                let filter_path = input_path.strip_prefix(suite_source_dir).expect(
-                    "test suite source directory should have been an ancestor of the input path",
-                );
-                if filter_path != Path::new("") {
-                    log::debug!(
-                        "filtering suite '{}' by path: '{}'",
-                        &suite.id(),
-                        filter_path.display()
-                    );
-                    suite.filter_by_path(filter_path);
-                }
-            } else {
-                log::warn!("unable to locate test suite for {}", input.display());
-            }
+            self.load_from_path(input, config)?;
         }
 
         if self.suites.is_empty() {
             return Ok(());
         }
 
-        self.load_tests(config)?;
+        Ok(())
+    }
 
+    fn load_from_path(&mut self, input: &Path, config: &Config) -> DiagResult<()> {
+        let cwd = std::env::current_dir().expect("unable to access current working directory");
+
+        let input_path = input
+            .canonicalize()
+            .into_diagnostic()
+            .wrap_err("test input does not exist")?;
+        if !input_path.starts_with(&cwd) {
+            return Err(Report::new(LitError::TestPath(input_path)));
+        }
+        let search_root = if input_path.starts_with(&cwd) {
+            &cwd
+        } else {
+            &input_path
+        };
+
+        if let Some(suite) = self.find_nearest_suite(&input_path, search_root, config)? {
+            log::debug!("resolved input {} to {}", input.display(), &suite.id());
+            let suite_source_dir = suite.source_dir();
+            let filter_path = input_path.strip_prefix(suite_source_dir).expect(
+                "test suite source directory should have been an ancestor of the input path",
+            );
+            if filter_path != Path::new("") {
+                log::debug!(
+                    "filtering suite '{}' by path: '{}'",
+                    &suite.id(),
+                    filter_path.display()
+                );
+                suite.filter_by_path(filter_path);
+            }
+            self.load_tests_for_suite(suite, &cwd, config)?;
+        } else {
+            log::warn!("unable to locate test suite for {}", input.display());
+        }
         Ok(())
     }
 
@@ -106,7 +185,8 @@ impl TestSuiteRegistry for DefaultTestSuiteRegistry {
             .get(path)
             .and_then(|key| self.suites.get(key))
     }
-
+}
+impl TestSuiteRegistryExt for DefaultTestSuiteRegistry {
     fn tests(&self) -> impl Iterator<Item = Arc<Test>> + '_ {
         self.tests_by_suite.values().flat_map(|suite| suite.iter())
     }
@@ -253,11 +333,12 @@ impl DefaultTestSuiteRegistry {
         Ok(suite)
     }
 
-    /// Visits each test suite under management, and runs test discovery for that suite
-    /// using the provided configuration.
-    ///
-    /// This is safe to call multiple times, each subsequent load will clear all previously
-    /// loaded tests, and run discovery on an empty test set for each suite.
+    // Visits each test suite under management, and runs test discovery for that suite
+    // using the provided configuration.
+    //
+    // This is safe to call multiple times, each subsequent load will clear all previously
+    // loaded tests, and run discovery on an empty test set for each suite.
+    /*
     fn load_tests(&mut self, config: &Config) -> DiagResult<()> {
         log::debug!(target: "lit:suite:registry", "loading tests into registry..");
 
@@ -313,6 +394,7 @@ impl DefaultTestSuiteRegistry {
 
         Ok(())
     }
+     */
 }
 
 fn get_local_config(

@@ -11,7 +11,7 @@ use clap::Parser;
 use indicatif::{ParallelProgressIterator, ProgressBar, ProgressStyle};
 use lit::{
     Config, DefaultTestSuiteRegistry, LitError, Test, TestFormat, TestResult, TestStatus,
-    TestSuiteRegistry,
+    TestSuiteRegistry, TestSuiteRegistryExt,
 };
 use litcheck::diagnostics::{DiagResult, Report};
 use rayon::prelude::*;
@@ -146,7 +146,7 @@ impl Command for Lit {
 /// Show the available test suites, and then exit
 pub fn show_suites<R>(registry: &R)
 where
-    R: TestSuiteRegistry,
+    R: TestSuiteRegistryExt,
 {
     println!("-- Test Suites --");
     for suite in registry.suites() {
@@ -186,7 +186,7 @@ where
 /// Show the available tests, and then exit
 pub fn show_tests<R>(registry: &R)
 where
-    R: TestSuiteRegistry,
+    R: TestSuiteRegistryExt,
 {
     println!("-- Available Tests --");
     for test in registry.tests() {
@@ -202,7 +202,7 @@ where
 /// Start the `lit` test interface, and run to completion.
 pub fn start<R>(registry: R, config: Arc<Config>) -> DiagResult<ExitCode>
 where
-    R: TestSuiteRegistry,
+    R: TestSuiteRegistryExt,
     <R as IntoIterator>::IntoIter: Send,
 {
     let num_tests = registry.num_tests();

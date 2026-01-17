@@ -1,0 +1,4 @@
+name = "filecheck"
+patterns = ["*.txt"]
+
+[format.shtest]

@@ -3,7 +3,7 @@ mod registry;
 mod set;
 
 pub use self::error::TestSuiteError;
-pub use self::registry::{DefaultTestSuiteRegistry, TestSuiteRegistry};
+pub use self::registry::{DefaultTestSuiteRegistry, TestSuiteRegistry, TestSuiteRegistryExt};
 pub use self::set::{TestSuiteKey, TestSuiteSet};
 
 use std::{

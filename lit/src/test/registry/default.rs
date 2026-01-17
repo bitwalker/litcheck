@@ -5,9 +5,12 @@ use litcheck::{
     fs,
 };
 
-use crate::test::{Test, TestConfig, TestList, TestSuite};
+use crate::{
+    test::{Test, TestConfig, TestList, TestSuite},
+    Config,
+};
 
-use super::TestRegistry;
+use super::{TestRegistry, TestSuiteRegistry};
 
 /// The [DefaultTestRegistry] is used by default to locate tests for the builtin test formats.
 ///
@@ -19,24 +22,38 @@ use super::TestRegistry;
 ///   unset, the default is to select all tests.
 /// * Hidden files are ignored
 pub struct DefaultTestRegistry;
+
 impl TestRegistry for DefaultTestRegistry {
-    fn all(&self, suite: Arc<TestSuite>) -> DiagResult<TestList> {
+    fn all(
+        &self,
+        suite: Arc<TestSuite>,
+        config: &Config,
+        suites: &mut dyn TestSuiteRegistry,
+    ) -> DiagResult<TestList> {
         log::debug!(target: "lit:test:registry", "finding all tests for suite '{}'", suite.name());
         let source_dir = suite.source_dir();
-        get_file_based_tests(source_dir, suite.clone(), suite.config.clone())
+        get_file_based_tests(
+            source_dir,
+            suite.clone(),
+            config,
+            suite.config.clone(),
+            suites,
+        )
     }
 
     fn find(
         &self,
         path_in_suite: &Path,
         suite: Arc<TestSuite>,
-        config: Arc<TestConfig>,
+        config: &Config,
+        test_config: Arc<TestConfig>,
+        suites: &mut dyn TestSuiteRegistry,
     ) -> DiagResult<TestList> {
         log::debug!(target: "lit:test:registry", "finding tests for suite '{}' in {}", suite.name(), path_in_suite.display());
         let source_dir = suite.source_dir();
         let absolute_path = source_dir.join(path_in_suite);
         if absolute_path.is_dir() {
-            return get_file_based_tests(&absolute_path, suite, config);
+            return get_file_based_tests(&absolute_path, suite, config, test_config, suites);
         }
         log::debug!(
             target: "lit:test:registry",
@@ -45,7 +62,7 @@ impl TestRegistry for DefaultTestRegistry {
         );
 
         let mut tests = TestList::default();
-        if is_file_based_test(&absolute_path, &suite, &config) {
+        if is_file_based_test(&absolute_path, &suite, &test_config) {
             log::debug!(
                 target: "lit:test:registry",
                 "{} is a valid test, adding it to registry",
@@ -54,7 +71,7 @@ impl TestRegistry for DefaultTestRegistry {
             tests.push_back(Arc::new(Test::new(
                 path_in_suite.to_path_buf(),
                 suite,
-                config,
+                test_config,
             )));
         }
         Ok(tests)
@@ -65,7 +82,9 @@ impl TestRegistry for DefaultTestRegistry {
 fn get_file_based_tests(
     search_path: &Path,
     suite: Arc<TestSuite>,
-    config: Arc<TestConfig>,
+    config: &Config,
+    test_config: Arc<TestConfig>,
+    suites: &mut dyn TestSuiteRegistry,
 ) -> DiagResult<TestList> {
     debug_assert!(search_path.is_absolute());
 
@@ -74,15 +93,39 @@ fn get_file_based_tests(
         "searching for tests in {} using default registry",
         search_path.display()
     );
-    let results = fs::search_directory(search_path, true, |entry| {
-        let path = entry.path();
-        log::trace!(target: "lit:test:registry", "checking if file is valid test: {}", path.display());
-        is_file_based_test(path, &suite, &config)
+
+    let mut nested = Vec::new();
+    let searcher = fs::Searcher::<_>::new(search_path, true, |entry| {
+        if entry.file_type().is_dir() {
+            let path = entry.path();
+            if path == search_path || path == suite.source_dir() {
+                return true;
+            }
+            // Do not recurse into directories which contain a `lit.suite.toml`
+            if entry
+                .path()
+                .join("lit.suite.toml")
+                .try_exists()
+                .is_ok_and(|exists| exists)
+            {
+                nested.push(entry.path().to_path_buf());
+                return false;
+            }
+            true
+        } else {
+            log::trace!(target: "lit:test:registry", "checking if file is valid test: {}", entry.path().display());
+            is_file_based_test(entry.path(), &suite, &test_config)
+        }
     });
 
+    // Collect tests from search results
     let mut tests = TestList::default();
-    for result in results {
-        let test_path = result.into_diagnostic()?.into_path();
+    for result in searcher.into_walker() {
+        let test_entry = result.into_diagnostic()?;
+        if test_entry.file_type().is_dir() {
+            continue;
+        }
+        let test_path = test_entry.into_path();
         log::trace!(target: "lit:test:registry", "found test file: {}", test_path.display());
         let relative_path = test_path
             .strip_prefix(search_path)
@@ -90,8 +133,17 @@ fn get_file_based_tests(
         tests.push_back(Arc::new(Test::new(
             relative_path.to_path_buf(),
             suite.clone(),
-            config.clone(),
+            test_config.clone(),
         )));
+    }
+
+    // Visit any nested suites that were found
+    for nested in nested {
+        if nested == search_path || nested == suite.source_dir() {
+            log::trace!(target: "lit:test:registry", "ignoring nested path {}", nested.display());
+            continue;
+        }
+        suites.load_from_path(&nested, config)?;
     }
 
     Ok(tests)

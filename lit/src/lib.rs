@@ -9,7 +9,9 @@ pub(crate) mod utils;
 
 pub use self::config::Config;
 pub use self::format::TestFormat;
-pub use self::suite::{DefaultTestSuiteRegistry, TestSuite, TestSuiteError, TestSuiteRegistry};
+pub use self::suite::{
+    DefaultTestSuiteRegistry, TestSuite, TestSuiteError, TestSuiteRegistry, TestSuiteRegistryExt,
+};
 pub use self::test::{Test, TestConfig, TestConfigError, TestRegistry, TestResult, TestStatus};
 
 use litcheck::diagnostics::Diagnostic;
