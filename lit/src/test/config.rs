@@ -165,25 +165,32 @@ impl TestConfig {
         // and depending on how it was invoked,
         let mut exe =
             std::env::current_exe().expect("unable to detect lit/filecheck executable path");
-        let filecheck = if exe.ends_with("litcheck") {
+        let (filecheck, not) = if exe.ends_with("litcheck") {
             // We are running lit, so a filename of 'litcheck'
             // means that lit was invoked explicitly, thus we
             // should use a substitution that invokes filecheck
             // explicitly
-            StaticCow::Owned(format!("{} filecheck", exe.display()))
+            let filecheck = StaticCow::Owned(format!("{} filecheck", exe.display()));
+            let not = StaticCow::Owned(format!("{} not", exe.display()));
+            (filecheck, not)
         } else if exe.ends_with("lit") {
             // We must have been invoked as a symlink, in
             // which case the filecheck symlink is in the
             // same directory, we just need to update the
             // executable name
             exe.set_file_name("filecheck");
-            StaticCow::Owned(exe.to_string_lossy().into_owned())
+            let filecheck = StaticCow::Owned(exe.to_string_lossy().into_owned());
+            exe.set_file_name("not");
+            let not = StaticCow::Owned(exe.to_string_lossy().into_owned());
+            (filecheck, not)
         } else {
             // We're probably running as a test executable right now,
             // so just use 'filecheck' as the substitution
-            StaticCow::Borrowed("filecheck")
+            (StaticCow::Borrowed("filecheck"), StaticCow::Borrowed("not"))
         };
-        self.substitutions.insert("[Ff]ile[Cc]heck", filecheck);
+        self.substitutions
+            .insert("\\b{start}[Ff]ile[Cc]heck\\b{end}", filecheck);
+        self.substitutions.insert("\\b{start}not\\b{end}", not);
 
         self.substitutions
             .insert(r"%\{pathsep\}", if cfg!(windows) { ";" } else { ":" });
