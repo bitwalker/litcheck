@@ -18,7 +18,7 @@ patterns = ["*.txt"]
 #   ; Test FileCheck itself, but only examine its exit status, so a bare
 #   ; FileCheck call is still sufficient and more convenient for debugging.
 #   ;
-#   ; RUN: FileCheck -input-file %s %s
+#   ; RUN: FileCheck --input-file %s %s
 #   ; CHECK: {{[0-9]+\.0}}
 #   ; 5.0
 #
@@ -26,8 +26,8 @@ patterns = ["*.txt"]
 #   ; call's textual output affects test results, so it requires
 #   ; %ProtectFileCheckOutput to be safe.
 #   ;
-#   ; RUN: %ProtectFileCheckOutput FileCheck -input-file %s %s 2>&1 \
-#   ; RUN: | FileCheck -allow-empty -check-prefix QUIET %s
+#   ; RUN: %ProtectFileCheckOutput FileCheck --input-file %s %s 2>&1 \
+#   ; RUN: | FileCheck --allow-empty --check-prefix QUIET %s
 #   ;
 #   ; CHECK: {{[0-9]+\.0}}
 #   ; 5.0
@@ -38,8 +38,8 @@ patterns = ["*.txt"]
 #   ; FILECHECK_OPTS beforehand.
 #   ;
 #   ; RUN: %ProtectFileCheckOutput FILECHECK_OPTS=-v \
-#   ; RUN: FileCheck -dump-input=never -input-file %s %s 2>&1 \
-#   ; RUN: | FileCheck -check-prefix TRACE %s
+#   ; RUN: FileCheck --dump-input=never --input-file %s %s 2>&1 \
+#   ; RUN: | FileCheck --check-prefix TRACE %s
 #   ;
 #   ; CHECK: {{[0-9]+\.0}}
 #   ; 5.0

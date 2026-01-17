@@ -5,7 +5,7 @@
 
 ; RUN: %ProtectFileCheckOutput \
 ; RUN: not FileCheck %s --dump-input=never --input-file %t.in 2>&1 \
-; RUN: | FileCheck -check-prefix QUIET %s
+; RUN: | FileCheck --check-prefix QUIET %s
 
 ; RUN: %ProtectFileCheckOutput FILECHECK_OPTS= \
 ; RUN: not FileCheck %s --dump-input=never --input-file %t.in 2>&1 \

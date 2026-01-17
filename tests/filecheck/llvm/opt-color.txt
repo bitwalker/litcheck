@@ -2,7 +2,7 @@
 ; RUN: echo foo > %t.in
 ; CHECK: bar
 
-; Run without and with -color.  In the former case, FileCheck should suppress
+; Run without and with --color.  In the former case, FileCheck should suppress
 ; color in its diagnostics because stderr is a file.
 ; RUN: %ProtectFileCheckOutput not FileCheck %s < %t.in 2> %t.no-color
 ; RUN: %ProtectFileCheckOutput not FileCheck --color %s < %t.in 2> %t.color
