@@ -7,8 +7,8 @@
 
 //------------------------------------------------
 RUN: %ProtectFileCheckOutput \
-RUN: not FileCheck -check-prefix=BEFORE-PREFIX %s < /dev/null 2>&1 | \
-RUN:   FileCheck -check-prefix=ERR-EMPTY-CHECK %s
+RUN: not FileCheck --check-prefix=BEFORE-PREFIX %s < /dev/null 2>&1 | \
+RUN:   FileCheck --check-prefix=ERR-EMPTY-CHECK %s
 
  BEFORE-PREFIX:
 ^
@@ -16,8 +16,8 @@ ERR-EMPTY-CHECK: error: found empty check string
 
 //------------------------------------------------
 RUN: %ProtectFileCheckOutput \
-RUN: not FileCheck -check-prefix=AFTER-PREFIX %s < /dev/null 2>&1 | \
-RUN:   FileCheck -check-prefix=ERR-NO-CHECK %s
+RUN: not FileCheck --check-prefix=AFTER-PREFIX %s < /dev/null 2>&1 | \
+RUN:   FileCheck --check-prefix=ERR-NO-CHECK %s
 
 AFTER-PREFIX :
             ^
@@ -25,8 +25,8 @@ ERR-NO-CHECK: error: no check strings found
 
 //------------------------------------------------
 RUN: %ProtectFileCheckOutput \
-RUN: not FileCheck -check-prefix=BEFORE-VAR %s < /dev/null 2>&1 | \
-RUN:   FileCheck -check-prefix=ERR-BAD-VAR %s
+RUN: not FileCheck --check-prefix=BEFORE-VAR %s < /dev/null 2>&1 | \
+RUN:   FileCheck --check-prefix=ERR-BAD-VAR %s
 
 BEFORE-VAR: [[ VAR:]]
               ^
@@ -34,8 +34,8 @@ ERR-BAD-VAR: error: invalid variable name
 
 //------------------------------------------------
 RUN: %ProtectFileCheckOutput \
-RUN: not FileCheck -check-prefix=AFTER-VAR %s < /dev/null 2>&1 | \
-RUN:   FileCheck -check-prefix=ERR-BAD-STRING-VAR %s
+RUN: not FileCheck --check-prefix=AFTER-VAR %s < /dev/null 2>&1 | \
+RUN:   FileCheck --check-prefix=ERR-BAD-STRING-VAR %s
 
 AFTER-VAR: [[VAR :]]
                 ^

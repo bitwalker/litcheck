@@ -82,11 +82,13 @@ pub struct Config {
     ///
     /// For example, in the directive `CHECK-SAME`, `CHECK` is the prefix.
     #[arg(
-        long = "check-prefix",
+        long,
+        alias = "check-prefix",
         value_name = "PREFIX",
         default_value = "CHECK",
         action(clap::ArgAction::Append),
         value_parser(re_value_parser("^[A-Za-z][A-Za-z0-9_]*")),
+        value_delimiter(','),
         help_heading = "Syntax"
     )]
     pub check_prefixes: Vec<Arc<str>>,
@@ -95,11 +97,13 @@ pub struct Config {
     /// All content on a line following a comment directive is ignored,
     /// up to the next newline.
     #[arg(
-        long = "comment-prefix",
+        long,
+        alias = "comment-prefix",
         value_name = "PREFIX",
         default_value = "COM,RUN",
         action(clap::ArgAction::Append),
         value_parser(re_value_parser("^[A-Za-z][A-Za-z0-9_]*")),
+        value_delimiter(','),
         help_heading = "Syntax"
     )]
     pub comment_prefixes: Vec<Arc<str>>,
