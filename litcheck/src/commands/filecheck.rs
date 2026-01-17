@@ -24,7 +24,7 @@ pub struct FileCheck {
     /// The path to the file to verify.
     ///
     /// By default this reads from standard input
-    #[arg(value_name = "VERIFY", default_value = "-")]
+    #[arg(long, value_name = "VERIFY", default_value = "-")]
     pub input_file: Input,
     #[command(flatten)]
     pub config: filecheck::Config,
