@@ -81,13 +81,13 @@ block0(v0: u32):
     assert_eq!(script.commands.len(), 2);
     assert_eq!(
         script.commands[0].unwrap_run().command,
-        "midenc compile --stdout --emit=ast %s
+        "midenc compile --stdout --emit=ast %s\\
         | filecheck --check-prefix=AST %s"
     );
     assert_eq!(
         script.commands[1].unwrap_run().command,
-        "midenc compile --stdout --emit=hir %s
-        | filecheck --check-prefix=HIR
+        "midenc compile --stdout --emit=hir %s\\
+        | filecheck --check-prefix=HIR\\
           %s"
     );
     assert!(script.unsupported.is_empty());

@@ -153,6 +153,7 @@ where
                     output.push(' ');
                     rest = stripped.trim();
                 } else {
+                    output.push('\\');
                     output.push('\n');
                     rest = stripped;
                 }
@@ -164,6 +165,7 @@ where
                     output.push(' ');
                     rest = rest.trim_start();
                 } else {
+                    output.push('\\');
                     output.push('\n');
                 }
             }
