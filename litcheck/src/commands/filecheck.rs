@@ -41,6 +41,8 @@ impl Command for FileCheck {
         config.check_prefixes.sort();
         config.check_prefixes.dedup();
 
+        config.validate()?;
+
         let match_file = self.match_file.into_source(true).into_diagnostic()?;
         let input_file = self.input_file.into_source(true).into_diagnostic()?;
         let mut test = Test::new(match_file, &config);

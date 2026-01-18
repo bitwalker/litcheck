@@ -16,8 +16,8 @@ clap.workspace = true
 console.workspace = true
 env_logger.workspace = true
 indicatif = { version = "0.18", features = ["rayon"] }
-lit = { workspace = true, features = ["fancy-diagnostics"] }
 filecheck = { workspace = true, features = ["fancy-diagnostics"] }
+lit = { workspace = true, features = ["fancy-diagnostics"] }
 litcheck = { workspace = true, features = ["fancy-diagnostics"] }
 miette = { workspace = true, features = ["fancy"] }
 parking_lot.workspace = true

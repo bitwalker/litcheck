@@ -17,6 +17,7 @@ pub use self::test::TestContext;
 pub use self::test::{Test, TestResult};
 
 use clap::{builder::ValueParser, ArgAction, Args, ColorChoice, ValueEnum};
+use litcheck::diagnostics::{DiagResult, Report};
 use std::sync::Arc;
 
 #[doc(hidden)]
@@ -87,7 +88,7 @@ pub struct Config {
         value_name = "PREFIX",
         default_value = "CHECK",
         action(clap::ArgAction::Append),
-        value_parser(re_value_parser("^[A-Za-z][A-Za-z0-9_]*")),
+        value_parser(prefix_value_parser()),
         value_delimiter(','),
         help_heading = "Syntax"
     )]
@@ -102,7 +103,7 @@ pub struct Config {
         value_name = "PREFIX",
         default_value = "COM,RUN",
         action(clap::ArgAction::Append),
-        value_parser(re_value_parser("^[A-Za-z][A-Za-z0-9_]*")),
+        value_parser(prefix_value_parser()),
         value_delimiter(','),
         help_heading = "Syntax"
     )]
@@ -203,6 +204,7 @@ pub struct Config {
     )]
     pub color: ColorChoice,
 }
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -224,6 +226,35 @@ impl Default for Config {
             verbose: 0,
             color: Default::default(),
         }
+    }
+}
+
+impl Config {
+    pub fn validate(&self) -> DiagResult<()> {
+        // Validate that we do not have overlapping check and comment prefixes
+        if self
+            .check_prefixes
+            .iter()
+            .any(|prefix| prefix.as_ref() != "CHECK")
+        {
+            for check_prefix in self.check_prefixes.iter() {
+                if self.comment_prefixes.contains(check_prefix) {
+                    return Err(Report::msg(format!("supplied check prefix must be unique among check and comment prefixes: '{check_prefix}'")));
+                }
+            }
+        } else if self
+            .comment_prefixes
+            .iter()
+            .any(|prefix| !matches!(prefix.as_ref(), "COM" | "RUN"))
+        {
+            for comment_prefix in self.comment_prefixes.iter() {
+                if self.check_prefixes.contains(comment_prefix) {
+                    return Err(Report::msg(format!("supplied comment prefix must be unique among check and comment prefixes: '{comment_prefix}'")));
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -253,19 +284,29 @@ pub enum DumpFilter {
     Error,
 }
 
-fn re_value_parser(r: &'static str) -> ValueParser {
+fn prefix_value_parser() -> ValueParser {
     use clap::{error::ErrorKind, Error};
 
     ValueParser::from(move |s: &str| -> Result<Arc<str>, clap::Error> {
-        let re = regex::Regex::new(r).unwrap();
-        if re.is_match(s) {
-            Ok(Arc::from(s.to_owned().into_boxed_str()))
-        } else {
-            Err(Error::raw(
+        if s.is_empty() {
+            return Err(Error::raw(
                 ErrorKind::ValueValidation,
-                "'{s}' does not match expected pattern `{r}`",
-            ))
+                "supplied prefix must not be an empty string",
+            ));
         }
+        if !s.starts_with(|c: char| c.is_ascii_alphabetic()) {
+            return Err(Error::raw(
+                ErrorKind::ValueValidation,
+                "supplied prefix must start with an ASCII alphabetic character",
+            ));
+        }
+        if s.contains(|c: char| !c.is_alphanumeric() && c != '_' && c != '-') {
+            return Err(Error::raw(
+                ErrorKind::ValueValidation,
+                "supplied prefix may only contain ASCII alphanumerics, hyphens, or underscores",
+            ));
+        }
+        Ok(Arc::from(s.to_owned().into_boxed_str()))
     })
 }
 
