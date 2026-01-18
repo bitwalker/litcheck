@@ -51,6 +51,6 @@ patterns = ["*.txt"]
 # debugging tests.  If a developer sets values that affect FileCheck's exit
 # status (e.g., FILECHECK_OPTS=-strict-whitespace), he shouldn't be surprised
 # that test results throughout all test suites are affected.
-"%ProtectFileCheckOutput" = "env -u FILECHECK_OPTS"
+"%ProtectFileCheckOutput" = "env -u FILECHECK_OPTS -u LITCHECK_TRACE"
 
 [format.shtest]
