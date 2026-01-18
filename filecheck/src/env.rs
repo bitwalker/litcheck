@@ -34,14 +34,6 @@ impl<V: Clone> Clone for Bindings<V> {
         }
     }
 }
-impl<V: Clone> IntoIterator for Bindings<V> {
-    type Item = (VariableName, V);
-    type IntoIter = im_rc::ordmap::ConsumingIter<Self::Item>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.bound.into_iter()
-    }
-}
 impl<V: Clone + fmt::Debug> Bindings<V> {
     pub fn new() -> Self {
         Self::default()
@@ -57,7 +49,7 @@ impl<V: Clone + fmt::Debug> Bindings<V> {
 
     pub fn get(&self, name: &VariableName) -> Option<&V> {
         match name {
-            VariableName::User(_) => self.bound.get(name),
+            VariableName::User(sym) => self.bound.get(name).or_else(|| self.system.get(sym)),
             VariableName::Global(sym) => self.global.get(sym).or_else(|| self.system.get(sym)),
             VariableName::Pseudo(_) => {
                 panic!("expected pseudo-variable to have been expanded by caller")
@@ -66,7 +58,9 @@ impl<V: Clone + fmt::Debug> Bindings<V> {
     }
 
     pub fn get_local(&self, name: Symbol) -> Option<&V> {
-        self.bound.get(&VariableName::User(Span::new(0..0, name)))
+        self.bound
+            .get(&VariableName::User(Span::new(0..0, name)))
+            .or_else(|| self.system.get(&name))
     }
 
     pub fn get_global(&self, name: Symbol) -> Option<&V> {
@@ -274,32 +268,6 @@ impl<V: Clone + fmt::Debug> dyn LexicalScopeMut<Value = V> {
     }
 }
 
-/// This trait is separate from [LexicalScopeMut] to ensure that [LexicalScopeMut]
-/// can be used as a trait object. This trait is automatically implemented for all
-/// implementations of [LexicalScopeMut].
-pub trait LexicalScopeExtend {
-    type Value;
-
-    /// Extend the local set of bindings from the given iterator.
-    fn extend<I>(&mut self, bindings: I)
-    where
-        I: IntoIterator<Item = (VariableName, Self::Value)>;
-}
-impl<S> LexicalScopeExtend for &mut S
-where
-    S: LexicalScopeExtend + ?Sized,
-{
-    type Value = <S as LexicalScopeExtend>::Value;
-
-    #[inline]
-    fn extend<I>(&mut self, bindings: I)
-    where
-        I: IntoIterator<Item = (VariableName, Self::Value)>,
-    {
-        (**self).extend(bindings);
-    }
-}
-
 /// This struct represents the top-level environment used by expressions
 /// evaluated as part of a CHECK pattern. Currently, this environment
 /// consists solely of local and global variable bindings, along with the
@@ -405,19 +373,6 @@ impl<'input, 'context: 'input> LexicalScopeMut for Env<'input, 'context> {
         self.bindings.clear();
     }
 }
-impl<'input, 'context: 'input> LexicalScopeExtend for Env<'input, 'context> {
-    type Value = Value<'input>;
-
-    fn extend<I>(&mut self, bindings: I)
-    where
-        I: IntoIterator<Item = (VariableName, Self::Value)>,
-    {
-        self.bindings.extend(bindings.into_iter().map(|(k, v)| {
-            log::trace!(target: "lexical-scope", "binding {} to {v:#?}", self.interner.resolve(k.into_inner()));
-            (k, v)
-        }));
-    }
-}
 
 /// This struct is used to introduce a new scope which "protects" the
 /// scope from which it is derived.
@@ -459,6 +414,10 @@ impl<'a, 'input> ScopeGuard<'a, 'input, Value<'input>> {
             bindings,
             _marker: core::marker::PhantomData,
         }
+    }
+
+    pub fn merge(&mut self, bindings: Bindings<Value<'input>>) {
+        self.bindings.merge(bindings);
     }
 }
 impl<'a, 'input: 'a, V: Clone + fmt::Debug + 'input> LexicalScope for ScopeGuard<'a, 'input, V> {
@@ -507,20 +466,5 @@ impl<'a, 'input: 'a, V: Clone + fmt::Debug + 'input> LexicalScopeMut for ScopeGu
     fn clear(&mut self) {
         log::trace!(target: "scope-guard", "clearing all bindings in the current scope");
         self.bindings.clear();
-    }
-}
-impl<'a, 'input: 'a, V: Clone + fmt::Debug + 'input> LexicalScopeExtend
-    for ScopeGuard<'a, 'input, V>
-{
-    type Value = V;
-
-    fn extend<I>(&mut self, bindings: I)
-    where
-        I: IntoIterator<Item = (VariableName, Self::Value)>,
-    {
-        self.bindings.extend(bindings.into_iter().map(|(k, v)| {
-            log::trace!(target: "scope-guard", "binding {} to {v:#?}", self.interner.resolve(k.into_inner()));
-            (k, v)
-        }));
     }
 }

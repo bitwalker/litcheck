@@ -329,7 +329,7 @@ impl<'a, 'input, S: PatternSearcher<'input>> DynamicPatternSetVisitor<'a, S> {
         {
             self.patterns_matched[prefix_id].push(Span::new(longest_match.info.span, index));
             // Restore the matched bindings, and save them to the overall match binding scope
-            context.extend_locals(longest_match.bindings);
+            context.save_bindings(longest_match.bindings);
 
             if self.all_prefixes_visited() {
                 ControlFlow::Break(longest_match.info)

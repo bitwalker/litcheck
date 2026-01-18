@@ -1,4 +1,4 @@
-use crate::common::*;
+use crate::{common::*, env::Bindings};
 
 pub trait Context<'input, 'context> {
     fn config(&self) -> &'context Config;
@@ -104,11 +104,8 @@ impl<'guard, 'input, 'context> ContextGuard<'guard, 'input, 'context> {
         self.scope.save();
     }
 
-    pub fn extend_locals<I>(&mut self, bindings: I)
-    where
-        I: IntoIterator<Item = (VariableName, Value<'input>)>,
-    {
-        self.scope.extend(bindings);
+    pub fn save_bindings(&mut self, bindings: Bindings<Value<'input>>) {
+        self.scope.merge(bindings);
     }
 }
 impl<'guard, 'input, 'context> Context<'input, 'context>
