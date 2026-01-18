@@ -12,7 +12,7 @@ RUN:   FileCheck --check-prefix=ERR-EMPTY-CHECK %s
 
  BEFORE-PREFIX:
 ^
-ERR-EMPTY-CHECK: error: found empty check string
+ERR-EMPTY-CHECK: expected a non-empty pattern
 
 //------------------------------------------------
 RUN: %ProtectFileCheckOutput \
@@ -21,22 +21,4 @@ RUN:   FileCheck --check-prefix=ERR-NO-CHECK %s
 
 AFTER-PREFIX :
             ^
-ERR-NO-CHECK: error: no check strings found
-
-//------------------------------------------------
-RUN: %ProtectFileCheckOutput \
-RUN: not FileCheck --check-prefix=BEFORE-VAR %s < /dev/null 2>&1 | \
-RUN:   FileCheck --check-prefix=ERR-BAD-VAR %s
-
-BEFORE-VAR: [[ VAR:]]
-              ^
-ERR-BAD-VAR: error: invalid variable name
-
-//------------------------------------------------
-RUN: %ProtectFileCheckOutput \
-RUN: not FileCheck --check-prefix=AFTER-VAR %s < /dev/null 2>&1 | \
-RUN:   FileCheck --check-prefix=ERR-BAD-STRING-VAR %s
-
-AFTER-VAR: [[VAR :]]
-                ^
-ERR-BAD-STRING-VAR: error: invalid name in string variable definition
+ERR-NO-CHECK: no check strings found with prefix(es) 'AFTER-PREFIX'

@@ -5,4 +5,4 @@ RUN: echo 'COM: foo'  >  %t.chk
 RUN: echo 'RUN: echo' >> %t.chk
 RUN: %ProtectFileCheckOutput not FileCheck %t.chk < %t.in 2>&1 | FileCheck %s
 
-CHECK: error: no check strings found with prefix 'CHECK:'
+CHECK: no check strings found with prefix(es) 'CHECK'
