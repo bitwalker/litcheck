@@ -59,6 +59,7 @@ impl Input {
     pub fn into_source(&self, strict: bool) -> std::io::Result<Source<'static>> {
         let name = self.filename();
         let code = self.read_to_string(strict).map(Cow::Owned)?;
+        log::trace!(target: "input", "read '{name}': '{code}'");
         Ok(Source { name, code })
     }
 

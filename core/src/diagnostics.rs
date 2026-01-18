@@ -228,9 +228,55 @@ impl fmt::Display for FileName {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct Location {
+    pub file: FileName,
+    pub line: u32,
+    pub column: u32,
+}
+
+impl fmt::Display for Location {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:{}:{}", &self.file, &self.line, &self.column)
+    }
+}
+
 pub trait NamedSourceFile: SourceFile {
     fn name(&self) -> FileName {
         FileName::Stdin
+    }
+
+    fn location_from_span(&self, span: SourceSpan) -> Option<Location> {
+        let bytes = self.source_bytes();
+        let start = span.offset();
+        if start >= bytes.len() {
+            return None;
+        }
+        let mut line = 1;
+        let mut column = 0;
+        let mut last_newline = 0;
+        for offset in memchr::memchr_iter(b'\n', bytes) {
+            if offset <= start {
+                line += 1;
+            } else {
+                let line_content = core::str::from_utf8(&bytes[last_newline..offset]).unwrap();
+                for (i, _) in line_content.char_indices() {
+                    if (offset + i) < start {
+                        column += 1;
+                    } else {
+                        break;
+                    }
+                }
+                break;
+            }
+            last_newline = offset;
+        }
+
+        Some(Location {
+            file: self.name(),
+            line,
+            column,
+        })
     }
 }
 

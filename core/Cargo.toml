@@ -20,6 +20,7 @@ anyhow.workspace = true
 clap.workspace = true
 either.workspace = true
 glob = "0.3"
+log.workspace = true
 miette.workspace = true
 memchr.workspace = true
 rustc-hash.workspace = true

@@ -115,6 +115,13 @@ pub fn discover_blocks<'input, 'context: 'input>(
                 Ok(result) => {
                     match result.info {
                         Some(info) => {
+                            if context.config.remarks_enabled() {
+                                if let Some(loc) =
+                                    context.match_file.location_from_span(info.pattern_span)
+                                {
+                                    eprintln!("{loc}: remark: CHECK-LABEL: expected string found in input");
+                                }
+                            }
                             // We must compute the indices for the end of the previous block,
                             // and the start of the current block, by looking forwards/backwards
                             // for the nearest newlines in those directions.
@@ -307,6 +314,11 @@ pub fn check_group<'section, 'input, 'a: 'input>(
             let input = context.search_block();
             match check_not(pattern, input, context) {
                 Ok(Ok(num_patterns)) => {
+                    if context.config.remarks_enabled() {
+                        if let Some(loc) = context.match_file.location_from_span(pattern.span()) {
+                            eprintln!("{loc}: remark: CHECK-NOT: none of the expected strings were found in the input");
+                        }
+                    }
                     (0..num_patterns).for_each(|_| test_result.passed());
                     Ok(Ok(vec![]))
                 }
@@ -335,6 +347,14 @@ pub fn check_group<'section, 'input, 'a: 'input>(
             for rule in rules.iter() {
                 match rule.apply(context) {
                     Ok(matches) => {
+                        if context.config.remarks_enabled() {
+                            if let Some(loc) = context.match_file.location_from_span(rule.span()) {
+                                eprintln!(
+                                    "{loc}: remark: {}: expected string found in input",
+                                    DynRule::kind(rule)
+                                );
+                            }
+                        }
                         matched.push(matches);
                     }
                     Err(err) => {
@@ -357,6 +377,14 @@ pub fn check_group<'section, 'input, 'a: 'input>(
             for _ in 0..*count {
                 match rule.apply(context) {
                     Ok(matches) => {
+                        if context.config.remarks_enabled() {
+                            if let Some(loc) = context.match_file.location_from_span(rule.span()) {
+                                eprintln!(
+                                    "{loc}: remark: {}: expected string found in input",
+                                    DynRule::kind(rule)
+                                );
+                            }
+                        }
                         matched.push(matches);
                     }
                     Err(err) => {

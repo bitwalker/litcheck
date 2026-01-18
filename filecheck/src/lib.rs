@@ -230,6 +230,20 @@ impl Default for Config {
 }
 
 impl Config {
+    /// Returns true if the user has passed -v, requesting diagnostic remarks be output for matches
+    pub const fn remarks_enabled(&self) -> bool {
+        self.verbose > 0
+    }
+
+    /// Returns true if the user has passed -vv, requesting verbose diagnostics be output
+    ///
+    /// NOTE: This is different than the tracing enabled via LITCHECK_TRACE which is tailored for
+    /// diagnosing litcheck internals. Instead, the tracing referred to here is end user-oriented,
+    /// and meant to provide helpful information to understand why a test is failing
+    pub const fn tracing_enabled(&self) -> bool {
+        self.verbose > 1
+    }
+
     pub fn validate(&self) -> DiagResult<()> {
         // Validate that we do not have overlapping check and comment prefixes
         if self
