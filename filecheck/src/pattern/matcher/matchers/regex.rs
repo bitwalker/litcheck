@@ -289,7 +289,7 @@ where
     let diagnostic = if let Some(pattern_id) = error.pattern() {
         let span = get_pattern_span(pattern_id.as_usize());
         if let Some(syntax_err) = error.syntax_error() {
-            Diag::new(format!("invalid regex pattern: {error}"))
+            Diag::new(syntax_err.to_string())
                 .with_help("a syntax error prevented us from compiling this pattern")
                 .with_url("https://docs.rs/regex/latest/regex/index.html#syntax")
                 .and_label(Label::new(span, syntax_err.to_string()))

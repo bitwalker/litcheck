@@ -6,7 +6,7 @@ RUN: not FileCheck --check-prefix=CHECK-STAR %s < /dev/null 2>&1 | \
 RUN:   FileCheck --check-prefix=ERR-STAR %s
 
 CHECK-STAR: [[BOOM:*]]
-ERR-STAR: error: invalid regex: repetition-operator operand invalid
+ERR-STAR: error: repetition operator missing expression
 
 //------------------------------------------------
 RUN: %ProtectFileCheckOutput \
@@ -14,6 +14,6 @@ RUN: not FileCheck --check-prefix=CHECK-PLUS %s < /dev/null 2>&1 | \
 RUN:   FileCheck --check-prefix=ERR-PLUS %s
 
 CHECK-PLUS: [[BOOM:+]]
-ERR-PLUS: error: invalid regex: repetition-operator operand invalid
+ERR-PLUS: error: repetition operator missing expression
 
 //------------------------------------------------
