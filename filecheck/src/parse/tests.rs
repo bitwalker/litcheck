@@ -684,12 +684,25 @@ fn check_like_lexer_test() -> DiagResult<()> {
 fn main() -> i32 { std::process::exit(); }
 
 // CHECKS: main
+// COM-CHECK: main
+// COM_CHECK: main
+// COMCHECK: main
+// CHECK-COM: main
+// CHECK_COM: main
+// CHECKCOM: main
+// COM: main
+// CHECK: main
 "#;
     let context = TestContext::new();
 
     let mut lexer = context.lex(input);
 
-    assert_eq!(lexer.next()?, None);
+    assert_eq!(lexer.next()?, Some(Token::Comment("main".into())));
+    assert_eq!(lexer.next()?, Some(Token::Lf));
+    assert_eq!(lexer.next()?, Some(Token::Check(Check::Plain)));
+    assert_eq!(lexer.next()?, Some(Token::Colon));
+    assert_eq!(lexer.next()?, Some(Token::Raw("main")));
+    assert_eq!(lexer.next()?, Some(Token::Lf));
     Ok(())
 }
 
@@ -699,6 +712,12 @@ fn check_like_parser_test() {
 fn main() -> i32 { std::process::exit(); }
 
 // CHECKS: main
+// COM-CHECK: main
+// COM_CHECK: main
+// COMCHECK: main
+// CHECK-COM: main
+// CHECK_COM: main
+// CHECKCOM: main
 "#;
     let mut context = TestContext::new();
 
@@ -706,6 +725,75 @@ fn main() -> i32 { std::process::exit(); }
         context.parse_err(input),
         Err(ParserError::UnusedCheckPrefixes(_))
     );
+}
+
+#[test]
+fn comment_like_lexer_test() -> DiagResult<()> {
+    let input = r#"
+fn main() -> i32 { std::process::exit(); }
+
+// COM-CHECK: CHECK: main
+// COM_CHECK: CHECK: main
+// COMCHECK: CHECK: main
+// CHECK-COM: CHECK: main
+// CHECK_COM: CHECK: main
+// CHECKCOM: CHECK: main
+"#;
+    let context = TestContext::new();
+
+    let mut lexer = context.lex(input);
+
+    for _ in 0..6 {
+        assert_eq!(lexer.next()?, Some(Token::Check(Check::Plain)));
+        assert_eq!(lexer.next()?, Some(Token::Colon));
+        assert_eq!(lexer.next()?, Some(Token::Raw("main")));
+        assert_eq!(lexer.next()?, Some(Token::Lf));
+    }
+
+    assert_eq!(lexer.next()?, None);
+    Ok(())
+}
+
+#[test]
+fn check_blocks_lexer_test() -> DiagResult<()> {
+    let input = r"
+CHECK-LABEL: block0(
+CHECK-DAG: v1 = const.i32 1
+CHECK-DAG: v2 = const.i32 0
+CHECK-LABEL: block1(
+CHECK-DAG: v8 = add v6, v7
+";
+    let context = TestContext::new();
+
+    let mut lexer = context.lex(input);
+
+    assert_eq!(lexer.next()?, Some(Token::Check(Check::Label)));
+    assert_eq!(lexer.next()?, Some(Token::Colon));
+    assert_eq!(lexer.next()?, Some(Token::Raw("block0(")));
+    assert_eq!(lexer.next()?, Some(Token::Lf));
+
+    assert_eq!(lexer.next()?, Some(Token::Check(Check::Dag)));
+    assert_eq!(lexer.next()?, Some(Token::Colon));
+    assert_eq!(lexer.next()?, Some(Token::Raw("v1 = const.i32 1")));
+    assert_eq!(lexer.next()?, Some(Token::Lf));
+
+    assert_eq!(lexer.next()?, Some(Token::Check(Check::Dag)));
+    assert_eq!(lexer.next()?, Some(Token::Colon));
+    assert_eq!(lexer.next()?, Some(Token::Raw("v2 = const.i32 0")));
+    assert_eq!(lexer.next()?, Some(Token::Lf));
+
+    assert_eq!(lexer.next()?, Some(Token::Check(Check::Label)));
+    assert_eq!(lexer.next()?, Some(Token::Colon));
+    assert_eq!(lexer.next()?, Some(Token::Raw("block1(")));
+    assert_eq!(lexer.next()?, Some(Token::Lf));
+
+    assert_eq!(lexer.next()?, Some(Token::Check(Check::Dag)));
+    assert_eq!(lexer.next()?, Some(Token::Colon));
+    assert_eq!(lexer.next()?, Some(Token::Raw("v8 = add v6, v7")));
+    assert_eq!(lexer.next()?, Some(Token::Lf));
+
+    assert_eq!(lexer.next()?, None);
+    Ok(())
 }
 
 #[test]

@@ -14,21 +14,23 @@ pub struct Pattern {
 }
 impl Pattern {
     fn new(prefixes: &str, config: Either<Check, (Check, &str)>) -> Self {
-        const WORD_BOUNDARY: &str = r#"(?-u:\b)"#;
+        const WORD_BOUNDARY: &str = r#"(?-u:^|\s)"#;
         const MODIFIERS: &str = r#"([{](?<modifiers>LITERAL)[}])?"#;
 
         match config {
             Left(Check::Comment) => {
-                let raw = format!("(?m){WORD_BOUNDARY}(?<prefix>{prefixes}):(?<comment>.*)$");
+                let raw = format!("(?m){WORD_BOUNDARY}(?<prefix>{prefixes}):(?<comment>.*)$(?-m)");
                 Self::comment(raw)
             }
             Left(ty) => {
                 let label = ty.suffix();
-                let raw = format!("{WORD_BOUNDARY}(?<prefix>{prefixes}){label}{MODIFIERS}:");
+                let raw =
+                    format!("(?m){WORD_BOUNDARY}(?<prefix>{prefixes}){label}{MODIFIERS}:(?-m)");
                 Self::check(raw, ty)
             }
             Right((ty, label)) => {
-                let raw = format!("{WORD_BOUNDARY}(?<prefix>{prefixes}){label}{MODIFIERS}:");
+                let raw =
+                    format!("(?m){WORD_BOUNDARY}(?<prefix>{prefixes}){label}{MODIFIERS}:(?-m)");
                 Self::check(raw, ty)
             }
         }
