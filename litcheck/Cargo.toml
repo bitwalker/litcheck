@@ -7,7 +7,7 @@ repository.workspace = true
 homepage.workspace = true
 categories.workspace = true
 keywords.workspace = true
-edition.workspace = true
+edition = "2024"
 license.workspace = true
 
 [dependencies]
@@ -23,5 +23,6 @@ miette = { workspace = true, features = ["fancy"] }
 parking_lot.workspace = true
 rayon.workspace = true
 regex.workspace = true
+shlex.workspace = true
 target-lexicon.workspace = true
 thiserror.workspace = true

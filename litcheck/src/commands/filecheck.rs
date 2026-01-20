@@ -3,8 +3,8 @@ use std::process::ExitCode;
 use clap::Parser;
 use filecheck::{Config, Test};
 use litcheck::{
-    diagnostics::{DiagResult, IntoDiagnostic},
     Input,
+    diagnostics::{DiagResult, IntoDiagnostic},
 };
 
 use super::Command;
@@ -34,12 +34,19 @@ impl Command for FileCheck {
         self.match_file.path().as_os_str() == "help"
     }
 
-    fn run(self) -> DiagResult<ExitCode> {
+    fn run(mut self) -> DiagResult<ExitCode> {
+        if let Some(filecheck_opts) = std::env::var("FILECHECK_OPTS").ok()
+            && let Some(extra_args) = shlex::split(&filecheck_opts)
+        {
+            <filecheck::Options as clap::Parser>::update_from(&mut self.options, extra_args);
+        }
+
         let mut options = self.options;
         options.comment_prefixes.sort();
         options.comment_prefixes.dedup();
         options.check_prefixes.sort();
         options.check_prefixes.dedup();
+
         options.validate()?;
 
         let config = Config {

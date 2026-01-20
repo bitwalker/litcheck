@@ -251,6 +251,28 @@ pub struct Options {
     pub color: ColorChoice,
 }
 
+/// This is implemented for [Options] so that we can use [clap::Parser::update_from] on it.
+impl clap::CommandFactory for Options {
+    fn command() -> clap::Command {
+        let cmd = clap::Command::new("filecheck")
+            .no_binary_name(true)
+            .disable_help_flag(true)
+            .disable_version_flag(true);
+        <Self as clap::Args>::augment_args(cmd)
+    }
+
+    fn command_for_update() -> clap::Command {
+        let cmd = clap::Command::new("filecheck")
+            .no_binary_name(true)
+            .disable_help_flag(true)
+            .disable_version_flag(true);
+        <Self as clap::Args>::augment_args_for_update(cmd)
+    }
+}
+
+/// This is implemented for [Options] in order to use [clap::Parser::update_from].
+impl clap::Parser for Options {}
+
 impl Default for Options {
     fn default() -> Self {
         Self {

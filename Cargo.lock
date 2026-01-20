@@ -606,6 +606,7 @@ dependencies = [
  "parking_lot",
  "rayon",
  "regex",
+ "shlex",
  "target-lexicon",
  "thiserror",
 ]
