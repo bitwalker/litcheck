@@ -14,7 +14,8 @@ pub struct TestScriptParser<'a, S: ?Sized> {
     source: &'a S,
     lines: Lines<'a>,
     errors: Vec<TestScriptError>,
-    current_line: usize,
+    effective_line_number: usize,
+    current_line_number: usize,
 }
 impl<'a, S> TestScriptParser<'a, S>
 where
@@ -29,7 +30,8 @@ where
             source,
             lines,
             errors: vec![],
-            current_line: 1,
+            effective_line_number: 0,
+            current_line_number: 0,
         }
     }
 
@@ -48,6 +50,7 @@ where
 
     fn try_parse(&mut self) -> Result<(), TestScriptError> {
         while let Some(line) = self.next_line() {
+            self.effective_line_number = self.current_line_number;
             if let Some(directive) = RawDirective::parse(line) {
                 match directive.kind {
                     DirectiveKind::End => {
@@ -82,7 +85,7 @@ where
 
     fn next_line(&mut self) -> Option<Span<&'a str>> {
         let line = self.lines.next()?;
-        self.current_line += 1;
+        self.current_line_number = self.lines.current_line;
         Some(line)
     }
 
@@ -113,7 +116,7 @@ where
             trimmed,
             &mut output,
             &span,
-            self.current_line,
+            self.current_line_number,
             &mut self.errors,
         );
         while needs_continuation {
@@ -174,7 +177,7 @@ where
                 rest,
                 &mut output,
                 &span,
-                self.current_line,
+                self.current_line_number,
                 &mut self.errors,
             );
         }
@@ -183,11 +186,12 @@ where
     }
 
     fn parse_run(&mut self, directive: Span<RawDirective<'a>>) -> Result<(), TestScriptError> {
+        let line_number = self.effective_line_number;
         let line = self.parse_line(directive, /*collapse_whitespace=*/ false)?;
         let (span, line) = line.into_parts();
         self.script.commands.push(ScriptCommand::Run(Run {
             span,
-            line: self.current_line,
+            line: line_number,
             command: line.to_string(),
         }));
         Ok(())
@@ -198,6 +202,7 @@ where
         directive: Span<RawDirective<'a>>,
     ) -> Result<(), TestScriptError> {
         let kind = directive.kind;
+        let line_number = self.effective_line_number;
         let line = self.parse_line(directive, /*collapse_whitespace=*/ true)?;
 
         if let Some((key, value)) = line.split_once('=') {
@@ -205,7 +210,7 @@ where
             let value = value.trim();
             match Substitution::new(
                 line.span(),
-                self.current_line,
+                line_number,
                 key,
                 value,
                 kind == DirectiveKind::Redefine,
@@ -356,12 +361,14 @@ impl<'a> StringRewriter<'a> {
 struct Lines<'a> {
     iter: std::str::SplitInclusive<'a, char>,
     offset: usize,
+    current_line: usize,
 }
 impl<'a> Lines<'a> {
     pub fn new(s: &'a str) -> Self {
         Self {
             iter: s.split_inclusive('\n'),
             offset: 0,
+            current_line: 0,
         }
     }
 }
@@ -376,6 +383,7 @@ impl<'a> Iterator for Lines<'a> {
             .strip_suffix('\n')
             .map(|line| (1, line))
             .unwrap_or((0, line));
+        self.current_line += stripped;
         let (stripped, line) = line
             .strip_suffix('\r')
             .map(|line| (stripped + 1, line))

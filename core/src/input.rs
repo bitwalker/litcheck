@@ -147,7 +147,7 @@ impl Input {
             Ok(content)
         } else {
             // Normalize line endings via `lines`
-            for line in buf.lines() {
+            for (i, line) in buf.lines().enumerate() {
                 let mut line = line?;
                 // SAFETY: We are able to guarantee that we do not violate
                 // the utf-8 property of `content` here, because both lines
@@ -156,7 +156,9 @@ impl Input {
                 // representation in ascii and utf-8
                 unsafe {
                     let bytes = content.as_mut_vec();
-                    bytes.push(b'\n');
+                    if i > 0 {
+                        bytes.push(b'\n');
+                    }
                     bytes.append(line.as_mut_vec());
                 }
             }
