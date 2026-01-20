@@ -57,10 +57,10 @@ impl<'input> Lexer<'input> {
         let source = source.as_ref();
         let buffer = source.as_bytes();
         let input = Input::new(source_id, buffer, false);
-        let mut patterns =
-            Pattern::generate_check_patterns(&config.options.check_prefixes).collect::<Vec<_>>();
-        patterns.extend(Pattern::generate_comment_patterns(
-            &config.options.comment_prefixes,
+        let mut patterns = Pattern::generate_comment_patterns(&config.options.comment_prefixes)
+            .collect::<Vec<_>>();
+        patterns.extend(Pattern::generate_check_patterns(
+            &config.options.check_prefixes,
         ));
         let regex =
             Regex::new_many(&patterns).expect("expected valid prefix searcher configuration");

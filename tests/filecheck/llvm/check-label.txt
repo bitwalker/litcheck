@@ -1,7 +1,7 @@
 ; RUN: FileCheck --input-file %s %s --check-prefix=CHECKOK
 ;
 ; RUN: %ProtectFileCheckOutput \
-; RUN: not FileCheck --input-file %s %s --check-prefix=CHECKFAIL 2>&1 \
+; RUN: not FileCheck --input-file %s %s --check-prefix=CHECKFAIL --comment-prefixes=CHECKERROR 2>&1 \
 ; RUN: | FileCheck %s --check-prefix=CHECKERROR
 
 label0:
@@ -33,22 +33,24 @@ c
 ; CHECKFAIL: {{^}}b
 ; CHECKFAIL: {{^}}c
 
-; CHECKERROR: expected string not found in input
-; CHECKERROR-NEXT: CHECKFAIL: {{[{][{]\^[}][}]}}c
+; CHECKERROR:      34 │ ; CHECKFAIL: {{[{][{]\^[}][}]}}c
+; CHECKERROR-NEXT:  ──┬─
+; CHECKERROR-NEXT:    ╰── pattern at this location was not matched
 
 ; CHECKFAIL-LABEL: {{^}}label1:
 ; CHECKFAIL: {{^}}a
 ; CHECKFAIL: {{^}}b
 ; CHECKFAIL: {{^}}c
 
-; CHECKERROR: expected string not found in input
-; CHECKERROR-NEXT: CHECKFAIL: {{[{][{]\^[}][}]}}a
+; CHECKERROR:      41 │ ; CHECKFAIL: {{[{][{]\^[}][}]}}a
+; CHECKERROR-NEXT:  ──┬─
+; CHECKERROR-NEXT:    ╰── pattern at this location was not matched
 
 ; CHECKFAIL-LABEL: {{^}}label2:
 ; CHECKFAIL: {{^}}a
 ; CHECKFAIL: {{^}}b
 ; CHECKFAIL: {{^}}c
 
-; CHECKERROR: expected string not found in input
-; CHECKERROR-NEXT: CHECKFAIL: {{[{][{]\^[}][}]}}b
-
+; CHECKERROR:      51 │ ; CHECKFAIL: {{[{][{]\^[}][}]}}b
+; CHECKERROR-NEXT:  ──┬─
+; CHECKERROR-NEXT:    ╰── pattern at this location was not matched
