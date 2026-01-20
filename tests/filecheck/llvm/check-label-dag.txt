@@ -1,4 +1,4 @@
-; RUN: %ProtectFileCheckOutput not FileCheck --input-file %s %s 2>&1 \
+; RUN: %ProtectFileCheckOutput not FileCheck --input-file %s --comment-prefix=ERROR %s 2>&1 \
 ; RUN: | FileCheck --check-prefix=ERROR %s
 
 bar
@@ -8,5 +8,6 @@ CHECK-LABEL: {{^}}bar
 CHECK-DAG: {{^}}foo
 CHECK-LABEL: {{^}}zed
 
-ERROR: error: CHECK-DAG: expected string not found in input
-ERROR-NEXT: CHECK-DAG: {{.....}}foo
+ERROR:      8 │ CHECK-DAG:
+ERROR-NEXT:                ───┬──
+ERROR-NEXT:                   ╰── pattern at this location was not matched

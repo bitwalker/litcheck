@@ -187,7 +187,7 @@ impl<'a, 'input, S: PatternSearcher<'input>> DynamicPatternSetVisitor<'a, S> {
                     ty,
                     info: Some(info),
                 })) => {
-                    log::debug!("found match for prefix at offset {}, but it failed with reason: {}; ignoring the match..", info.span.start(), ty);
+                    log::debug!(target: "visitor:dynamic", "found match for prefix at offset {}, but it failed with reason: {}; ignoring the match..", info.span.start(), ty);
                 }
                 // We were unable to find an instance of the prefix
                 ControlFlow::Break(_) => break,
@@ -232,10 +232,15 @@ impl<'a, 'input, S: PatternSearcher<'input>> DynamicPatternSetVisitor<'a, S> {
         pattern: &'guard Pattern<'a>,
         context: &mut ContextGuard<'guard, 'input, 'context>,
     ) -> DiagResult<Result<MatchInfo<'input>, CheckFailedError>> {
-        let input = self.searcher.input();
-        let input = Input::new(context.cursor().source_id, context.cursor().buffer(), false)
-            .anchored(true)
-            .bounded(input.range());
+        let bounds = self.searcher.input().range();
+        let bounds = self.searcher.last_match_end().unwrap_or(bounds.start)..bounds.end;
+        let input = Input::new(
+            context.cursor().source_id,
+            context.buffer(),
+            context.cursor().is_crlf(),
+        )
+        .anchored(true)
+        .bounded(bounds);
         match pattern.try_match_mut(input, context)? {
             MatchResult {
                 ty: MatchType::Failed(error),

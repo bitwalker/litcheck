@@ -526,6 +526,10 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
                     .multi_line(true)
                     .case_insensitive(context.config().options.ignore_case),
             )
+            .configure(
+                regex_automata::meta::Config::new()
+                    .match_kind(regex_automata::MatchKind::LeftmostFirst),
+            )
             .build(&pattern)
             .map_err(|error| regex::build_error_to_diagnostic(error, 1, |_| span))?;
         self.match_regex(span, &pattern, context)
