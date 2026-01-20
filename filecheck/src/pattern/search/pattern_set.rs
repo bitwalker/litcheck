@@ -23,7 +23,7 @@ pub struct PatternSetSearcher<'a, 'patterns, 'input> {
 impl<'a, 'patterns, 'input> PatternSetSearcher<'a, 'patterns, 'input> {
     pub fn new(input: Input<'input>, patterns: &'patterns [Pattern<'a>]) -> DiagResult<Self> {
         let num_patterns = patterns.len();
-        let excluded_chunks = (num_patterns / 64) + num_patterns.is_multiple_of(64) as usize;
+        let excluded_chunks = (num_patterns / 64) + (!num_patterns.is_multiple_of(64) as usize);
         let excluded = smallvec![0; excluded_chunks];
         let next_starts = vec![0; num_patterns];
 
