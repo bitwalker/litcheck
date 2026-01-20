@@ -227,7 +227,7 @@ impl<'a> CheckProgram<'a> {
                 }
                 Check::Empty | Check::Same | Check::Next if block.is_empty() && label.is_none() => {
                     return Err(Report::from(InvalidCheckFileError::InvalidFirstCheck {
-                        kind: Check::Empty,
+                        kind: next.kind(),
                         line: next.span(),
                     }));
                 }
