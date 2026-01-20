@@ -231,16 +231,41 @@ impl<'input> Lexer<'input> {
 
     fn tokenize_optional_modifiers(&mut self) -> bool {
         if let Some(span) = self.captures.get_group_by_name("modifiers") {
-            if self.input.buffer()[span.start..].starts_with(b"LITERAL") {
-                self.buffer.push_back(Ok((
-                    span.start,
-                    Token::Modifier(CheckModifier::LITERAL),
-                    span.end,
-                )));
-                true
-            } else {
-                unreachable!("no other modifiers are recognized by the regex pattern")
+            let modifiers = core::str::from_utf8(&self.input.buffer()[span.range()])
+                .expect("expected capture to be valid utf8");
+            let mut has_modifiers = false;
+            let mut cursor = 0;
+            for (i, modifier) in modifiers.split(',').enumerate() {
+                if i > 0 {
+                    cursor += 1;
+                }
+                let partially_trimmed_modifier = modifier.trim_start();
+                let modifier_start = cursor + modifier.len() - partially_trimmed_modifier.len();
+                let trimmed_modifier = partially_trimmed_modifier.trim_end();
+                let modifier_len = trimmed_modifier.len();
+                match trimmed_modifier {
+                    "LITERAL" => {
+                        self.buffer.push_back(Ok((
+                            span.start + modifier_start,
+                            Token::Modifier(CheckModifier::LITERAL),
+                            span.start + modifier_start + modifier_len,
+                        )));
+                        has_modifiers = true;
+                        cursor += modifier.len();
+                    }
+                    _ => {
+                        let start = span.start + modifier_start;
+                        self.buffer
+                            .push_back(Err(ParserError::InvalidCheckModifier {
+                                span: SourceSpan::from_range_unchecked(
+                                    self.source_id(),
+                                    start..(start + modifier_len),
+                                ),
+                            }));
+                    }
+                }
             }
+            has_modifiers
         } else {
             false
         }

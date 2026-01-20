@@ -15,7 +15,7 @@ pub struct Pattern {
 impl Pattern {
     fn new(prefixes: &str, config: Either<Check, (Check, &str)>) -> Self {
         const WORD_BOUNDARY: &str = r#"(?u:^|\s)"#;
-        const MODIFIERS: &str = r#"([{](?<modifiers>LITERAL)[}])?"#;
+        const MODIFIERS: &str = r#"([{](?<modifiers>\s*LITERAL(\s*,\s*LITERAL\s*)*)[}])?"#;
 
         match config {
             Left(Check::Comment) => {

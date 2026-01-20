@@ -43,7 +43,7 @@ The result is "[[[5371]], [[5372]], [[5373]], [[5374]]]"
 ;; Ensure invalid modifier skipped.
 
 ; INVALID{BADMODIFIER}: 6371, 6372,
-; CHECK-INVALID: no check strings found with prefix 'INVALID
+; CHECK-INVALID: no check strings found with prefix(es) 'INVALID'
 
 ; RUN: %ProtectFileCheckOutput \
 ; RUN: not FileCheck %s --input-file %s --check-prefix=CHECK-ERRNOT 2>&1 | \
