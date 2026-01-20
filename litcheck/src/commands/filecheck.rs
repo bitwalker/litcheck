@@ -10,7 +10,7 @@ use litcheck::{
 use super::Command;
 
 #[derive(Debug, Parser)]
-#[command(name = "filecheck", arg_required_else_help(true))]
+#[command(name = "filecheck")]
 pub struct FileCheck {
     /// The path to the file containing patterns, e.g. `CHECK`, to
     /// match against the `input_file`.
@@ -19,12 +19,12 @@ pub struct FileCheck {
     /// the test file is fed into a command which produces some output
     /// derived from the test file, and FileCheck validates that output
     /// using the CHECK directives found in the test file.
-    #[arg(value_name = "CHECK")]
+    #[arg(value_name = "CHECK_FILE")]
     pub match_file: Input,
     /// The path to the file to verify.
     ///
     /// By default this reads from standard input
-    #[arg(long, value_name = "VERIFY", default_value = "-")]
+    #[arg(long, value_name = "PATH", default_value = "-")]
     pub input_file: Input,
     #[command(flatten)]
     pub config: filecheck::Config,

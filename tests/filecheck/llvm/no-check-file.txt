@@ -1,3 +1,4 @@
 ; RUN: %ProtectFileCheckOutput not FileCheck 2>&1 | FileCheck %s
 
-CHECK: <check-file> not specified
+CHECK: error: the following required arguments were not provided:
+CHECK-NEXT: <CHECK_FILE>
