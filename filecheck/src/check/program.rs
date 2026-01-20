@@ -191,6 +191,8 @@ impl<'a> CheckProgram<'a> {
         let mut program = Self::default();
         program.compile_lines(lines, config, interner)?;
 
+        log::trace!(target: "filecheck", "compiled program: {program:#?}");
+
         Ok(program)
     }
 
