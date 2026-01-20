@@ -33,7 +33,9 @@ c
 ; CHECKFAIL: {{^}}b
 ; CHECKFAIL: {{^}}c
 
-; CHECKERROR:      34 │ ; CHECKFAIL: {{[{][{]\^[}][}]}}c
+; CHECKERROR: no matches were found for expected pattern{{.*$[[:space:]].*}}check-label.txt:[[@LINE-2]]:16
+; CHECKERROR-NEXT: [[@LINE-4]] │ ; CHECKFAIL{{:}} {{[{][{]\^[}][}]}}b
+; CHECKERROR-NEXT: [[@LINE-4]] │ ; CHECKFAIL{{:}} {{[{][{]\^[}][}]}}c
 ; CHECKERROR-NEXT:  ──┬─
 ; CHECKERROR-NEXT:    ╰── pattern at this location was not matched
 
@@ -42,7 +44,9 @@ c
 ; CHECKFAIL: {{^}}b
 ; CHECKFAIL: {{^}}c
 
-; CHECKERROR:      41 │ ; CHECKFAIL: {{[{][{]\^[}][}]}}a
+; CHECKERROR: no matches were found for expected pattern{{.*$[[:space:]].*}}check-label.txt:[[@LINE-4]]:16
+; CHECKERROR-NEXT: [[@LINE-6]] │ ; CHECKFAIL-LABEL{{:}} {{[{][{]\^[}][}]}}label1:
+; CHECKERROR-NEXT: [[@LINE-6]] │ ; CHECKFAIL{{:}} {{[{][{]\^[}][}]}}a
 ; CHECKERROR-NEXT:  ──┬─
 ; CHECKERROR-NEXT:    ╰── pattern at this location was not matched
 
@@ -51,6 +55,8 @@ c
 ; CHECKFAIL: {{^}}b
 ; CHECKFAIL: {{^}}c
 
-; CHECKERROR:      51 │ ; CHECKFAIL: {{[{][{]\^[}][}]}}b
+; CHECKERROR: no matches were found for expected pattern{{.*$[[:space:]].*}}check-label.txt:[[@LINE-3]]:16
+; CHECKERROR-NEXT: [[@LINE-5]] │ ; CHECKFAIL{{:}} {{[{][{]\^[}][}]}}a
+; CHECKERROR-NEXT: [[@LINE-5]] │ ; CHECKFAIL{{:}} {{[{][{]\^[}][}]}}b
 ; CHECKERROR-NEXT:  ──┬─
 ; CHECKERROR-NEXT:    ╰── pattern at this location was not matched

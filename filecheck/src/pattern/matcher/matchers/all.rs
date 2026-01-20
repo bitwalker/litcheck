@@ -107,9 +107,9 @@ impl<'a> MatchAll<'a> {
         // on the composition of the patterns
 
         // A single stage match means that each prefix is unique, and that the prefix represents the entire pattern
-        let is_single_stage = suffixes.iter().all(|patterns| {
-            patterns.is_empty() || matches!(patterns.as_slice(), [Pattern::Empty(_)])
-        });
+        let is_single_stage = suffixes
+            .iter()
+            .all(|patterns| patterns.iter().all(|p| matches!(p, Pattern::Empty(_))));
 
         // Literal patterns are always single stage, and can be performed with a simple substring set matcher
         let is_literal = prefixes

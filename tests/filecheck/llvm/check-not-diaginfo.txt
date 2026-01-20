@@ -1,11 +1,10 @@
 ; RUN: %ProtectFileCheckOutput not FileCheck --input-file %s %s 2>&1 \
-; RUN:   | FileCheck --strict-whitespace --check-prefix DIAG %s
+; RUN:   | FileCheck --check-prefix DIAG %s
 
 CHECK-NOT: test
 
-DIAG:           error: CHECK-NOT: excluded string found in input
-DIAG-NEXT:      CHECK-NOT: test
-DIAG-NEXT: {{^}}           ^{{$}}
-DIAG-NEXT:      note: found here
-DIAG-NEXT:      CHECK-NOT: test
-DIAG-NEXT: {{^}}           ^~~~{{$}}
+DIAG: match found, but was excluded{{[[:space:]].*}}check-not-diaginfo.txt:[[@LINE-2]]:12
+DIAG-NEXT: [[@LINE-4]] │
+DIAG-NEXT: [[@LINE-4]] │ CHECK-NOT{{:}} test
+DIAG-NEXT: ──┬─
+DIAG-NEXT:   ╰── match found here

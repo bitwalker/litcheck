@@ -59,4 +59,15 @@ The result is "[[[5371]], [[5372]], [[5373]], [[5374]]]"
 ; CHECK-ERRNOT{LITERAL}: [[a]]
 ; CHECK-ERRNOT-NOT{LITERAL}: [[b]]
 ; CHECK-ERRNOT{LITERAL}: [[c]]
-; ERRNOT: no match expected
+
+; ERRNOT: match found, but was excluded{{.*$[[:space:]].*}}check-literal.txt:[[@LINE-7]]:1
+; ERRNOT-NEXT: [[@LINE-9]] │ {{\[\[a\]\]}}
+; ERRNOT-NEXT: [[@LINE-9]] │ {{\[\[b\]\]}}
+; ERRNOT-NEXT: ──┬──
+; ERRNOT-NEXT:   ╰── match found here
+
+; ERRNOT: see also{{.*$[[:space:]].*}}check-literal.txt:[[@LINE-9]]:30
+; ERRNOT-NEXT: [[@LINE-11]] │ ; CHECK-ERRNOT{LITERAL}{{:}} {{\[\[a\]\]}}
+; ERRNOT-NEXT: [[@LINE-11]] │ ; CHECK-ERRNOT-NOT{LITERAL}{{:}} {{\[\[b\]\]}}
+; ERRNOT-NEXT: ──┬──
+; ERRNOT-NEXT:   ╰── by this pattern

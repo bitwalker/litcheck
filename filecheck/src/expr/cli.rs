@@ -22,11 +22,12 @@ impl CliVariable {
 }
 
 impl FromStr for CliVariable {
-    type Err = Report;
+    type Err = String;
 
     fn from_str(input: &str) -> Result<Self, Self::Err> {
         let span = SourceSpan::from_range_unchecked(SourceId::UNKNOWN, 0..input.len());
         <CliVariable as TypedVariable>::try_parse(Span::new(span, input))
+            .map_err(|err| litcheck::reporting::PrintDiagnostic::new(err).to_string())
     }
 }
 

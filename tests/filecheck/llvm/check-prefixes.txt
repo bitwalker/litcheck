@@ -9,4 +9,4 @@ foobar
 
 ; We use regex to match the colon so that FileCheck won't think it is a check
 ; prefix.
-; CHECK-NONEXISTENT-PREFIX: error: no check strings found with prefix 'PREFIX{{:}}'
+; CHECK-NONEXISTENT-PREFIX: no check strings found with prefix(es) 'PREFIX'

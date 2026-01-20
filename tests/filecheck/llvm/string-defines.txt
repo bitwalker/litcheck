@@ -14,14 +14,18 @@ Value = 10
 CHECK: Value = [[VALUE]]
 NOT-NOT: Value = [[VALUE]]
 
-ERRMSG: defines.txt:[[@LINE-3]]:8: error: CHECK: expected string not found in input
-ERRMSG: defines.txt:1:1: note: scanning from here
-ERRMSG: defines.txt:1:1: note: with "VALUE" equal to "20"
-ERRMSG: defines.txt:[[@LINE-7]]:1: note: possible intended match here
+ERRMSG: no matches were found for expected pattern{{[[:space:]].*}}string-defines.txt:[[@LINE-3]]:8
+ERRMSG-NEXT: [[@LINE-5]] │ Value = 10
+ERRMSG-NEXT: [[@LINE-5]] │ CHECK{{:}} Value = {{\[\[VALUE\]\]}}
+ERRMSG-NEXT: ────────┬────────
+ERRMSG-NEXT:         ╰── pattern at this location was not matched
 
-NOT-ERRMSG: defines.txt:[[@LINE-7]]:10: error: {{NOT}}-NOT: excluded string found in input
-NOT-ERRMSG: defines.txt:[[@LINE-10]]:1: note: found here
-NOT-ERRMSG: defines.txt:[[@LINE-11]]:1: note: with "VALUE" equal to "10"
+
+NOT-ERRMSG: match found, but was excluded{{[[:space:]].*}}string-defines.txt:[[@LINE-11]]:1
+NOT-ERRMSG-NEXT: [[@LINE-23]] │
+NOT-ERRMSG-NEXT: [[@LINE-23]] │ Value = 10
+NOT-ERRMSG-NEXT: ─────┬────
+NOT-ERRMSG-NEXT:      ╰── match found here
 
 ; Definition of string variable to an empty string.
 RUN: FileCheck -DVALUE= --check-prefix EMPTY --input-file %s %s 2>&1

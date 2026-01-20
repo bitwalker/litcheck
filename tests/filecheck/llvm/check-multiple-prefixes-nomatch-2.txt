@@ -1,13 +1,13 @@
 ; RUN: %ProtectFileCheckOutput \
-; RUN: not FileCheck --input-file %s %s --check-prefix=FOO --check-prefix=BAR \
+; RUN: not FileCheck --input-file %s %s --check-prefix=FOO --check-prefix=BAR --comment-prefix=CHECK \
 ; RUN: 2>&1 | FileCheck %s
 ;
 ; RUN: %ProtectFileCheckOutput \
-; RUN: not FileCheck --input-file %s %s --check-prefixes=FOO,BAR 2>&1 \
+; RUN: not FileCheck --input-file %s %s --check-prefixes=FOO,BAR --comment-prefix=CHECK 2>&1 \
 ; RUN: | FileCheck %s
 ;
 ; RUN: %ProtectFileCheckOutput \
-; RUN: not FileCheck --input-file %s %s --check-prefixes=BAR,FOO 2>&1 \
+; RUN: not FileCheck --input-file %s %s --check-prefixes=BAR,FOO --comment-prefix=CHECK 2>&1 \
 ; RUN: | FileCheck %s
 
 fog
@@ -16,5 +16,8 @@ bar
 ; FOO: fo{{o}}
 ; BAR: ba{{r}}
 
-; CHECK: {{error: FOO: expected string not found in input}}
-; CHECK-NEXT: {{F}}OO: fo{{[{][{]o[}][}]}}
+; CHECK: no matches were found for expected pattern{{[[:space:]].*}}check-multiple-prefixes-nomatch-2.txt:[[@LINE-3]]:8
+; CHECK-NEXT: ; _FOO not a valid check-line
+; CHECK-NEXT: [[@LINE-5]] │ ; FOO: fo{{[{][{]o[}][}]}}
+; CHECK-NEXT: ──┬──
+; CHECK-NEXT:   ╰── pattern at this location was not matched

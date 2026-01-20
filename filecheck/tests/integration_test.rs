@@ -50,7 +50,7 @@ and some rules
     assert_matches!(&result, Err(_));
 
     let error = result.unwrap_err().downcast::<TestFailed>().unwrap();
-    if let [CheckFailedError::MatchNoneButExpected { .. }] = error.errors() {
+    if let [CheckFailedError::MatchGroupFailed { .. }] = error.errors() {
         Ok(())
     } else {
         Err(error.into())
@@ -134,7 +134,7 @@ fn integration_test_check_dag_xfail_x1() -> DiagResult<()> {
     assert_matches!(&result, Err(_));
 
     let error = result.unwrap_err().downcast::<TestFailed>().unwrap();
-    if let [CheckFailedError::MatchNoneButExpected { .. }] = error.errors() {
+    if let [CheckFailedError::MatchGroupFailed { .. }] = error.errors() {
         Ok(())
     } else {
         Err(error.into())
@@ -158,7 +158,7 @@ fn integration_test_check_dag_xfail_x2() -> DiagResult<()> {
     assert_matches!(&result, Err(_));
 
     let error = result.unwrap_err().downcast::<TestFailed>().unwrap();
-    if let [CheckFailedError::MatchNoneButExpected { .. }] = error.errors() {
+    if let [CheckFailedError::MatchGroupFailed { .. }] = error.errors() {
         Ok(())
     } else {
         Err(error.into())

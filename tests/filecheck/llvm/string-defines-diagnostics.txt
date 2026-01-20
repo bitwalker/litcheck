@@ -4,49 +4,73 @@
 RUN: %ProtectFileCheckOutput not FileCheck -DVALUE10 --input-file %s %s 2>&1 \
 RUN:   | FileCheck %s --check-prefix ERRCLIEQ1
 
-ERRCLIEQ1: Missing equal sign in command-line definition '-DVALUE10'
+ERRCLIEQ1: error: invalid value 'VALUE10' for '--define <NAME=VALUE>':
+ERRCLIEQ1-SAME: invalid variable definition: expected 'NAME=VALUE', but no '=' was found in the input
+ERRCLIEQ1-NEXT:   ,----
+ERRCLIEQ1-NEXT: 1 | VALUE10
+ERRCLIEQ1-NEXT:   : ^^^^^^^
+ERRCLIEQ1-NEXT:   `----
 
 ; Missing definition expression (variable name, equal sign and value).
 RUN: %ProtectFileCheckOutput not FileCheck -D --input-file %s %s 2>&1 \
 RUN:   | FileCheck %s --check-prefix ERRCLIEQ2
 
-ERRCLIEQ2: {{F|f}}ile{{C|c}}heck{{[^:]*}}: for the -D option: requires a value!
+ERRCLIEQ2: error: a value is required for '--define <NAME=VALUE>' but none was supplied
 
 ; Missing variable name.
 RUN: %ProtectFileCheckOutput not FileCheck -D=10 --input-file %s %s 2>&1 \
 RUN:   | FileCheck %s --check-prefix ERRCLIVAR1
 
-ERRCLIVAR1: Missing variable name in command-line definition '-D=10'
+ERRCLIVAR1: error: invalid value '10' for '--define <NAME=VALUE>':
+ERRCLIVAR1-SAME: invalid variable definition: expected 'NAME=VALUE', but no '=' was found in the input
+ERRCLIVAR1-NEXT:   ,----
+ERRCLIVAR1-NEXT: 1 | 10
+ERRCLIVAR1-NEXT:   : ^^
+ERRCLIVAR1-NEXT:   `----
 
 ; Missing variable name.
 RUN: %ProtectFileCheckOutput not FileCheck -D= --input-file %s %s 2>&1 \
 RUN:   | FileCheck %s --check-prefix ERRCLIVAR2
 
-ERRCLIVAR2: Missing variable name in command-line definition '-D='
+ERRCLIVAR2: error: invalid value '' for '--define <NAME=VALUE>':
+ERRCLIVAR2-SAME: invalid variable definition: expected expression of the form `NAME=(VALUE)?`
+ERRCLIVAR2-NEXT:   ,----
+ERRCLIVAR2-NEXT:   `----
 
 ; Invalid variable name: starts with a digit.
 RUN: %ProtectFileCheckOutput \
 RUN: not FileCheck -D10VALUE=10 --input-file %s %s 2>&1 \
 RUN:   | FileCheck %s --strict-whitespace --match-full-lines --check-prefix ERRCLINAME
 
-ERRCLINAME:Global defines:1:19: error: invalid variable name
-ERRCLINAME-NEXT:Global define #1: 10VALUE=10
-ERRCLINAME-NEXT:                  ^
+ERRCLINAME: error: invalid value '10VALUE=10' for '--define <NAME=VALUE>':
+ERRCLINAME-SAME: name contains invalid characters
+ERRCLINAME-NEXT:   ,----
+ERRCLINAME-NEXT: 1 | 10VALUE=10
+ERRCLINAME-NEXT:   : ^^^^^^^
+ERRCLINAME-NEXT:   `----
+
 
 ; Invalid definition of pseudo variable.
 RUN: %ProtectFileCheckOutput \
 RUN: not FileCheck -D@VALUE=10 --input-file %s %s 2>&1 \
 RUN:   | FileCheck %s --strict-whitespace --match-full-lines --check-prefix ERRCLIPSEUDO
 
-ERRCLIPSEUDO:Global defines:1:19: error: invalid name in string variable definition '@VALUE'
-ERRCLIPSEUDO-NEXT:Global define #1: @VALUE=10
-ERRCLIPSEUDO-NEXT:                  ^
+ERRCLIPSEUDO: error: invalid value '@VALUE=10' for '--define <NAME=VALUE>':
+ERRCLIPSEUDO-SAME: name contains invalid characters
+ERRCLIPSEUDO-NEXT:   ,----
+ERRCLIPSEUDO-NEXT: 1 | @VALUE=10
+ERRCLIPSEUDO-NEXT:   : ^^^^^^
+ERRCLIPSEUDO-NEXT:   `----
+
 
 ; Invalid definition of an expression.
 RUN: %ProtectFileCheckOutput \
 RUN: not FileCheck -D'VALUE + 2=10' --input-file %s %s 2>&1 \
 RUN:   | FileCheck %s --strict-whitespace --check-prefix ERRCLITRAIL
 
-ERRCLITRAIL:Global defines:1:19: error: invalid name in string variable definition 'VALUE + 2'
-ERRCLITRAIL-NEXT:Global define #1: VALUE + 2=10
-ERRCLITRAIL-NEXT:                  ^
+ERRCLITRAIL: error: invalid value 'VALUE + 2=10' for '--define <NAME=VALUE>':
+ERRCLITRAIL-SAME: name contains invalid characters
+ERRCLITRAIL-NEXT:   ,----
+ERRCLITRAIL-NEXT: 1 | VALUE + 2=10
+ERRCLITRAIL-NEXT:   : ^^^^^^^^^
+ERRCLITRAIL-NEXT:   `----

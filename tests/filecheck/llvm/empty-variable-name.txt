@@ -1,0 +1,32 @@
+a
+
+; RUN: %ProtectFileCheckOutput not FileCheck --input-file %s %s 2>&1 | \
+; RUN:   FileCheck --check-prefix CHECK-ERROR -DDIR=%S %s
+
+; CHECK:        a[[]]
+; CHECK-ERROR{LITERAL}: 6 │ ; CHECK:        a[[]]
+; CHECK-ERROR-NEXT:                            ─┬
+; CHECK-ERROR-NEXT{LITERAL}:                    ╰── lexed a ]] here
+; CHECK-ERROR:          help: expected one of: a non-empty match expression
+
+b
+
+; RUN: %ProtectFileCheckOutput not FileCheck --input-file %s --check-prefix CHECK-PSEUDO %s 2>&1 | \
+; RUN:   FileCheck --check-prefix CHECK-ERROR-PSEUDO -DDIR=%S %s
+
+; CHECK-PSEUDO: b[[@]]
+; CHECK-ERROR-PSEUDO{LITERAL}: 17 │ ; CHECK-PSEUDO: b[[@]]
+; CHECK-ERROR-PSEUDO-NEXT:                            ─┬
+; CHECK-ERROR-PSEUDO-NEXT{LITERAL}:                    ╰── lexed a ]] here
+; CHECK-ERROR-PSEUDO:          help: expected one of: ident, "LINE"
+
+c
+
+; RUN: %ProtectFileCheckOutput not FileCheck --input-file %s --check-prefix CHECK-GLOBAL %s 2>&1 | \
+; RUN:   FileCheck --check-prefix CHECK-ERROR-GLOBAL -DDIR=%S %s
+
+; CHECK-GLOBAL: c[[$]]
+; CHECK-ERROR-GLOBAL{LITERAL}: 28 │ ; CHECK-GLOBAL: c[[$]]
+; CHECK-ERROR-GLOBAL-NEXT:                            ─┬
+; CHECK-ERROR-GLOBAL-NEXT{LITERAL}:                    ╰── lexed a ]] here
+; CHECK-ERROR-GLOBAL:          help: expected one of: ident

@@ -366,7 +366,7 @@ pub fn check_group<'section, 'input, 'a: 'input>(
                                     Range::new(start.start(), end.end()),
                                 )
                             });
-                            let cause = matches
+                            let mut cause = matches
                                 .into_results()
                                 .into_iter()
                                 .flat_map(|matches| {
@@ -376,13 +376,19 @@ pub fn check_group<'section, 'input, 'a: 'input>(
                                         Some(matches.unwrap_err())
                                     }
                                 })
-                                .collect();
-                            test_result.failed(CheckFailedError::MatchGroupFailed {
-                                span: rule.span(),
-                                match_file: context.match_file(),
-                                cause,
-                                skipped,
-                            });
+                                .collect::<Vec<_>>();
+                            // Simplify the diagnostic in the case where there is a single failure
+                            // and no dependent checks
+                            if cause.len() == 1 && skipped.is_none() {
+                                test_result.failed(cause.pop().unwrap());
+                            } else {
+                                test_result.failed(CheckFailedError::MatchGroupFailed {
+                                    span: rule.span(),
+                                    match_file: context.match_file(),
+                                    cause,
+                                    skipped,
+                                });
+                            }
                             return Ok(Err(matched));
                         }
                     }

@@ -8,25 +8,30 @@ this is something else
 ; RUN: not FileCheck %s --input-file %s --check-prefix=CHECK-ERR1 2>&1 \
 ; RUN: | FileCheck %s --check-prefix=ERRCOUNT1
 CHECK-ERR1-COUNT-xx: this
-ERRCOUNT1: [[@LINE-1]]:18: error: invalid count in -COUNT specification on prefix 'CHECK-ERR1'
+ERRCOUNT1: no check strings found with prefix(es) 'CHECK-ERR1'
 
 ; RUN: %ProtectFileCheckOutput \
 ; RUN: not FileCheck %s --input-file %s --check-prefix=CHECK-ERR2 2>&1 \
 ; RUN: | FileCheck %s --check-prefix=ERRCOUNT2
 CHECK-ERR2-COUNT-0x1: something
-ERRCOUNT2: [[@LINE-1]]:19: error: invalid count in -COUNT specification on prefix 'CHECK-ERR2'
+ERRCOUNT2: no check strings found with prefix(es) 'CHECK-ERR2'
 
 ; RUN: %ProtectFileCheckOutput \
 ; RUN: not FileCheck %s --input-file %s --check-prefix=CHECK-ERR3 2>&1 \
 ; RUN: | FileCheck %s --check-prefix=ERRCOUNT3
 CHECK-ERR3-COUNT-100x: else
-ERRCOUNT3: [[@LINE-1]]:21: error: invalid count in -COUNT specification on prefix 'CHECK-ERR3'
+ERRCOUNT3: no check strings found with prefix(es) 'CHECK-ERR3'
 
 ; RUN: %ProtectFileCheckOutput \
 ; RUN: not FileCheck %s --input-file %s --check-prefix=CHECK-ERR4 2>&1 \
 ; RUN: | FileCheck %s --check-prefix=ERRCOUNT4
 CHECK-ERR4-COUNT-0: else
-ERRCOUNT4: [[@LINE-1]]:19: error: invalid count in -COUNT specification on prefix 'CHECK-ERR4'
+ERRCOUNT4: invalid check modifier
+ERRCOUNT4-NEXT: check-count.txt:[[@LINE-2]]:1
+ERRCOUNT4-NEXT: FileCheck %s --check-prefix=ERRCOUNT4
+ERRCOUNT4-NEXT: CHECK-ERR4-COUNT-0
+ERRCOUNT4-NEXT: ─────────┬────────
+ERRCOUNT4-NEXT:          ╰── invalid count in -COUNT specification
 
 ;
 ; Main functionality
@@ -93,14 +98,24 @@ CHECK-CNTMANY-EMPTY:
 ; RUN: | FileCheck %s --check-prefix=MISCOUNT1
 CHECK-MIS1-COUNT-3: this is duplicate
 CHECK-MIS1: {{^}}this is not duplicate
-MISCOUNT1: [[@LINE-1]]:13: error: CHECK-MIS1: expected string not found in input
+MISCOUNT1: check-count.txt:[[@LINE-1]]:15
+MISCOUNT1-NEXT: this is duplicate
+MISCOUNT1-NEXT: this is not duplicate
+MISCOUNT1-NEXT: ────────────┬───────────
+MISCOUNT1-NEXT:             ╰── pattern at this location was not matched
 
 ; RUN: %ProtectFileCheckOutput \
 ; RUN: not FileCheck %s --input-file %s --check-prefix=CHECK-MIS2 2>&1 \
 ; RUN: | FileCheck %s --check-prefix=MISCOUNT2
 CHECK-MIS2-COUNT-10: {{^this is duplicate}}
 CHECK-MIS2: {{^}}this is not duplicate
-MISCOUNT2: [[@LINE-2]]:22: error: CHECK-MIS2-COUNT: expected string not found in input
+
+MISCOUNT2: unable to match all instances of repeat pattern (matched 5 of 10 times){{[[:space:]].*}}check-count.txt:[[@LINE-3]]:24
+MISCOUNT2-NEXT: FileCheck %s --check-prefix=MISCOUNT2
+MISCOUNT2-NEXT{LITERAL}: {{^this is duplicate}}
+MISCOUNT2-NEXT:            ─────────┬────────┬
+MISCOUNT2-NEXT:                     │        ╰── no matches were found for expected pattern
+MISCOUNT2-NEXT:                     ╰── when matching this pattern for the 6th time
 
 ; RUN: %ProtectFileCheckOutput \
 ; RUN: not FileCheck %s --input-file %s --check-prefix=CHECK-MIS3 2>&1 \
@@ -111,4 +126,10 @@ CHECK-MIS3-LABEL: Many-label:
 CHECK-MIS3-EMPTY:
 CHECK-MIS3-COUNT-160: {{^}}-many-
 CHECK-MIS3-EMPTY:
-MISCOUNT3: [[@LINE-2]]:23: error: CHECK-MIS3-COUNT: expected string not found in input (17 out of 160)
+
+MISCOUNT3: unable to match all instances of repeat pattern (matched 16 of 160 times){{[[:space:]].*}}check-count.txt:[[@LINE-3]]:25
+MISCOUNT3-NEXT: CHECK-MIS3-EMPTY{{:}}
+MISCOUNT3-NEXT{LITERAL}: {{^}}-many-
+MISCOUNT3-NEXT:            ────┬────┬
+MISCOUNT3-NEXT:                │    ╰── no matches were found for expected pattern
+MISCOUNT3-NEXT:                ╰── when matching this pattern for the 17th time

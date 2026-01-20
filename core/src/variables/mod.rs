@@ -84,7 +84,7 @@ impl std::error::Error for VariableError {}
 impl fmt::Display for VariableError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Empty(_) => f.write_str("invalid variable definition: expected expression of the form `NAME(=VALUE)?`"),
+            Self::Empty(_) => f.write_str("invalid variable definition: expected expression of the form `NAME=(VALUE)?`"),
             Self::EmptyName(_) => f.write_str("invalid variable definition: name cannot be empty"),
             Self::MissingEquals(_) => f.write_str(
                 "invalid variable definition: expected 'NAME=VALUE', but no '=' was found in the input",

@@ -13,13 +13,13 @@ op4 r30, r18, r21
 
 // RUN: %ProtectFileCheckOutput \
 // RUN: not FileCheck --check-prefixes INVALID-VARNAME --input-file %s %s 2>&1 \
-// RUN:   | FileCheck --check-prefix INVALID-VARNAME-MSG --strict-whitespace %s
+// RUN:   | FileCheck --check-prefix INVALID-VARNAME-MSG %s
 
 5
 4
 ; INVALID-VARNAME: [[X:]]
 ; INVALID-VARNAME-NEXT: [[Y:]]
 ; INVALID-VARNAME-NEXT: [[X-Y]]
-; INVALID-VARNAME-MSG: simple-var-capture.txt:[[#@LINE-1]]:27: error: invalid name in string variable use
-; INVALID-VARNAME-MSG-NEXT: ; {{I}}NVALID-VARNAME-NEXT: {{\[\[X-Y\]\]}}
-; INVALID-VARNAME-MSG-NEXT:    {{^}}                          ^{{$}}
+; INVALID-VARNAME-MSG{LITERAL}: 22 │ ; INVALID-VARNAME-NEXT: [[X-Y]]
+; INVALID-VARNAME-MSG-NEXT:                                     ┬
+; INVALID-VARNAME-MSG-NEXT:                                     ╰── lexed a - here

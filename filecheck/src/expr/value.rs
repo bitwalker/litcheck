@@ -24,7 +24,7 @@ impl FromStr for Value<'_> {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.is_empty() {
-            Ok(Value::Undef)
+            Ok(Value::Str(Cow::Borrowed("")))
         } else {
             Ok(Value::Str(Cow::Owned(s.to_string())))
         }

@@ -3,35 +3,51 @@
 ; Invalid variable name: starts with a digit.
 RUN: %ProtectFileCheckOutput \
 RUN: not FileCheck -D#10VALUE=10 --input-file %s %s 2>&1 \
-RUN:   | FileCheck %s --strict-whitespace --match-full-lines --check-prefix NUMERRCLINAME
+RUN:   | FileCheck %s --check-prefix NUMERRCLINAME
 
-NUMERRCLINAME:Global defines:1:46: error: invalid variable name
-NUMERRCLINAME-NEXT:Global define #1: #10VALUE=10 (parsed as: {{\[\[#10VALUE:10\]\]}})
-    NUMERRCLINAME-NEXT:                                             ^
+NUMERRCLINAME: error: invalid value '#10VALUE=10' for '--define <NAME=VALUE>':
+NUMERRCLINAME-NEXT:   ,----
+NUMERICLINAME-NEXT: 1 | #10VALUE=10
+NUMERICLINAME-NEXT:   :  ^|
+NUMERICLINAME-NEXT:   :    -- lexed a 10 here
+NUMERICLINAME-NEXT:   `----
+NUMERICLINAME-NEXT:  help: expected one of: ident, "%"
 
 ; Invalid definition of pseudo variable.
 RUN: %ProtectFileCheckOutput \
 RUN: not FileCheck -D#@VALUE=10 --input-file %s %s 2>&1 \
 RUN:   | FileCheck %s --strict-whitespace --match-full-lines --check-prefix NUMERRCLIPSEUDO
 
-NUMERRCLIPSEUDO:Global defines:1:45: error: definition of pseudo numeric variable unsupported
-NUMERRCLIPSEUDO-NEXT:Global define #1: #@VALUE=10 (parsed as: {{\[\[#@VALUE:10\]\]}})
-    NUMERRCLIPSEUDO-NEXT:                                            ^
+NUMERRCLIPSEUDO: error: invalid value '#@VALUE=10' for '--define <NAME=VALUE>':
+NUMERRCLIPSEUDO-NEXT:   ,----
+NUMERRCLIPSEUDO-NEXT: 1 | #@VALUE=10
+NUMERRCLIPSEUDO-NEXT:   :  |
+NUMERRCLIPSEUDO-NEXT:   :  `-- lexed a @ here
+NUMERRCLIPSEUDO-NEXT:   `----
+NUMERRCLIPSEUDO-NEXT:  help: expected one of: ident, "%"
 
 ; Invalid definition of an expression.
 RUN: %ProtectFileCheckOutput \
 RUN: not FileCheck -D#VALUE+2=10 --input-file %s %s 2>&1 \
 RUN:   | FileCheck %s --strict-whitespace --match-full-lines --check-prefix NUMERRCLITRAIL
 
-NUMERRCLITRAIL:Global defines:1:51: error: unexpected characters after numeric variable name
-NUMERRCLITRAIL-NEXT:Global define #1: #VALUE+2=10 (parsed as: {{\[\[#VALUE\+2:10\]\]}})
-     NUMERRCLITRAIL-NEXT:                                                  ^
+NUMERRCLITRAIL: error: invalid value '#VALUE+2=10' for '--define <NAME=VALUE>':
+NUMERRCLITRAIL-NEXT:   ,----
+NUMERRCLITRAIL-NEXT: 1 | #VALUE+2=10
+NUMERRCLITRAIL-NEXT:   :       |
+NUMERRCLITRAIL-NEXT:   :       `-- lexed a + here
+NUMERRCLITRAIL-NEXT:   `----
+NUMERRCLITRAIL-NEXT:  help: expected one of: "="
 
 ; Invalid format for variable.
 RUN: %ProtectFileCheckOutput \
 RUN: not FileCheck -D#,VALUE=10 --input-file %s %s 2>&1 \
 RUN:   | FileCheck %s --strict-whitespace --match-full-lines --check-prefix NUMERRCLIFMT
 
-NUMERRCLIFMT:Global defines:1:45: error: invalid matching format specification in expression
-NUMERRCLIFMT-NEXT:Global define #1: #,VALUE=10 (parsed as: {{\[\[#,VALUE:10\]\]}})
-    NUMERRCLIFMT-NEXT:                                            ^
+NUMERRCLIFMT: error: invalid value '#,VALUE=10' for '--define <NAME=VALUE>':
+NUMERRCLIFMT-NEXT:   ,----
+NUMERRCLIFMT-NEXT: 1 | #,VALUE=10
+NUMERRCLIFMT-NEXT:   :  |
+NUMERRCLIFMT-NEXT:   :  `-- lexed a , here
+NUMERRCLIFMT-NEXT:   `----
+NUMERRCLIFMT-NEXT:  help: expected one of: ident, "%"

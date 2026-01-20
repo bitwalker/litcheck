@@ -87,7 +87,7 @@ CHECK-NOT: [[#NUMVAR + 1]]
 CHECK-NEXT: NUMVAR - 1:[[#NUMVAR - 1]]
 
 V:      verbose.txt:[[#@LINE-4]]:8: remark: {{C}}HECK: expected string found in input
-V-NEXT: {{C}}HECK: {{NUMVAR=[[][[]#NUMVAR:[]][]]$}}
+V-NEXT: {{C}}HECK: {{NUMVAR=[\[][\[]#NUMVAR:[\]][\]]$}}
 V-NEXT:  {{^}}       ^{{$}}
 V-NEXT: verbose.txt:[[#@LINE-9]]:1: note: found here
 V-NEXT: {{^}}NUMVAR=42{{$}}
@@ -97,7 +97,7 @@ V-NEXT: NUMVAR=42
 V-NEXT:        ^~
 
 V-NEXT: verbose.txt:[[#@LINE-12]]:13: remark: {{C}}HECK-NEXT: expected string found in input
-V-NEXT: {{C}}HECK-NEXT: {{NUMVAR - 1:[[][[]#NUMVAR - 1[]][]]$}}
+V-NEXT: {{C}}HECK-NEXT: {{NUMVAR - 1:[\[][\[]#NUMVAR - 1[\]][\]]$}}
 V-NEXT:  {{^}}            ^{{$}}
 V-NEXT: verbose.txt:[[#@LINE-18]]:1: note: found here
 V-NEXT: {{^}}NUMVAR - 1:41{{$}}
@@ -107,7 +107,7 @@ V-NEXT: {{^}}NUMVAR - 1:41{{$}}
 V-NEXT: {{^}}^{{$}}
 
 VV-NEXT: verbose.txt:[[#@LINE-23]]:12: remark: {{C}}HECK-NOT: excluded string not found in input
-VV-NEXT: {{C}}HECK-NOT: {{[[][[]#NUMVAR [+] 1[]][]]$}}
+VV-NEXT: {{C}}HECK-NOT: {{[\[][\[]#NUMVAR [+] 1[\]][\]]$}}
 VV-NEXT:   {{^}}           ^{{$}}
 VV-NEXT: verbose.txt:[[#@LINE-29]]:10: note: scanning from here
 VV-NEXT: {{^}}NUMVAR=42{{$}}
