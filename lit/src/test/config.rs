@@ -201,9 +201,14 @@ impl TestConfig {
             // so just use 'filecheck' as the substitution
             (StaticCow::Borrowed("filecheck"), StaticCow::Borrowed("not"))
         };
-        self.substitutions
-            .insert("\\b{start}[Ff]ile[Cc]heck\\b{end}", filecheck);
-        self.substitutions.insert("\\b{start}not\\b{end}", not);
+        self.substitutions.insert(
+            "(?<before>^|\\s)[Ff]ile[Cc]heck(?<after>$|\\s)",
+            format!("$before{filecheck}$after"),
+        );
+        self.substitutions.insert(
+            "(?<before>^|\\s)not(?<after>$|\\s)",
+            format!("$before{not}$after"),
+        );
 
         self.substitutions
             .insert(r"%\{pathsep\}", if cfg!(windows) { ";" } else { ":" });
