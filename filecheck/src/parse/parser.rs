@@ -189,6 +189,11 @@ impl<'config> CheckFileParser<'config> {
         let ty = ty.into_inner();
         let ty = CheckType::new(span, ty).with_modifiers(modifiers);
 
+        // If this is a CHECK-COUNT line, ensure the count is valid
+        if matches!(ty.kind, Check::Count(n) if n == 0) {
+            return Err(ParserError::InvalidCheckCount { span });
+        }
+
         // CheckPattern
         if modifiers.contains(CheckModifier::LITERAL) {
             match expect!(lexer, Token::Raw(_) | Token::Lf) {
@@ -397,12 +402,17 @@ fn handle_parse_error(source_id: SourceId, err: ParseError) -> ParserError {
         },
         ParseError::UnrecognizedToken {
             token: (l, tok, r),
-            expected,
-        } => ParserError::UnrecognizedToken {
-            span: SourceSpan::from_range_unchecked(source_id, l..r),
-            token: tok.to_string(),
-            expected,
-        },
+            mut expected,
+        } => {
+            if let Some(pos) = expected.iter().position(|tok| tok == "ERROR") {
+                expected.remove(pos);
+            }
+            ParserError::UnrecognizedToken {
+                span: SourceSpan::from_range_unchecked(source_id, l..r),
+                token: tok.to_string(),
+                expected,
+            }
+        }
         ParseError::ExtraToken { token: (l, tok, r) } => ParserError::ExtraToken {
             span: SourceSpan::from_range_unchecked(source_id, l..r),
             token: tok.to_string(),

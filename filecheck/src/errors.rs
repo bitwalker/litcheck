@@ -5,13 +5,9 @@ use crate::test::TestInputType;
 
 #[derive(Diagnostic, Debug, thiserror::Error)]
 #[error("{test_from} failed")]
-#[diagnostic(help("see emitted diagnostics for details"))]
+#[diagnostic(help("see below for details"))]
 pub struct TestFailed {
     pub test_from: TestInputType,
-    #[label]
-    pub span: SourceSpan,
-    #[source_code]
-    pub input: Arc<SourceFile>,
     #[related]
     pub errors: Vec<CheckFailedError>,
 }
@@ -20,11 +16,8 @@ impl TestFailed {
         errors: Vec<CheckFailedError>,
         context: &MatchContext<'input, 'context>,
     ) -> Self {
-        let input_file = context.input_file();
         Self {
             test_from: TestInputType(context.match_file().uri().clone()),
-            span: input_file.source_span(),
-            input: input_file.clone(),
             errors,
         }
     }
@@ -85,12 +78,15 @@ pub struct UndefinedVariableError {
 #[derive(Diagnostic, Debug, thiserror::Error)]
 pub enum CheckFailedError {
     #[error("the input file was rejected because it is empty, and --allow-empty was not set")]
+    #[diagnostic(
+        help = "if your input was the piped output of a command, it may have succeeded with no output when you expected it to fail"
+    )]
     EmptyInput,
     /// Indicates an error while processing a potential match
     #[error("an error occurred while processing a potential match")]
     #[diagnostic()]
     MatchError {
-        #[label("when matching against this input")]
+        #[label(primary, "when matching against this input")]
         span: SourceSpan,
         #[source_code]
         input_file: Arc<SourceFile>,
@@ -103,7 +99,7 @@ pub enum CheckFailedError {
     #[error("match found, but was excluded")]
     #[diagnostic()]
     MatchFoundButExcluded {
-        #[label("match found here")]
+        #[label(primary, "match found here")]
         span: SourceSpan,
         #[source_code]
         input_file: Arc<SourceFile>,
@@ -115,7 +111,7 @@ pub enum CheckFailedError {
     #[error("match found for expected pattern, but on the wrong line")]
     #[diagnostic()]
     MatchFoundButWrongLine {
-        #[label("match found here")]
+        #[label(primary, "match found here")]
         span: SourceSpan,
         #[source_code]
         input_file: Arc<SourceFile>,
@@ -126,7 +122,7 @@ pub enum CheckFailedError {
     #[error("match found, but was discarded")]
     #[diagnostic()]
     MatchFoundButDiscarded {
-        #[label("match found here")]
+        #[label(primary, "match found here")]
         span: SourceSpan,
         #[source_code]
         input_file: Arc<SourceFile>,
@@ -140,7 +136,7 @@ pub enum CheckFailedError {
     #[error("match found, but there was an error processing it")]
     #[diagnostic()]
     MatchFoundErrorNote {
-        #[label("match found here")]
+        #[label(primary, "match found here")]
         span: SourceSpan,
         #[source_code]
         input_file: Arc<SourceFile>,
@@ -154,7 +150,7 @@ pub enum CheckFailedError {
     #[error("match found, but there was an error when evaluating a constraint")]
     #[diagnostic()]
     MatchFoundConstraintFailed {
-        #[label("match found here")]
+        #[label(primary, "match found here")]
         span: SourceSpan,
         #[source_code]
         input_file: Arc<SourceFile>,
@@ -171,7 +167,7 @@ pub enum CheckFailedError {
     #[error("no matches were found for expected pattern")]
     #[diagnostic()]
     MatchNoneButExpected {
-        #[label("pattern at this location was not matched")]
+        #[label(primary, "pattern at this location was not matched")]
         span: SourceSpan,
         #[source_code]
         match_file: Arc<SourceFile>,
@@ -185,7 +181,7 @@ pub enum CheckFailedError {
     #[error("unable to match invalid pattern")]
     #[diagnostic()]
     MatchNoneForInvalidPattern {
-        #[label("pattern at this location was invalid")]
+        #[label(primary, "pattern at this location was invalid")]
         span: SourceSpan,
         #[source_code]
         match_file: Arc<SourceFile>,
@@ -196,7 +192,7 @@ pub enum CheckFailedError {
     #[error("error occurred while matching pattern")]
     #[diagnostic()]
     MatchNoneErrorNote {
-        #[label("when matching this pattern")]
+        #[label(primary, "when matching this pattern")]
         span: SourceSpan,
         #[source_code]
         match_file: Arc<SourceFile>,
@@ -208,7 +204,7 @@ pub enum CheckFailedError {
     #[error("an exact match was not found, but some similar matches were found, see notes")]
     #[diagnostic()]
     MatchFuzzy {
-        #[label("pattern at this location was invalid")]
+        #[label(primary, "pattern at this location was invalid")]
         span: SourceSpan,
         #[source_code]
         match_file: Arc<SourceFile>,
@@ -225,6 +221,30 @@ pub enum CheckFailedError {
         #[related]
         failed: Vec<CheckFailedError>,
     },
+    #[error("unable to match all instances of repeat pattern (matched {n} of {count} times)")]
+    #[diagnostic(help("see related errors below for additional details"))]
+    MatchRepeatedError {
+        #[label(primary, "when matching this pattern for the {}th time", n + 1)]
+        span: SourceSpan,
+        #[source_code]
+        match_file: Arc<SourceFile>,
+        n: usize,
+        count: usize,
+        #[label(collection)]
+        related: Vec<LabeledSpan>,
+    },
+    #[error("one or more matches were not found for a set of expected patterns")]
+    #[diagnostic(help("see related error for more information"))]
+    MatchGroupFailed {
+        #[label(primary, "this check failed")]
+        span: SourceSpan,
+        #[source_code]
+        match_file: Arc<SourceFile>,
+        #[related]
+        cause: Vec<CheckFailedError>,
+        #[label("these checks were skipped because they were dependent on the check that failed")]
+        skipped: Option<SourceSpan>,
+    },
 }
 impl CheckFailedError {
     /// Returns true if this error was produced in the context of a possibly-valid match
@@ -237,6 +257,99 @@ impl CheckFailedError {
                 | Self::MatchFoundErrorNote { .. }
                 | Self::MatchFoundConstraintFailed { .. }
         )
+    }
+
+    pub fn related_labels_for(&self, related_span: SourceSpan) -> Vec<LabeledSpan> {
+        use CheckFailedError::*;
+        let mut related = vec![];
+        let related_source_id = related_span.source_id();
+        match self {
+            EmptyInput => (),
+            err @ (MatchError { span, labels, .. }
+            | MatchFoundButExcluded { span, labels, .. }
+            | MatchFoundButDiscarded { span, labels, .. }) => {
+                if span.source_id() == related_source_id {
+                    related.push(LabeledSpan::new_with_span(Some(err.to_string()), *span));
+                }
+                for label in labels {
+                    if label.file.id() == related_source_id {
+                        for label in label.labels.iter() {
+                            related.push(LabeledSpan::new_with_span(
+                                label.label().map(|s| s.to_string()),
+                                label.span(),
+                            ))
+                        }
+                    }
+                }
+            }
+            err @ (MatchFoundButWrongLine { span, pattern, .. }
+            | MatchFoundErrorNote { span, pattern, .. }) => {
+                if span.source_id() == related_source_id {
+                    related.push(LabeledSpan::new_with_span(Some(err.to_string()), *span));
+                }
+                if let Some(pattern) = pattern.as_ref()
+                    && pattern.span.source_id() == related_source_id
+                {
+                    related.push(LabeledSpan::new_with_span(
+                        Some("due to pattern at this location".to_string()),
+                        pattern.span,
+                    ));
+                }
+            }
+            err @ MatchFoundConstraintFailed {
+                span,
+                pattern,
+                error,
+                ..
+            } => {
+                if span.source_id() == related_source_id {
+                    related.push(LabeledSpan::new_with_span(Some(err.to_string()), *span));
+                    if let Some(error) = error.as_ref() {
+                        related.push(LabeledSpan::new_with_span(Some(error.to_string()), *span));
+                    }
+                }
+                if let Some(pattern) = pattern.as_ref()
+                    && pattern.span.source_id() == related_source_id
+                {
+                    related.push(LabeledSpan::new_with_span(
+                        Some("due to pattern at this location".to_string()),
+                        pattern.span,
+                    ));
+                }
+            }
+            err @ MatchNoneButExpected { span, .. } => {
+                let message = err.to_string();
+                related.push(LabeledSpan::new_with_span(Some(message), *span));
+            }
+            err @ MatchNoneForInvalidPattern { span, error, .. } => {
+                if span.source_id() == related_source_id {
+                    let message = err.to_string();
+                    related.push(LabeledSpan::new_with_span(Some(message), *span));
+                    if let Some(error) = error.as_ref() {
+                        related.push(LabeledSpan::new_with_span(Some(error.to_string()), *span));
+                    }
+                }
+            }
+            MatchNoneErrorNote { span, error, .. } => {
+                if span.source_id() == related_source_id
+                    && let Some(error) = error.as_ref()
+                {
+                    related.push(LabeledSpan::new_with_span(Some(error.to_string()), *span));
+                }
+            }
+            err @ MatchFuzzy { span, notes, .. } => {
+                if span.source_id() == related_source_id {
+                    let message = err.to_string();
+                    related.push(LabeledSpan::new_with_span(Some(message), *span));
+                    if let Some(notes) = notes.clone() {
+                        related.push(LabeledSpan::new_with_span(Some(notes), *span));
+                    }
+                }
+            }
+            MatchAllFailed { .. } | MatchRepeatedError { .. } | MatchGroupFailed { .. } => (),
+        }
+
+        related
     }
 }
 

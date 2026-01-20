@@ -335,7 +335,8 @@ pub fn check_group<'section, 'input, 'a: 'input>(
         }
         CheckGroup::Ordered(rules) => {
             let mut matched = vec![];
-            for rule in rules.iter() {
+            let mut rules = rules.iter();
+            while let Some(rule) = rules.next() {
                 match rule.apply(context) {
                     Ok(matches) => {
                         if matches.is_ok() {
@@ -347,8 +348,43 @@ pub fn check_group<'section, 'input, 'a: 'input>(
                                     DynRule::kind(rule)
                                 );
                             }
+                            matched.push(matches);
+                        } else {
+                            let skipped_spans =
+                                rules.map(|rule| rule.span()).collect::<SmallVec<[_; 4]>>();
+                            let skipped_start = skipped_spans
+                                .iter()
+                                .map(|rule| rule.span())
+                                .min_by_key(|span| span.start().to_u32());
+                            let skipped_end = skipped_spans
+                                .into_iter()
+                                .map(|rule| rule.span())
+                                .max_by_key(|span| span.end().to_u32());
+                            let skipped = skipped_start.zip(skipped_end).map(|(start, end)| {
+                                SourceSpan::new(
+                                    start.source_id(),
+                                    Range::new(start.start(), end.end()),
+                                )
+                            });
+                            let cause = matches
+                                .into_results()
+                                .into_iter()
+                                .flat_map(|matches| {
+                                    if matches.is_ok() {
+                                        None
+                                    } else {
+                                        Some(matches.unwrap_err())
+                                    }
+                                })
+                                .collect();
+                            test_result.failed(CheckFailedError::MatchGroupFailed {
+                                span: rule.span(),
+                                match_file: context.match_file(),
+                                cause,
+                                skipped,
+                            });
+                            return Ok(Err(matched));
                         }
-                        matched.push(matches);
                     }
                     Err(err) => {
                         test_result.failed(CheckFailedError::MatchNoneErrorNote {
@@ -367,18 +403,44 @@ pub fn check_group<'section, 'input, 'a: 'input>(
         }
         CheckGroup::Repeated { rule, count } => {
             let mut matched = vec![];
-            for _ in 0..*count {
+            let count = *count;
+            for n in 0..count {
                 match rule.apply(context) {
                     Ok(matches) => {
-                        if context.config.remarks_enabled() {
-                            if let Ok(loc) = context.source_manager().file_line_col(rule.span()) {
-                                eprintln!(
-                                    "{loc}: remark: {}: expected string found in input",
-                                    DynRule::kind(rule)
+                        let match_results = matches.into_results();
+                        let mut related = vec![];
+                        let mut matches = Matches::default();
+                        for match_result in match_results {
+                            if match_result.is_ok() {
+                                matches.push(match_result);
+                            } else {
+                                related.extend(
+                                    match_result.unwrap_err().related_labels_for(rule.span()),
                                 );
                             }
                         }
-                        matched.push(matches);
+
+                        if related.is_empty() {
+                            if context.config.remarks_enabled()
+                                && let Ok(loc) = context.source_manager().file_line_col(rule.span())
+                            {
+                                eprintln!(
+                                    "{loc}: remark: {}: expected string found in input ({} of {count} times)",
+                                    DynRule::kind(rule),
+                                    n + 1,
+                                );
+                            }
+                            matched.push(matches);
+                        } else {
+                            test_result.failed(CheckFailedError::MatchRepeatedError {
+                                span: rule.span(),
+                                match_file: context.match_file(),
+                                n,
+                                count,
+                                related,
+                            });
+                            return Ok(Err(matched));
+                        }
                     }
                     Err(err) => {
                         test_result.failed(CheckFailedError::MatchNoneErrorNote {
@@ -386,15 +448,11 @@ pub fn check_group<'section, 'input, 'a: 'input>(
                             match_file: context.match_file(),
                             error: Some(RelatedError::new(err)),
                         });
-                        break;
+                        return Ok(Err(matched));
                     }
                 }
             }
-            if matched.is_empty() || matched.iter().all(|m| m.range().is_none()) {
-                Ok(Err(matched))
-            } else {
-                Ok(Ok(matched))
-            }
+            Ok(Ok(matched))
         }
         CheckGroup::Unordered(check_dag) => match check_dag.apply(context) {
             Ok(matches) => {

@@ -34,6 +34,11 @@ impl<'input> Matches<'input> {
         !self.is_ok()
     }
 
+    #[inline(always)]
+    pub fn into_results(self) -> SmallVec<[MatchResult<'input>; 1]> {
+        self.0
+    }
+
     #[inline]
     pub fn iter(&self) -> impl Iterator<Item = &MatchResult<'input>> + '_ {
         self.0.iter()

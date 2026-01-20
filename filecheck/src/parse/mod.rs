@@ -72,6 +72,12 @@ pub enum ParserError {
         #[label("this modifier is not recognized, valid modifiers are: LITERAL")]
         span: SourceSpan,
     },
+    #[error("invalid check modifier")]
+    #[diagnostic(help("count must be non-zero, and in decimal format"))]
+    InvalidCheckCount {
+        #[label("invalid count in -COUNT specification")]
+        span: SourceSpan,
+    },
     #[error("unclosed substitution block")]
     #[diagnostic()]
     UnclosedSubstitution {
