@@ -37,7 +37,7 @@ impl TestFormat for ExecutableTest {
                 .with_stderr(unsupported_features.into_bytes()));
         }
 
-        if config.no_execute {
+        if config.options.no_execute {
             return Ok(TestResult::new(TestStatus::Pass));
         }
 
@@ -46,10 +46,11 @@ impl TestFormat for ExecutableTest {
             .args(ARGV)
             .current_dir(test.suite.working_dir())
             .envs(test.config.env.iter().map(|(k, v)| (&**k, &**v)))
-            .paths(config.search_paths.as_slice())?;
+            .paths(config.options.search_paths.as_slice())?;
 
         Ok(command.wait_with_timeout(
             config
+                .options
                 .timeout
                 .map(Duration::from_secs)
                 .unwrap_or(Duration::ZERO),

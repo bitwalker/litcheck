@@ -3,17 +3,19 @@ use crate::{common::*, env::Bindings};
 pub trait Context<'input, 'context> {
     fn config(&self) -> &'context Config;
 
+    fn source_manager(&self) -> &'context dyn SourceManager;
+
     fn env(&self) -> &dyn LexicalScope<Value = Value<'input>>;
 
     fn env_mut<'env, 'this: 'env>(
         &'this mut self,
     ) -> &'env mut dyn LexicalScopeMut<Value = Value<'input>>;
 
-    fn match_file(&self) -> ArcSource;
+    fn match_file(&self) -> Arc<SourceFile>;
 
     fn match_file_bytes(&self) -> &[u8];
 
-    fn input_file(&self) -> ArcSource;
+    fn input_file(&self) -> Arc<SourceFile>;
 
     fn buffer(&self) -> &'input [u8];
 
@@ -93,8 +95,8 @@ impl<'input, 'context, C: Context<'input, 'context> + ?Sized> ContextExt<'input,
 
 pub struct ContextGuard<'guard, 'input, 'context> {
     config: &'context Config,
-    match_file: ArcSource,
-    input_file: ArcSource,
+    match_file: Arc<SourceFile>,
+    input_file: Arc<SourceFile>,
     scope: ScopeGuard<'guard, 'input, Value<'input>>,
     cursor: CursorGuard<'guard, 'input>,
 }
@@ -129,6 +131,11 @@ impl<'guard, 'input, 'context> Context<'input, 'context>
     }
 
     #[inline(always)]
+    fn source_manager(&self) -> &'context dyn SourceManager {
+        &self.config.source_manager
+    }
+
+    #[inline(always)]
     fn env(&self) -> &dyn LexicalScope<Value = Value<'input>> {
         &self.scope
     }
@@ -141,17 +148,17 @@ impl<'guard, 'input, 'context> Context<'input, 'context>
     }
 
     #[inline]
-    fn match_file(&self) -> ArcSource {
+    fn match_file(&self) -> Arc<SourceFile> {
         self.match_file.clone()
     }
 
     #[inline(always)]
     fn match_file_bytes(&self) -> &[u8] {
-        self.match_file.source_bytes()
+        self.match_file.as_bytes()
     }
 
     #[inline]
-    fn input_file(&self) -> ArcSource {
+    fn input_file(&self) -> Arc<SourceFile> {
         self.input_file.clone()
     }
 
@@ -185,25 +192,26 @@ pub struct MatchContext<'input, 'context> {
     /// The current global configuration
     pub config: &'context Config,
     pub env: Env<'input, 'context>,
-    pub match_file: ArcSource,
-    pub input_file: ArcSource,
+    pub match_file: Arc<SourceFile>,
+    pub input_file: Arc<SourceFile>,
     cursor: Cursor<'input>,
 }
 impl<'input, 'context: 'input> MatchContext<'input, 'context> {
     pub fn new(
         config: &'context Config,
         interner: &'context mut StringInterner,
-        match_file: ArcSource,
-        input_file: ArcSource,
+        match_file: Arc<SourceFile>,
+        input_file: Arc<SourceFile>,
         buffer: &'input [u8],
     ) -> Self {
         let env = Env::<'input, 'context>::from_config(config, interner);
+        let source_id = input_file.id();
         Self {
             config,
             env,
             match_file,
             input_file,
-            cursor: Cursor::new(buffer),
+            cursor: Cursor::new(source_id, buffer),
         }
     }
 
@@ -212,7 +220,7 @@ impl<'input, 'context: 'input> MatchContext<'input, 'context> {
         R: RangeBounds<usize>,
     {
         self.cursor.set_bounds(range);
-        if self.config.enable_var_scope {
+        if self.config.options.enable_var_scope {
             self.env.clear();
         }
     }
@@ -234,6 +242,11 @@ impl<'input, 'context: 'input> Context<'input, 'context> for MatchContext<'input
     }
 
     #[inline(always)]
+    fn source_manager(&self) -> &'context dyn SourceManager {
+        &self.config.source_manager
+    }
+
+    #[inline(always)]
     fn env(&self) -> &dyn LexicalScope<Value = Value<'input>> {
         &self.env
     }
@@ -246,17 +259,17 @@ impl<'input, 'context: 'input> Context<'input, 'context> for MatchContext<'input
     }
 
     #[inline]
-    fn match_file(&self) -> ArcSource {
+    fn match_file(&self) -> Arc<SourceFile> {
         self.match_file.clone()
     }
 
     #[inline(always)]
     fn match_file_bytes(&self) -> &[u8] {
-        self.match_file.source_bytes()
+        self.match_file.as_bytes()
     }
 
     #[inline]
-    fn input_file(&self) -> ArcSource {
+    fn input_file(&self) -> Arc<SourceFile> {
         self.input_file.clone()
     }
 

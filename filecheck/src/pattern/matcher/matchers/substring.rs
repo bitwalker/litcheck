@@ -39,8 +39,8 @@ impl<'a> SubstringMatcher<'a> {
             "an empty string is not a valid substring pattern"
         );
 
-        let pattern =
-            pattern.map(|p| text::canonicalize_horizontal_whitespace(p, config.strict_whitespace));
+        let pattern = pattern
+            .map(|p| text::canonicalize_horizontal_whitespace(p, config.options.strict_whitespace));
 
         let (span, pattern) = pattern.into_parts();
         let mut builder = AhoCorasickBuilder::new();
@@ -48,7 +48,7 @@ impl<'a> SubstringMatcher<'a> {
             .match_kind(MatchKind::LeftmostLongest)
             .start_kind(start_kind)
             .kind(Some(AhoCorasickKind::DFA))
-            .ascii_case_insensitive(config.ignore_case)
+            .ascii_case_insensitive(config.options.ignore_case)
             .build([pattern.as_ref()])
             .map_err(|err| {
                 let diag = Diag::new("failed to build aho-corasick searcher")
@@ -86,7 +86,8 @@ impl<'a> Matcher for SubstringMatcher<'a> {
         C: Context<'input, 'context> + ?Sized,
     {
         if let Some(matched) = self.searcher.find(input) {
-            Ok(MatchResult::ok(MatchInfo::new(matched.range(), self.span)))
+            let span = SourceSpan::from_range_unchecked(input.source_id(), matched.range());
+            Ok(MatchResult::ok(MatchInfo::new(span, self.span)))
         } else {
             Ok(MatchResult::failed(
                 CheckFailedError::MatchNoneButExpected {
@@ -106,12 +107,16 @@ impl<'a> Spanned for SubstringMatcher<'a> {
 
 #[cfg(test)]
 mod tests {
+    use crate::source_file;
+
     use super::*;
 
     #[test]
     fn test_substring_matcher() -> DiagResult<()> {
         let mut context = TestContext::new();
-        context.with_checks("CHECK: Name: bar").with_input(
+        let match_file = source_file!(context.config, "CHECK: Name: bar");
+        let input_file = source_file!(
+            context.config,
             "
 Name: foo
 Field: 1
@@ -119,22 +124,25 @@ Field: 1
 Name: bar
 Field: 2
 "
-            .trim_start(),
+            .trim_start()
         );
+        context
+            .with_checks(match_file)
+            .with_input(input_file.clone());
 
-        let pattern = Span::new(8..10, Cow::Borrowed("Name: bar"));
+        let pattern = Span::new(
+            SourceSpan::from_range_unchecked(input_file.id(), 8..10),
+            Cow::Borrowed("Name: bar"),
+        );
         let matcher =
             SubstringMatcher::new(pattern, &context.config).expect("expected pattern to be valid");
         let mctx = context.match_context();
         let input = mctx.search();
         let result = matcher.try_match(input, &mctx)?;
         let info = result.info.expect("expected match");
-        assert_eq!(info.span.offset(), 20);
+        assert_eq!(info.span.start().to_u32(), 20);
         assert_eq!(info.span.len(), 9);
-        assert_eq!(
-            input.as_str(info.span.offset()..(info.span.offset() + info.span.len())),
-            "Name: bar"
-        );
+        assert_eq!(input.as_str(info.span.into_slice_index()), "Name: bar");
 
         Ok(())
     }

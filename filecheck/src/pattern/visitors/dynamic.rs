@@ -233,9 +233,9 @@ impl<'a, 'input, S: PatternSearcher<'input>> DynamicPatternSetVisitor<'a, S> {
         context: &mut ContextGuard<'guard, 'input, 'context>,
     ) -> DiagResult<Result<MatchInfo<'input>, CheckFailedError>> {
         let input = self.searcher.input();
-        let input = Input::new(context.cursor().buffer(), false)
+        let input = Input::new(context.cursor().source_id, context.cursor().buffer(), false)
             .anchored(true)
-            .span(input.range());
+            .bounded(input.range());
         match pattern.try_match_mut(input, context)? {
             MatchResult {
                 ty: MatchType::Failed(error),
@@ -266,10 +266,10 @@ impl<'a, 'input, S: PatternSearcher<'input>> DynamicPatternSetVisitor<'a, S> {
                 }
 
                 // Ignore this match if we have already matched a pattern to it at this location
-                let range = info.span.range();
+                let range = info.span.into_slice_index();
                 if self.patterns_matched[info.pattern_id]
                     .iter()
-                    .map(|span| span.range())
+                    .map(|span| span.span().into_slice_index())
                     .any(|span| span.contains(&range.start) || span.contains(&range.end))
                 {
                     continue;
@@ -289,7 +289,7 @@ impl<'a, 'input, S: PatternSearcher<'input>> DynamicPatternSetVisitor<'a, S> {
                                 }
                                 VariableName::Pseudo(name) => {
                                     let diag = Diag::new("unsupported variable binding")
-                                        .with_label(Label::new(name.range(), "occurs here"))
+                                        .with_label(Label::new(name.span(), "occurs here"))
                                         .with_help("pseudo-variables like LINE cannot be bound");
                                     return Err(Report::new(diag));
                                 }

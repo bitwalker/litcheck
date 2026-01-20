@@ -122,9 +122,9 @@ where
 {
     use crate::ast::Capture;
 
-    let overall_span = SourceSpan::from(matched.range());
-    let mut capture_infos = Vec::with_capacity(captures.group_len());
     let input = context.search();
+    let overall_span = SourceSpan::from_range_unchecked(input.source_id(), matched.range());
+    let mut capture_infos = Vec::with_capacity(captures.group_len());
     let slots = captures.slots();
     for op in patterns {
         match op {
@@ -212,7 +212,7 @@ where
     if let Some(start) = slots[a].map(|offset| offset.get()) {
         let end = slots[b].expect("expected end offset to be present").get();
         let captured = input.as_str(start..end);
-        let capture_span = SourceSpan::from(start..end);
+        let capture_span = SourceSpan::from_range_unchecked(input.source_id(), start..end);
 
         super::regex::try_convert_capture_to_type(
             group.pattern_id,

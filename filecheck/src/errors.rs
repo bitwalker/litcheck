@@ -11,7 +11,7 @@ pub struct TestFailed {
     #[label]
     pub span: SourceSpan,
     #[source_code]
-    pub input: ArcSource,
+    pub input: Arc<SourceFile>,
     #[related]
     pub errors: Vec<CheckFailedError>,
 }
@@ -22,8 +22,8 @@ impl TestFailed {
     ) -> Self {
         let input_file = context.input_file();
         Self {
-            test_from: TestInputType(context.match_file().name()),
-            span: input_file.span(),
+            test_from: TestInputType(context.match_file().uri().clone()),
+            span: input_file.source_span(),
             input: input_file.clone(),
             errors,
         }
@@ -69,7 +69,7 @@ pub struct InvalidNumericCastError {
     #[label("specifically, the value captured by this pattern is not of the correct format")]
     pub specific_span: Option<SourceSpan>,
     #[source_code]
-    pub match_file: ArcSource,
+    pub match_file: Arc<SourceFile>,
 }
 
 #[derive(Debug, Diagnostic, thiserror::Error)]
@@ -78,7 +78,7 @@ pub struct UndefinedVariableError {
     #[label("occurs here")]
     pub span: SourceSpan,
     #[source_code]
-    pub match_file: ArcSource,
+    pub match_file: Arc<SourceFile>,
     pub name: String,
 }
 
@@ -93,7 +93,7 @@ pub enum CheckFailedError {
         #[label("when matching against this input")]
         span: SourceSpan,
         #[source_code]
-        input_file: litcheck::diagnostics::ArcSource,
+        input_file: Arc<SourceFile>,
         #[related]
         labels: Vec<RelatedLabel>,
         #[help]
@@ -106,7 +106,7 @@ pub enum CheckFailedError {
         #[label("match found here")]
         span: SourceSpan,
         #[source_code]
-        input_file: litcheck::diagnostics::ArcSource,
+        input_file: Arc<SourceFile>,
         #[related]
         labels: Vec<RelatedLabel>,
     },
@@ -118,7 +118,7 @@ pub enum CheckFailedError {
         #[label("match found here")]
         span: SourceSpan,
         #[source_code]
-        input_file: litcheck::diagnostics::ArcSource,
+        input_file: Arc<SourceFile>,
         #[related]
         pattern: Option<RelatedCheckError>,
     },
@@ -129,7 +129,7 @@ pub enum CheckFailedError {
         #[label("match found here")]
         span: SourceSpan,
         #[source_code]
-        input_file: litcheck::diagnostics::ArcSource,
+        input_file: Arc<SourceFile>,
         #[related]
         labels: Vec<RelatedLabel>,
         #[help]
@@ -143,7 +143,7 @@ pub enum CheckFailedError {
         #[label("match found here")]
         span: SourceSpan,
         #[source_code]
-        input_file: litcheck::diagnostics::ArcSource,
+        input_file: Arc<SourceFile>,
         #[related]
         pattern: Option<RelatedCheckError>,
         #[help]
@@ -157,7 +157,7 @@ pub enum CheckFailedError {
         #[label("match found here")]
         span: SourceSpan,
         #[source_code]
-        input_file: litcheck::diagnostics::ArcSource,
+        input_file: Arc<SourceFile>,
         #[related]
         pattern: Option<RelatedCheckError>,
         #[related]
@@ -174,7 +174,7 @@ pub enum CheckFailedError {
         #[label("pattern at this location was not matched")]
         span: SourceSpan,
         #[source_code]
-        match_file: litcheck::diagnostics::ArcSource,
+        match_file: Arc<SourceFile>,
         #[help]
         note: Option<String>,
     },
@@ -188,7 +188,7 @@ pub enum CheckFailedError {
         #[label("pattern at this location was invalid")]
         span: SourceSpan,
         #[source_code]
-        match_file: litcheck::diagnostics::ArcSource,
+        match_file: Arc<SourceFile>,
         #[related]
         error: Option<RelatedError>,
     },
@@ -199,7 +199,7 @@ pub enum CheckFailedError {
         #[label("when matching this pattern")]
         span: SourceSpan,
         #[source_code]
-        match_file: litcheck::diagnostics::ArcSource,
+        match_file: Arc<SourceFile>,
         #[related]
         error: Option<RelatedError>,
     },
@@ -211,7 +211,7 @@ pub enum CheckFailedError {
         #[label("pattern at this location was invalid")]
         span: SourceSpan,
         #[source_code]
-        match_file: litcheck::diagnostics::ArcSource,
+        match_file: Arc<SourceFile>,
         #[help]
         notes: Option<String>,
     },
@@ -249,7 +249,7 @@ pub struct RelatedCheckError {
     #[label("due to pattern at this location")]
     pub span: SourceSpan,
     #[source_code]
-    pub match_file: litcheck::diagnostics::ArcSource,
+    pub match_file: Arc<SourceFile>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -257,10 +257,10 @@ pub struct RelatedCheckError {
 pub struct RelatedLabel {
     pub severity: litcheck::diagnostics::Severity,
     pub labels: SmallVec<[Label; 1]>,
-    pub file: litcheck::diagnostics::ArcSource,
+    pub file: Arc<SourceFile>,
 }
 impl RelatedLabel {
-    pub fn error(label: Label, file: litcheck::diagnostics::ArcSource) -> Self {
+    pub fn error(label: Label, file: Arc<SourceFile>) -> Self {
         Self {
             severity: litcheck::diagnostics::Severity::Error,
             labels: smallvec![label],
@@ -268,7 +268,7 @@ impl RelatedLabel {
         }
     }
 
-    pub fn warn(label: Label, file: litcheck::diagnostics::ArcSource) -> Self {
+    pub fn warn(label: Label, file: Arc<SourceFile>) -> Self {
         Self {
             severity: litcheck::diagnostics::Severity::Warning,
             labels: smallvec![label],
@@ -276,7 +276,7 @@ impl RelatedLabel {
         }
     }
 
-    pub fn note(label: Label, file: litcheck::diagnostics::ArcSource) -> Self {
+    pub fn note(label: Label, file: Arc<SourceFile>) -> Self {
         Self {
             severity: litcheck::diagnostics::Severity::Advice,
             labels: smallvec![label],
@@ -284,10 +284,7 @@ impl RelatedLabel {
         }
     }
 
-    pub fn notes(
-        label: impl IntoIterator<Item = Label>,
-        file: litcheck::diagnostics::ArcSource,
-    ) -> Self {
+    pub fn notes(label: impl IntoIterator<Item = Label>, file: Arc<SourceFile>) -> Self {
         Self {
             severity: litcheck::diagnostics::Severity::Advice,
             labels: label.into_iter().collect(),

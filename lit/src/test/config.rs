@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, path::Path};
 
 use litcheck::{
-    diagnostics::{DiagResult, Diagnostic, IntoDiagnostic, Report, SourceFile, SourceSpan},
+    diagnostics::{DiagResult, Diagnostic, IntoDiagnostic, Report, SourceSpan},
     fs::PatternSet,
     Input, StaticCow,
 };
@@ -66,20 +66,22 @@ pub struct TestConfig {
 }
 impl TestConfig {
     /// Parse local test suite configuration from `input`, inheriting from `parent` where applicable
-    pub fn parse<P: AsRef<Path>>(path: P) -> DiagResult<Box<Self>> {
+    pub fn parse<P: AsRef<Path>>(path: P, config: &Config) -> DiagResult<Box<Self>> {
         let path = path.as_ref();
         let path = if path.is_absolute() {
             path.to_path_buf()
         } else {
             path.canonicalize().into_diagnostic()?
         };
-        let source = Input::from(path).into_source(false).into_diagnostic()?;
-        toml::from_str::<Self>(source.source())
+        let source = Input::from(path)
+            .into_source(false, config.source_manager())
+            .into_diagnostic()?;
+        toml::from_str::<Self>(source.as_str())
             .map(Box::new)
             .map_err(|error| {
                 let span = error.span().unwrap_or(0..0);
                 Report::new(TestConfigError::Syntax {
-                    span: SourceSpan::from(span),
+                    span: SourceSpan::from_range_unchecked(source.id(), span),
                     error,
                 })
                 .with_source_code(source)

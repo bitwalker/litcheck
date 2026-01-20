@@ -49,11 +49,12 @@ fn run_once(
     command
         .current_dir(test.suite.working_dir())
         .envs(test.config.env.iter().map(|(k, v)| (&**k, &**v)))
-        .paths(lit.search_paths.as_slice())?
+        .paths(lit.options.search_paths.as_slice())?
         .pipe_stdin(script_bytes);
 
     Ok(command.wait_with_timeout(
-        lit.timeout
+        lit.options
+            .timeout
             .map(Duration::from_secs)
             .unwrap_or(Duration::ZERO),
     ))

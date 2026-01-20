@@ -73,6 +73,11 @@ impl<T: PartialOrd + fmt::Debug> Range<T> {
 }
 impl<T: PartialOrd> Range<T> {
     #[inline]
+    pub fn into_range(self) -> core::ops::Range<T> {
+        self.start..self.end
+    }
+
+    #[inline]
     pub fn is_empty(&self) -> bool {
         !matches!(self.start.partial_cmp(&self.end), Some(Ordering::Less))
     }
@@ -164,19 +169,6 @@ impl<T: Ord> Ord for Range<T> {
         self.start
             .cmp(&other.start)
             .then_with(|| self.end.cmp(&other.end))
-    }
-}
-impl From<crate::diagnostics::SourceSpan> for Range<usize> {
-    #[inline]
-    fn from(span: crate::diagnostics::SourceSpan) -> Self {
-        let offset = span.offset();
-        Self::new(offset, offset + span.len())
-    }
-}
-impl From<Range<usize>> for crate::diagnostics::SourceSpan {
-    #[inline]
-    fn from(range: Range<usize>) -> Self {
-        crate::diagnostics::SourceSpan::from(range.start..range.end)
     }
 }
 impl<T: NumericRangeBound> From<core::ops::Range<T>> for Range<T> {

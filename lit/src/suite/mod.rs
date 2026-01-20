@@ -15,7 +15,7 @@ use std::{
 
 use intrusive_collections::RBTreeAtomicLink;
 use litcheck::{
-    diagnostics::{DiagResult, IntoDiagnostic, Report, SourceFile, SourceSpan, WrapErr},
+    diagnostics::{DiagResult, IntoDiagnostic, Report, SourceSpan, WrapErr},
     Input, StaticCow,
 };
 use parking_lot::Mutex;
@@ -73,8 +73,8 @@ impl TestSuite {
         self.name.as_ref()
     }
 
-    pub fn span(&self) -> SourceSpan {
-        SourceSpan::from(self.name.span())
+    pub fn span(&self) -> core::ops::Range<usize> {
+        self.name.span()
     }
 
     pub fn id(&self) -> TestSuiteKey {
@@ -108,23 +108,23 @@ impl TestSuite {
             path.canonicalize().into_diagnostic()?
         };
         let source = Input::from(path.as_path())
-            .into_arc_source(false)
+            .into_source(false, config.source_manager())
             .into_diagnostic()?;
-        let toml = source.source();
+        let toml = source.as_str();
         let mut suite = toml::from_str::<Self>(toml).map_err(|error| {
             let span = error.span();
             Report::new(TestSuiteError::Syntax {
-                span: span.map(SourceSpan::from),
+                span: span.map(|span| SourceSpan::from_range_unchecked(source.id(), span)),
                 error,
             })
             .with_source_code(source.clone())
         })?;
 
         if suite.name().is_empty() {
-            return Err(
-                Report::new(TestSuiteError::EmptyName { span: suite.span() })
-                    .with_source_code(source.clone()),
-            );
+            return Err(Report::new(TestSuiteError::EmptyName {
+                span: SourceSpan::from_range_unchecked(source.id(), suite.span()),
+            })
+            .with_source_code(source.clone()));
         }
         suite.path = Some(path.clone().into());
 
@@ -142,7 +142,7 @@ impl TestSuite {
         if !suite.source_dir().is_dir() {
             let span = suite.source_dir.span();
             return Err(Report::new(TestSuiteError::InvalidSourceDir {
-                span: span.into(),
+                span: SourceSpan::from_range_unchecked(source.id(), span),
                 source_dir: suite.source_dir.into_inner().into_owned(),
             })
             .with_source_code(source.clone()));
@@ -168,7 +168,7 @@ impl TestSuite {
             let span = suite.working_dir.span();
             let working_dir = suite.working_dir.into_inner();
             return Err(Report::new(TestSuiteError::InvalidWorkingDir {
-                span: span.into(),
+                span: SourceSpan::from_range_unchecked(source.id(), span),
                 working_dir: working_dir.into_owned(),
             })
             .with_source_code(source));

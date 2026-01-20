@@ -8,15 +8,88 @@ pub use self::substitutions::{
     InvalidSubstitutionPatternError, ScopedSubstitutionSet, SubstitutionSet,
 };
 
-use std::path::PathBuf;
+use std::{fmt, path::PathBuf, sync::Arc};
 
 use clap::Args;
+use litcheck::diagnostics::{DefaultSourceManager, SourceManagerSync};
 use regex::Regex;
 
 pub type Variable = litcheck::variables::Variable<String, String>;
 
-#[derive(Debug, Args)]
 pub struct Config {
+    pub options: Options,
+    pub source_manager: Arc<dyn SourceManagerSync>,
+}
+
+impl Config {
+    pub fn new(tests: Vec<String>) -> Self {
+        Self {
+            options: Options {
+                tests,
+                workers: None,
+                params: vec![],
+                quiet: false,
+                verbose: false,
+                all: false,
+                no_execute: false,
+                search_paths: vec![],
+                timeout: None,
+                filter: None,
+                filter_out: None,
+                target: None,
+            },
+            source_manager: Arc::from(DefaultSourceManager::default()),
+        }
+    }
+
+    #[inline(always)]
+    pub fn source_manager(&self) -> &dyn SourceManagerSync {
+        &self.source_manager
+    }
+
+    /// Returns true if a test with `name` should be selected for execution
+    pub fn is_selected(&self, name: &str) -> bool {
+        let is_selected = self
+            .options
+            .filter
+            .as_ref()
+            .map(|filter| filter.is_match(name))
+            .unwrap_or(true);
+        let is_excluded = self
+            .options
+            .filter_out
+            .as_ref()
+            .map(|filter_out| filter_out.is_match(name))
+            .unwrap_or(false);
+        is_selected && !is_excluded
+    }
+
+    pub fn host(&self) -> target_lexicon::Triple {
+        target_lexicon::Triple::host()
+    }
+
+    pub fn target(&self) -> target_lexicon::Triple {
+        self.options
+            .target
+            .clone()
+            .unwrap_or_else(target_lexicon::Triple::host)
+    }
+}
+
+impl Default for Config {
+    #[inline]
+    fn default() -> Self {
+        Self::new(vec![])
+    }
+}
+
+impl fmt::Debug for Config {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(&self.options, f)
+    }
+}
+#[derive(Debug, Args)]
+pub struct Options {
     /// The test files or directories to search for tests
     #[arg(value_name = "TESTS", required(true), trailing_var_arg(true))]
     pub tests: Vec<String>,
@@ -91,49 +164,6 @@ pub struct Config {
         help_heading = "Selection Options"
     )]
     pub target: Option<target_lexicon::Triple>,
-}
-impl Config {
-    pub fn new(tests: Vec<String>) -> Self {
-        Self {
-            tests,
-            workers: None,
-            params: vec![],
-            quiet: false,
-            verbose: false,
-            all: false,
-            no_execute: false,
-            search_paths: vec![],
-            timeout: None,
-            filter: None,
-            filter_out: None,
-            target: None,
-        }
-    }
-
-    /// Returns true if a test with `name` should be selected for execution
-    pub fn is_selected(&self, name: &str) -> bool {
-        let is_selected = self
-            .filter
-            .as_ref()
-            .map(|filter| filter.is_match(name))
-            .unwrap_or(true);
-        let is_excluded = self
-            .filter_out
-            .as_ref()
-            .map(|filter_out| filter_out.is_match(name))
-            .unwrap_or(false);
-        is_selected && !is_excluded
-    }
-
-    pub fn host(&self) -> target_lexicon::Triple {
-        target_lexicon::Triple::host()
-    }
-
-    pub fn target(&self) -> target_lexicon::Triple {
-        self.target
-            .clone()
-            .unwrap_or_else(target_lexicon::Triple::host)
-    }
 }
 
 fn target_triple_parser() -> clap::builder::ValueParser {

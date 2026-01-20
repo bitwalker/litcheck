@@ -4,7 +4,7 @@ use std::{borrow::Borrow, collections::BTreeSet, fmt, ops::Range, str::FromStr};
 
 use regex::Regex;
 
-use litcheck::diagnostics::{Diagnostic, SourceSpan, Span, Spanned};
+use litcheck::diagnostics::{Diagnostic, SourceId, SourceSpan, Span};
 
 use crate::config::FeatureSet;
 
@@ -49,9 +49,9 @@ impl InvalidBooleanExprError {
             | Self::UnexpectedChar { ref mut span, .. }
             | Self::UnexpectedEof { ref mut span, .. }
             | Self::InvalidRegex { ref mut span, .. } => {
-                let start = span.start() + offset;
-                let end = span.len() + start;
-                *span = SourceSpan::from(start..end);
+                let start = span.start().to_usize() + offset;
+                let end = span.end().to_usize() + offset;
+                *span = SourceSpan::from_range_unchecked(span.source_id(), start..end);
                 self
             }
         }
@@ -86,7 +86,7 @@ impl FromStr for BooleanExpr {
     type Err = InvalidBooleanExprError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let parser = BooleanExprParser::new(s);
+        let parser = BooleanExprParser::new(SourceId::UNKNOWN, s);
         parser.parse()
     }
 }
@@ -218,10 +218,13 @@ struct BooleanExprParser<'a> {
     expr: BooleanExpr,
 }
 impl<'a> BooleanExprParser<'a> {
-    pub fn new(input: &'a str) -> Self {
+    pub fn new(source_id: SourceId, input: &'a str) -> Self {
         Self {
-            tokenizer: Tokenizer::new(input),
-            current: Span::new(SourceSpan::from(input.len()), Token::Eof),
+            tokenizer: Tokenizer::new(source_id, input),
+            current: Span::new(
+                SourceSpan::from_range_unchecked(source_id, 0..input.len()),
+                Token::Eof,
+            ),
             expr: BooleanExpr::default(),
         }
     }
@@ -307,14 +310,14 @@ impl<'a> BooleanExprParser<'a> {
     fn parse_match_expr(&mut self) -> Result<(), InvalidBooleanExprError> {
         use smallvec::SmallVec;
 
-        let start = self.current.start();
-        let mut end = self.current.end();
+        let start = self.current.span().start().to_usize();
+        let mut end = self.current.span().end().to_usize();
         let mut is_ident = true;
         let mut reserve = 0;
         let mut parts = SmallVec::<[(SourceSpan, Token<'_>); 4]>::default();
         loop {
             let current_span = self.current.span();
-            let current_end = self.current.end();
+            let current_end = self.current.span().end().to_usize();
             match &*self.current {
                 tok @ Token::Pattern(raw) => {
                     end = current_end;
@@ -392,7 +395,10 @@ impl<'a> BooleanExprParser<'a> {
             self.expr = Regex::new(&pattern)
                 .map(BooleanExpr::Pattern)
                 .map_err(|error| InvalidBooleanExprError::InvalidRegex {
-                    span: SourceSpan::from(start..end),
+                    span: SourceSpan::from_range_unchecked(
+                        self.current.span().source_id(),
+                        start..end,
+                    ),
                     error,
                 })?;
         }
@@ -431,7 +437,7 @@ impl<'a> BooleanExprParser<'a> {
     #[inline(always)]
     fn next(&mut self) -> Result<(), InvalidBooleanExprError> {
         let token = self.tokenizer.next().unwrap_or_else(|| {
-            let span = SourceSpan::from(self.current.end());
+            let span = SourceSpan::at(self.current.span().source_id(), self.current.span().end());
             Ok(Span::new(span, Token::Eof))
         })?;
         self.current = token;
@@ -482,6 +488,7 @@ impl<'a> fmt::Display for Token<'a> {
 
 /// The tokenizer for [BooleanExprParser]
 struct Tokenizer<'a> {
+    source_id: SourceId,
     input: &'a str,
     chars: std::iter::Peekable<std::str::Chars<'a>>,
     token_start: usize,
@@ -509,13 +516,14 @@ macro_rules! pop2 {
 }
 
 impl<'a> Tokenizer<'a> {
-    pub fn new(input: &'a str) -> Self {
+    pub fn new(source_id: SourceId, input: &'a str) -> Self {
         let mut chars = input.chars().peekable();
         let current = chars.next();
         let end = current.map(|c| c.len_utf8()).unwrap_or(0);
         let pos = 0;
         let current = current.unwrap_or('\0');
         let mut tokenizer = Self {
+            source_id,
             input,
             chars,
             token_start: 0,
@@ -622,7 +630,7 @@ impl<'a> Tokenizer<'a> {
     }
 
     fn span(&self) -> SourceSpan {
-        SourceSpan::from(self.token_start..self.token_end)
+        SourceSpan::from_range_unchecked(self.source_id, self.token_start..self.token_end)
     }
 
     fn slice(&self) -> &'a str {
@@ -646,22 +654,28 @@ impl<'a> Tokenizer<'a> {
             '&' => match self.peek() {
                 '&' => pop2!(self, Token::And),
                 '\0' => Err(InvalidBooleanExprError::UnexpectedEof {
-                    span: SourceSpan::from(pos..self.token_end),
+                    span: SourceSpan::from_range_unchecked(self.source_id, pos..self.token_end),
                     expected: vec!["'&'"],
                 }),
                 c => Err(InvalidBooleanExprError::UnexpectedChar {
-                    span: SourceSpan::from(pos..(self.token_end + c.len_utf8())),
+                    span: SourceSpan::from_range_unchecked(
+                        self.source_id,
+                        pos..(self.token_end + c.len_utf8()),
+                    ),
                     c,
                 }),
             },
             '|' => match self.peek() {
                 '|' => pop2!(self, Token::Or),
                 '\0' => Err(InvalidBooleanExprError::UnexpectedEof {
-                    span: SourceSpan::from(pos..self.token_end),
+                    span: SourceSpan::from_range_unchecked(self.source_id, pos..self.token_end),
                     expected: vec!["'|'"],
                 }),
                 c => Err(InvalidBooleanExprError::UnexpectedChar {
-                    span: SourceSpan::from(pos..(self.token_end + c.len_utf8())),
+                    span: SourceSpan::from_range_unchecked(
+                        self.source_id,
+                        pos..(self.token_end + c.len_utf8()),
+                    ),
                     c,
                 }),
             },
@@ -687,7 +701,7 @@ impl<'a> Tokenizer<'a> {
                         let pattern = self.span_slice(start..end);
                         if pattern.is_empty() {
                             Err(InvalidBooleanExprError::UnexpectedToken {
-                                span: SourceSpan::from(start..end),
+                                span: SourceSpan::from_range_unchecked(self.source_id, start..end),
                                 token: "'}}'".to_string(),
                                 expected: vec!["pattern"],
                             })
@@ -696,18 +710,18 @@ impl<'a> Tokenizer<'a> {
                         }
                     }
                     (_, '}') if next != '\0' => Err(InvalidBooleanExprError::UnexpectedChar {
-                        span: SourceSpan::from(end),
+                        span: SourceSpan::at(self.source_id, end as u32),
                         c: next,
                     }),
                     (_, _) => Err(InvalidBooleanExprError::UnexpectedEof {
-                        span: SourceSpan::from(end),
+                        span: SourceSpan::at(self.source_id, end as u32),
                         expected: vec!["'}'"],
                     }),
                 }
             }
             '\0' => Ok(Token::Eof),
             c => Err(InvalidBooleanExprError::UnexpectedChar {
-                span: SourceSpan::from(pos),
+                span: SourceSpan::at(self.source_id, pos as u32),
                 c,
             }),
         }

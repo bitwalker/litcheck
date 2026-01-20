@@ -59,7 +59,7 @@ impl<V: Clone + fmt::Debug> Bindings<V> {
 
     pub fn get_local(&self, name: Symbol) -> Option<&V> {
         self.bound
-            .get(&VariableName::User(Span::new(0..0, name)))
+            .get(&VariableName::User(Span::new(SourceSpan::UNKNOWN, name)))
             .or_else(|| self.system.get(&name))
     }
 
@@ -293,7 +293,7 @@ impl<'input, 'context: 'input> Env<'input, 'context> {
         config: &'ctx Config,
         interner: &'ctx mut StringInterner,
     ) -> Env<'i, 'ctx> {
-        let system = OrdMap::<_, Value<'i>>::from_iter(config.variables.iter().map(|v| {
+        let system = OrdMap::<_, Value<'i>>::from_iter(config.options.variables.iter().map(|v| {
             (
                 interner.get_or_intern(v.name.as_ref()),
                 match v.value {

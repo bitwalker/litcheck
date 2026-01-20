@@ -6,7 +6,8 @@ pub use self::script::{InvalidTestScriptError, TestScript};
 use std::path::Path;
 
 use litcheck::{
-    diagnostics::{reporting::PrintDiagnostic, DiagResult, IntoDiagnostic, WrapErr},
+    diagnostics::{DiagResult, IntoDiagnostic, WrapErr},
+    reporting::PrintDiagnostic,
     Input,
 };
 use serde::Deserialize;
@@ -62,13 +63,12 @@ impl TestFormat for ShTest {
 
     fn execute(&self, test: &Test, config: &Config) -> DiagResult<TestResult> {
         let script_source = Input::from(test.source_path())
-            .into_arc_source(false)
+            .into_source(false, config.source_manager())
             .into_diagnostic()
             .wrap_err("failed to read test file")?;
-        let mut script = match TestScript::parse_source(&script_source) {
+        let mut script = match TestScript::parse(script_source.clone()) {
             Ok(script) => script,
             Err(err) => {
-                let err = err.with_source_code(script_source);
                 let buf = format!("{}", PrintDiagnostic::new(err));
                 return Ok(TestResult::new(TestStatus::Unresolved).with_stderr(buf.into_bytes()));
             }
@@ -87,7 +87,7 @@ impl TestFormat for ShTest {
                 .with_stderr(unsupported_features.into_bytes()));
         }
 
-        if config.no_execute {
+        if config.options.no_execute {
             log::debug!(target: "lit:shtest", "--no-execute was set, automatically passing test");
             return Ok(TestResult::new(TestStatus::Pass));
         }

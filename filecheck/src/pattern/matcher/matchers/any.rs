@@ -70,44 +70,62 @@ impl<'a> MatchAny<'a> {
                 let (prefix_id, start) = prefixes
                     .iter()
                     .enumerate()
-                    .map(|(i, p)| (i, p.span().start()))
-                    .min_by_key(|&(_, s)| s)
+                    .map(|(i, p)| (i, p.span()))
+                    .min_by_key(|&(_, s)| s.start())
                     .unwrap();
                 let (offset, end) = suffixes[prefix_id]
                     .iter()
                     .enumerate()
-                    .map(|(offset, p)| (offset, p.span().end()))
-                    .min_by_key(|&(_, e)| e)
+                    .map(|(offset, p)| (offset, p.span()))
+                    .max_by_key(|&(_, e)| e.end())
                     .unwrap();
-                Span::new(SourceSpan::from(start..end), prefix_id + offset)
+                Span::new(
+                    SourceSpan::from_range_unchecked(
+                        start.source_id(),
+                        start.start().to_usize()..end.end().to_usize(),
+                    ),
+                    prefix_id + offset,
+                )
             }
             Self::RegexPrefix {
                 ref prefixes,
                 ref suffixes,
             } => {
                 let (first_prefix_span, first_prefix) = prefixes.first_pattern().into_parts();
-                let start = first_prefix_span.start();
+                let start = first_prefix_span.start().to_usize();
                 let (offset, end) = suffixes[first_prefix]
                     .iter()
                     .enumerate()
-                    .map(|(offset, p)| (offset, p.span().end()))
-                    .min_by_key(|&(_, end)| end)
+                    .map(|(offset, p)| (offset, p.span()))
+                    .max_by_key(|&(_, end)| end.end())
                     .unwrap();
-                Span::new(SourceSpan::from(start..end), first_prefix + offset)
+                Span::new(
+                    SourceSpan::from_range_unchecked(
+                        first_prefix_span.source_id(),
+                        start..end.end().to_usize(),
+                    ),
+                    first_prefix + offset,
+                )
             }
             Self::SubstringPrefix {
                 ref prefixes,
                 ref suffixes,
             } => {
                 let (first_prefix_span, first_prefix) = prefixes.first_pattern().into_parts();
-                let start = first_prefix_span.start();
+                let start = first_prefix_span.start().to_usize();
                 let (offset, end) = suffixes[first_prefix]
                     .iter()
                     .enumerate()
-                    .map(|(offset, p)| (offset, p.span().end()))
-                    .min_by_key(|&(_, end)| end)
+                    .map(|(offset, p)| (offset, p.span()))
+                    .max_by_key(|&(_, span)| span.end())
                     .unwrap();
-                Span::new(SourceSpan::from(start..end), first_prefix + offset)
+                Span::new(
+                    SourceSpan::from_range_unchecked(
+                        first_prefix_span.source_id(),
+                        start..end.end().to_usize(),
+                    ),
+                    first_prefix + offset,
+                )
             }
         }
     }
@@ -127,8 +145,8 @@ impl<'a> Spanned for MatchAny<'a> {
             } => {
                 let start = prefixes
                     .iter()
-                    .map(|prefix| prefix.span().start())
-                    .min()
+                    .map(|prefix| prefix.span())
+                    .min_by_key(|span| span.start())
                     .unwrap();
                 let end = prefixes
                     .iter()
@@ -136,59 +154,62 @@ impl<'a> Spanned for MatchAny<'a> {
                     .map(|(prefix, suffixes)| {
                         suffixes
                             .iter()
-                            .map(|p| p.span().end())
-                            .max()
-                            .unwrap_or(prefix.span().end())
+                            .map(|p| p.span())
+                            .max_by_key(|span| span.end())
+                            .unwrap_or(prefix.span())
                     })
-                    .max()
+                    .max_by_key(|span| span.end())
                     .unwrap();
-                SourceSpan::from(start..end)
+                SourceSpan::from_range_unchecked(
+                    start.source_id(),
+                    start.start().to_usize()..end.end().to_usize(),
+                )
             }
             Self::RegexPrefix {
                 ref prefixes,
                 ref suffixes,
             } => {
                 let prefix_span = prefixes.span();
-                let start = prefix_span.start();
-                let prefix_end = prefix_span.end();
+                let start = prefix_span.start().to_usize();
                 let end = core::cmp::max(
-                    prefix_end,
+                    prefix_span.end(),
                     suffixes
                         .iter()
                         .map(|suffixes| {
                             suffixes
                                 .iter()
-                                .map(|p| p.span().end())
-                                .max()
-                                .unwrap_or(prefix_end)
+                                .map(|p| p.span())
+                                .max_by_key(|span| span.end())
+                                .unwrap_or(prefix_span)
                         })
-                        .max()
-                        .unwrap(),
+                        .max_by_key(|span| span.end())
+                        .unwrap()
+                        .end(),
                 );
-                SourceSpan::from(start..end)
+                SourceSpan::from_range_unchecked(prefix_span.source_id(), start..end.to_usize())
             }
             Self::SubstringPrefix {
                 ref prefixes,
                 ref suffixes,
             } => {
                 let prefix_span = prefixes.span();
-                let start = prefix_span.start();
-                let prefix_end = prefix_span.end();
+                let start = prefix_span.start().to_usize();
                 let end = core::cmp::max(
-                    prefix_end,
+                    prefix_span.end(),
                     suffixes
                         .iter()
                         .map(|suffixes| {
                             suffixes
                                 .iter()
-                                .map(|p| p.span().end())
-                                .max()
-                                .unwrap_or(prefix_end)
+                                .map(|p| p.span())
+                                .max_by_key(|span| span.end())
+                                .unwrap_or(prefix_span)
                         })
-                        .max()
-                        .unwrap(),
+                        .max_by_key(|span| span.end())
+                        .unwrap()
+                        .end(),
                 );
-                SourceSpan::from(start..end)
+                SourceSpan::from_range_unchecked(prefix_span.source_id(), start..end.to_usize())
             }
         }
     }
@@ -279,7 +300,10 @@ where
                 captures.append(&mut suffix_info.captures);
                 return Ok(Some(MatchResult::ok(MatchInfo {
                     pattern_id,
-                    span: SourceSpan::from(prefix_info.span.start()..suffix_info.span.end()),
+                    span: SourceSpan::new(
+                        prefix_info.span.source_id(),
+                        Range::new(prefix_info.span.start(), suffix_info.span.end()),
+                    ),
                     captures,
                     ..suffix_info
                 })));

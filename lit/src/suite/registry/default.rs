@@ -110,7 +110,7 @@ impl TestSuiteRegistry for DefaultTestSuiteRegistry {
         // Load all test suites corresponding to the provided input paths,
         // and add the input path as a filter for the tests in that suite,
         // if applicable.
-        for input in config.tests.iter().map(Path::new) {
+        for input in config.options.tests.iter().map(Path::new) {
             self.load_from_path(input, config)?;
         }
 
@@ -439,7 +439,7 @@ fn get_local_config(
             fs::search_directory(&path, false, |entry| entry.file_name() == "lit.local.toml");
         if let Some(entry) = found.next() {
             let entry = entry.into_diagnostic()?;
-            let mut cfg = TestConfig::parse(entry.path())?;
+            let mut cfg = TestConfig::parse(entry.path(), lit)?;
             cfg.inherit(&config);
             cfg.set_default_substitutions(lit, suite, &path);
             cfg.set_default_features(lit);

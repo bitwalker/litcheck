@@ -3,7 +3,10 @@ use self::commands::*;
 
 use std::process::ExitCode;
 
-use litcheck::diagnostics::{self, DiagResult};
+use litcheck::{
+    diagnostics::{self, DiagResult},
+    reporting,
+};
 
 pub fn main() -> DiagResult<ExitCode> {
     init_logger();
@@ -15,8 +18,8 @@ pub fn main() -> DiagResult<ExitCode> {
         subcommand = cmd.subcommand();
     }
 
-    diagnostics::reporting::set_hook(Box::new(|_| {
-        Box::new(diagnostics::reporting::ReportHandlerOpts::new().build())
+    reporting::set_hook(Box::new(|_| {
+        Box::new(reporting::ReportHandlerOpts::new().build())
     }))?;
     diagnostics::set_panic_hook();
 

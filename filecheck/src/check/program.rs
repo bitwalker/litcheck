@@ -121,24 +121,28 @@ impl<'a> CheckGroup<'a> {
             Self::Bounded { left, right } => {
                 let start = left.span().start();
                 let end = right.span().end();
-                SourceSpan::from(start..end)
+                SourceSpan::new(left.span().source_id(), Range::new(start, end))
             }
             Self::Ordered(rules) => {
-                let start = rules[0].span().start();
+                let start_span = rules[0].span();
+                let start = start_span.start();
                 let end = rules.last().unwrap().span().end();
-                SourceSpan::from(start..end)
+                SourceSpan::new(start_span.source_id(), Range::new(start, end))
             }
             Self::Repeated { rule, .. } => rule.span(),
             Self::Tree(ref tree) => {
-                let leftmost_start = match tree.leftmost() {
-                    Left(left) => left.span().start(),
-                    Right(left) => left.span().start(),
+                let leftmost_start_span = match tree.leftmost() {
+                    Left(left) => left.span(),
+                    Right(left) => left.span(),
                 };
                 let rightmost_end = match tree.rightmost() {
                     Left(right) => right.span().end(),
                     Right(right) => right.span().end(),
                 };
-                SourceSpan::from(leftmost_start..rightmost_end)
+                SourceSpan::new(
+                    leftmost_start_span.source_id(),
+                    Range::new(leftmost_start_span.start(), rightmost_end),
+                )
             }
         }
     }

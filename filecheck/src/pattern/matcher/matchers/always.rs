@@ -34,7 +34,7 @@ impl Matcher for AlwaysMatch {
         C: Context<'input, 'context> + ?Sized,
     {
         Ok(MatchResult::ok(MatchInfo::new(
-            input.start()..input.start(),
+            SourceSpan::at(input.source_id(), input.start() as u32),
             self.span,
         )))
     }

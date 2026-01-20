@@ -124,7 +124,7 @@ pub struct CheckType {
 }
 impl Default for CheckType {
     fn default() -> Self {
-        Self::new(SourceSpan::from(0..0), Default::default())
+        Self::new(SourceSpan::UNKNOWN, Default::default())
     }
 }
 impl Spanned for CheckType {

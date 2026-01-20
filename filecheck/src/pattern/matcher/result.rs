@@ -153,17 +153,13 @@ pub struct MatchInfo<'input> {
     pub captures: Vec<CaptureInfo<'input>>,
 }
 impl<'input> MatchInfo<'input> {
-    pub fn new(span: impl Into<SourceSpan>, pattern_span: SourceSpan) -> Self {
+    pub fn new(span: SourceSpan, pattern_span: SourceSpan) -> Self {
         Self::new_with_pattern(span, pattern_span, 0)
     }
 
-    pub fn new_with_pattern(
-        span: impl Into<SourceSpan>,
-        pattern_span: SourceSpan,
-        pattern_id: usize,
-    ) -> Self {
+    pub fn new_with_pattern(span: SourceSpan, pattern_span: SourceSpan, pattern_id: usize) -> Self {
         Self {
-            span: span.into(),
+            span,
             pattern_span,
             pattern_id,
             captures: Vec::new(),
@@ -181,8 +177,7 @@ impl<'input> MatchInfo<'input> {
     }
 
     pub fn matched_range(&self) -> Range<usize> {
-        let start = self.span.offset();
-        Range::new(start, start + self.span.len())
+        self.span.into_slice_index()
     }
 
     /// Extract the value of a variable binding that was captured by this match

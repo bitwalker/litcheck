@@ -40,8 +40,8 @@ where
                 info: Some(info),
             } if ty.is_ok() => {
                 let cursor = context.cursor_mut();
-                assert!(info.span.offset() < cursor.end_of_line());
-                cursor.set_start(info.span.end());
+                assert!(info.span.start().to_usize() < cursor.end_of_line());
+                cursor.set_start(info.span.end().to_usize());
                 Ok(MatchResult::new(ty, Some(info)).into())
             }
             result @ MatchResult { info: Some(_), .. } => Ok(result.into()),
@@ -74,31 +74,37 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pattern::matcher::*;
-    use crate::rules::CheckPlain;
+    use crate::{pattern::matcher::*, rules::CheckPlain, source_file};
 
     #[test]
     fn check_same_test() -> DiagResult<()> {
         let mut context = TestContext::new();
-        context
-            .with_checks(
-                "
+        let match_file = source_file!(
+            context.config,
+            "
 CHECK: tail call
 CHECK-SAME: @llvm.atomic.load.add.i64
-",
-            )
-            .with_input(
-                "
+"
+        );
+        let input_file = source_file!(
+            context.config,
+            "
 define void @inc4(i64* %p) {
 entry:
         %0 = tail call i64 @llvm.atomic.load.add.i64.p0i64(i64* %p, i64 1)
         ret void
 }
-",
-            );
+"
+        );
+        context
+            .with_checks(match_file.clone())
+            .with_input(input_file);
         let mut mctx = context.match_context();
         let pattern = SubstringMatcher::new(
-            Span::new(SourceSpan::from(6..14), Cow::Borrowed("tail call")),
+            Span::new(
+                SourceSpan::from_range_unchecked(match_file.id(), 6..14),
+                Cow::Borrowed("tail call"),
+            ),
             mctx.config,
         )
         .expect("expected pattern to be valid");
@@ -110,7 +116,7 @@ entry:
 
         let pattern = SubstringMatcher::new(
             Span::new(
-                SourceSpan::from(26..50),
+                SourceSpan::from_range_unchecked(match_file.id(), 26..50),
                 Cow::Borrowed("@llvm.atomic.load.add.i64"),
             ),
             mctx.config,
@@ -121,7 +127,7 @@ entry:
             .apply(&mut mctx)
             .expect("expected non-fatal application of rule");
         let matched = TestResult::from_matches(matches, &mctx).into_result()?;
-        assert_eq!(matched[0].span.offset(), 64);
+        assert_eq!(matched[0].span.start().to_u32(), 64);
         assert_eq!(matched[0].span.len(), 25);
         let input = mctx.search();
         assert_eq!(

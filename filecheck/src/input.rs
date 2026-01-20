@@ -5,8 +5,11 @@ use litcheck::{
     text,
 };
 
+use crate::common::{SourceId, SourceSpan};
+
 #[derive(Debug, Copy, Clone)]
 pub struct Input<'a> {
+    source_id: SourceId,
     buffer: &'a [u8],
     span: Range<usize>,
     anchored: bool,
@@ -14,8 +17,9 @@ pub struct Input<'a> {
 }
 impl<'a> Input<'a> {
     #[inline]
-    pub fn new(buffer: &'a [u8], crlf: bool) -> Self {
+    pub fn new(source_id: SourceId, buffer: &'a [u8], crlf: bool) -> Self {
         Self {
+            source_id,
             buffer,
             span: Range::from(0..buffer.len()),
             anchored: false,
@@ -28,7 +32,7 @@ impl<'a> Input<'a> {
         self
     }
 
-    pub fn span<R: RangeBounds<usize>>(mut self, range: R) -> Self {
+    pub fn bounded<R: RangeBounds<usize>>(mut self, range: R) -> Self {
         let range = range::range_from_bounds(range, Range::new(0, self.buffer.len()))
             .expect("invalid range");
         self.span = range;
@@ -68,7 +72,7 @@ impl<'a> Input<'a> {
     /// Set the bounds of the search area to `range`
     ///
     /// The range is clamped to the buffer size
-    pub fn set_span(&mut self, range: Range<usize>) {
+    pub fn set_bounds(&mut self, range: Range<usize>) {
         let eof = self.buffer.len();
         self.span.start = core::cmp::min(range.start, eof);
         self.span.end = core::cmp::min(range.end, eof);
@@ -79,6 +83,17 @@ impl<'a> Input<'a> {
     /// Specifically, if the start position of the search is greater than the end
     pub fn is_empty(&self) -> bool {
         self.span.is_empty()
+    }
+
+    #[inline(always)]
+    pub const fn source_id(&self) -> SourceId {
+        self.source_id
+    }
+
+    /// Get a [SourceSpan] corresponding to the content of this input
+    pub fn span(&self) -> SourceSpan {
+        SourceSpan::try_from_range(self.source_id, self.span.start..self.span.end)
+            .expect("invalid span: underlying content is too large")
     }
 
     /// Returns the boundaries to which any searches of this input

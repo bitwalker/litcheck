@@ -19,6 +19,7 @@ pub struct CursorPosition {
 /// * A searchable [Input] can be started from a cursor
 #[derive(Debug, Clone)]
 pub struct Cursor<'a> {
+    pub source_id: SourceId,
     /// The input buffer being checked
     pub buffer: &'a [u8],
     /// The byte range of the current block.
@@ -35,10 +36,11 @@ pub struct Cursor<'a> {
     crlf: bool,
 }
 impl<'a> Cursor<'a> {
-    pub fn new(buffer: &'a [u8]) -> Self {
+    pub fn new(source_id: SourceId, buffer: &'a [u8]) -> Self {
         let newline = Newline::next(buffer);
         let eof = buffer.len();
         Self {
+            source_id,
             buffer,
             block: Range::new(0, eof),
             eol: newline.offset().try_into().expect("line too large"),
@@ -80,7 +82,8 @@ impl<'a> Cursor<'a> {
 
     /// Get the current range of this cursor as a [SourceSpan]
     pub fn span(&self) -> SourceSpan {
-        SourceSpan::from(self.block)
+        SourceSpan::try_from_range(self.source_id, self.block.start..self.block.end)
+            .expect("invalid source span: underlying content is too large")
     }
 
     /// Get the current range of this cursor
@@ -202,28 +205,29 @@ impl<'a> Cursor<'a> {
 
     /// Get an [Input] that can be used to search the entire underlying buffer
     pub fn search(&self) -> Input<'a> {
-        Input::new(self.buffer, self.is_crlf())
+        Input::new(self.source_id, self.buffer, self.is_crlf())
     }
 
     /// Get an [Input] that can be used to search from the current position to the
     /// end of the underlying buffer, ignoring the end bound of the cursor.
     pub fn search_to_eof(&self) -> Input<'a> {
-        Input::new(self.buffer, self.is_crlf()).span(self.block.start..)
+        Input::new(self.source_id, self.buffer, self.is_crlf()).bounded(self.block.start..)
     }
 
     /// Get an [Input] that can be used to search an arbitrary range of the underlying buffer
     pub fn search_range<R: RangeBounds<usize>>(&self, range: R) -> Input<'a> {
-        Input::new(self.buffer, self.is_crlf()).span(range)
+        Input::new(self.source_id, self.buffer, self.is_crlf()).bounded(range)
     }
 
     /// Get an [Input] that can be used to search the unvisited portion of the current block
     pub fn search_block(&self) -> Input<'a> {
-        Input::new(self.buffer, self.is_crlf()).span(self.block)
+        Input::new(self.source_id, self.buffer, self.is_crlf()).bounded(self.block)
     }
 
     /// Get an [Input] that can be used to search the unvisited portion of the current line
     pub fn search_line(&self) -> Input<'a> {
-        Input::new(self.buffer, self.is_crlf()).span(self.block.start..self.end_of_line())
+        Input::new(self.source_id, self.buffer, self.is_crlf())
+            .bounded(self.block.start..self.end_of_line())
     }
 
     /// Returns true if the current position is at end of input

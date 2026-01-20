@@ -21,7 +21,7 @@ pub enum Capture {
 impl Default for Capture {
     #[inline(always)]
     fn default() -> Self {
-        Self::Ignore(SourceSpan::from(0..0))
+        Self::Ignore(SourceSpan::UNKNOWN)
     }
 }
 impl Eq for Capture {}
@@ -130,7 +130,7 @@ impl<'a> RegexPattern<'a> {
 }
 impl<'a> AsRef<str> for RegexPattern<'a> {
     fn as_ref(&self) -> &str {
-        self.pattern.as_ref()
+        self.pattern.inner().as_ref()
     }
 }
 impl<'a> Spanned for RegexPattern<'a> {
@@ -174,8 +174,8 @@ impl<'a> Prefix<'a> {
     pub fn as_str(&self) -> Option<&str> {
         match self {
             Self::Empty(_) => Some(""),
-            Self::Literal(s) | Self::Substring(s) => Some(s.as_ref()),
-            Self::Regex(regex) => Some(regex.pattern.as_ref()),
+            Self::Literal(s) | Self::Substring(s) => Some(s.inner().as_ref()),
+            Self::Regex(regex) => Some(regex.pattern.inner().as_ref()),
             Self::Match(_) => None,
         }
     }
@@ -213,14 +213,22 @@ impl<'a> Ord for Prefix<'a> {
                     captures: ac,
                 }),
                 b,
-            ) if !ac.is_empty() => ap.as_ref().cmp(b.as_str().unwrap()).then(Ordering::Greater),
+            ) if !ac.is_empty() => ap
+                .inner()
+                .as_ref()
+                .cmp(b.as_str().unwrap())
+                .then(Ordering::Greater),
             (
                 a,
                 Self::Regex(RegexPattern {
                     pattern: bp,
                     captures: bc,
                 }),
-            ) if !bc.is_empty() => a.as_str().unwrap().cmp(bp.as_ref()).then(Ordering::Less),
+            ) if !bc.is_empty() => a
+                .as_str()
+                .unwrap()
+                .cmp(bp.inner().as_ref())
+                .then(Ordering::Less),
             (a, b) => a.as_str().unwrap().cmp(b.as_str().unwrap()),
         }
     }
@@ -429,7 +437,9 @@ impl<'a> CheckPattern<'a> {
             }
             Self::Match(ref mut compacted) => {
                 let span = compacted.span();
-                let mut pattern_span = span.range();
+                let source_id = span.source_id();
+                let mut pattern_start = span.start();
+                let mut pattern_end = span.end();
                 let mut parts = VecDeque::from(core::mem::take(&mut **compacted));
                 let mut pattern = String::new();
                 let mut captures = SmallVec::<[Capture; 1]>::new();
@@ -437,19 +447,19 @@ impl<'a> CheckPattern<'a> {
                 while let Some(mut part) = parts.pop_front() {
                     match part {
                         CheckPatternPart::Literal(part) if is_literal_mode => {
-                            pattern_span.end = part.end();
-                            pattern.push_str(part.as_ref());
+                            pattern_end = part.span().end();
+                            pattern.push_str(part.inner().as_ref());
                         }
                         CheckPatternPart::Literal(part) => {
-                            pattern_span.end = part.end();
-                            regex_syntax::escape_into(part.as_ref(), &mut pattern);
+                            pattern_end = part.span().end();
+                            regex_syntax::escape_into(part.inner().as_ref(), &mut pattern);
                         }
                         CheckPatternPart::Regex(RegexPattern {
                             pattern: part,
                             captures: ref mut part_captures,
                         }) => {
                             let (span, part) = part.into_parts();
-                            pattern_span.end = span.end();
+                            pattern_end = span.end();
                             captures.append(part_captures);
                             if is_literal_mode {
                                 is_literal_mode = false;
@@ -462,7 +472,7 @@ impl<'a> CheckPattern<'a> {
                             name,
                             span,
                         }) => {
-                            pattern_span.end = span.end();
+                            pattern_end = span.end();
                             let part = part.into_inner();
                             let group_name = interner.resolve(name.into_inner());
                             if is_literal_mode {
@@ -486,7 +496,7 @@ impl<'a> CheckPattern<'a> {
                             format,
                             ..
                         }) => {
-                            pattern_span.end = span.end();
+                            pattern_end = span.end();
                             let format_pattern = format.pattern_nocapture();
                             if is_literal_mode {
                                 is_literal_mode = false;
@@ -501,7 +511,7 @@ impl<'a> CheckPattern<'a> {
                             format,
                             ..
                         }) => {
-                            pattern_span.end = span.end();
+                            pattern_end = span.end();
                             let group_name = interner.resolve(name.into_inner());
                             let format_pattern = format.pattern(Some(group_name));
                             if is_literal_mode {
@@ -521,21 +531,27 @@ impl<'a> CheckPattern<'a> {
                                 is_literal_mode = true;
                                 pattern.clear();
                                 captures.clear();
-                                pattern_span.end = span.end();
-                                pattern_span.start = pattern_span.end;
+                                pattern_end = span.end();
+                                pattern_start = pattern_end;
                                 continue;
                             }
 
                             if is_literal_mode {
                                 compacted.push(CheckPatternPart::Literal(Span::new(
-                                    pattern_span,
+                                    SourceSpan::new(
+                                        source_id,
+                                        Range::new(pattern_start, pattern_end),
+                                    ),
                                     Cow::Owned(core::mem::take(&mut pattern)),
                                 )));
                             } else {
                                 let captures = core::mem::take(&mut captures);
                                 compacted.push(CheckPatternPart::Regex(RegexPattern {
                                     pattern: Span::new(
-                                        pattern_span,
+                                        SourceSpan::new(
+                                            source_id,
+                                            Range::new(pattern_start, pattern_end),
+                                        ),
                                         Cow::Owned(core::mem::take(&mut pattern)),
                                     ),
                                     captures,
@@ -544,8 +560,8 @@ impl<'a> CheckPattern<'a> {
                             }
 
                             compacted.push(part);
-                            pattern_span.end = span.end();
-                            pattern_span.start = pattern_span.end;
+                            pattern_end = span.end();
+                            pattern_start = pattern_end;
                         }
                     }
                 }
@@ -553,13 +569,13 @@ impl<'a> CheckPattern<'a> {
                 if compacted.is_empty() {
                     let compacted = if is_literal_mode {
                         CheckPattern::Literal(Span::new(
-                            pattern_span,
+                            SourceSpan::new(source_id, Range::new(pattern_start, pattern_end)),
                             Cow::Owned(core::mem::take(&mut pattern)),
                         ))
                     } else {
                         CheckPattern::Regex(RegexPattern {
                             pattern: Span::new(
-                                pattern_span,
+                                SourceSpan::new(source_id, Range::new(pattern_start, pattern_end)),
                                 Cow::Owned(core::mem::take(&mut pattern)),
                             ),
                             captures,
@@ -572,13 +588,13 @@ impl<'a> CheckPattern<'a> {
                 if !pattern.is_empty() {
                     if is_literal_mode {
                         compacted.push(CheckPatternPart::Literal(Span::new(
-                            pattern_span,
+                            SourceSpan::new(source_id, Range::new(pattern_start, pattern_end)),
                             Cow::Owned(core::mem::take(&mut pattern)),
                         )));
                     } else {
                         compacted.push(CheckPatternPart::Regex(RegexPattern {
                             pattern: Span::new(
-                                pattern_span,
+                                SourceSpan::new(source_id, Range::new(pattern_start, pattern_end)),
                                 Cow::Owned(core::mem::take(&mut pattern)),
                             ),
                             captures,
@@ -623,7 +639,7 @@ impl<'a> Spanned for CheckPattern<'a> {
 impl<'a> From<Vec<CheckPatternPart<'a>>> for CheckPattern<'a> {
     fn from(mut parts: Vec<CheckPatternPart<'a>>) -> Self {
         match parts.len() {
-            0 => CheckPattern::Empty(SourceSpan::from(0..0)),
+            0 => CheckPattern::Empty(SourceSpan::UNKNOWN),
             1 => match parts.pop().unwrap() {
                 CheckPatternPart::Literal(lit) => Self::Literal(lit),
                 CheckPatternPart::Regex(re) => Self::Regex(re),
@@ -632,10 +648,13 @@ impl<'a> From<Vec<CheckPatternPart<'a>>> for CheckPattern<'a> {
                 }
             },
             _ => {
-                let start = parts.first().unwrap().span().offset();
+                let start = parts.first().unwrap().span().start();
                 let last_span = parts.last().unwrap().span();
-                let end = last_span.offset() + last_span.len();
-                Self::Match(Span::new(SourceSpan::from(start..end), parts))
+                let end = last_span.end();
+                Self::Match(Span::new(
+                    SourceSpan::new(last_span.source_id(), Range::new(start, end)),
+                    parts,
+                ))
             }
         }
     }
@@ -913,7 +932,7 @@ impl<'a> Ord for Match<'a> {
             ) => format
                 .pattern(None)
                 .as_ref()
-                .cmp(pattern.as_ref())
+                .cmp(pattern.inner().as_ref())
                 .then_with(|| capture.cmp(&Some(*name)))
                 .then(Ordering::Greater),
             (Self::Substitution { .. }, _) => Ordering::Less,

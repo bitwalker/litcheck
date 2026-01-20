@@ -5,10 +5,10 @@ mod parser;
 #[cfg(test)]
 mod tests;
 
-use std::borrow::Cow;
+use std::{borrow::Cow, sync::Arc};
 
 use litcheck::diagnostics::{
-    DiagResult, Diagnostic, FileName, NamedSourceFile, SourceSpan, Span, Spanned,
+    DiagResult, Diagnostic, FileName, SourceFile, SourceSpan, Span, Spanned,
 };
 
 use self::directives::*;
@@ -122,15 +122,11 @@ pub struct TestScript {
     pub allowed_retries: Option<Span<usize>>,
 }
 impl TestScript {
-    #[cfg(test)]
-    pub fn parse_str(input: &'static str) -> DiagResult<Self> {
-        let source = litcheck::diagnostics::Source::new("-", input);
-        Self::parse_source(&source).map_err(|err| err.with_source_code(source))
-    }
-
-    pub fn parse_source<S: NamedSourceFile + ?Sized>(source: &S) -> DiagResult<Self> {
-        let parser = TestScriptParser::new(source);
-        parser.parse().map_err(litcheck::diagnostics::Report::new)
+    pub fn parse(source: Arc<SourceFile>) -> DiagResult<Self> {
+        let parser = TestScriptParser::new(&source);
+        parser
+            .parse()
+            .map_err(|err| litcheck::diagnostics::Report::from(err).with_source_code(source))
     }
 
     pub fn apply_substitutions(

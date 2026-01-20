@@ -1,7 +1,7 @@
 use std::process::ExitCode;
 
 use clap::Parser;
-use filecheck::Test;
+use filecheck::{Config, Test};
 use litcheck::{
     diagnostics::{DiagResult, IntoDiagnostic},
     Input,
@@ -27,7 +27,7 @@ pub struct FileCheck {
     #[arg(long, value_name = "PATH", default_value = "-")]
     pub input_file: Input,
     #[command(flatten)]
-    pub config: filecheck::Config,
+    pub options: filecheck::Options,
 }
 impl Command for FileCheck {
     fn is_help_requested(&self) -> bool {
@@ -35,16 +35,26 @@ impl Command for FileCheck {
     }
 
     fn run(self) -> DiagResult<ExitCode> {
-        let mut config = self.config;
-        config.comment_prefixes.sort();
-        config.comment_prefixes.dedup();
-        config.check_prefixes.sort();
-        config.check_prefixes.dedup();
+        let mut options = self.options;
+        options.comment_prefixes.sort();
+        options.comment_prefixes.dedup();
+        options.check_prefixes.sort();
+        options.check_prefixes.dedup();
+        options.validate()?;
 
-        config.validate()?;
+        let config = Config {
+            options,
+            ..Default::default()
+        };
 
-        let match_file = self.match_file.into_source(true).into_diagnostic()?;
-        let input_file = self.input_file.into_source(true).into_diagnostic()?;
+        let match_file = self
+            .match_file
+            .into_source(true, config.source_manager())
+            .into_diagnostic()?;
+        let input_file = self
+            .input_file
+            .into_source(true, config.source_manager())
+            .into_diagnostic()?;
         let mut test = Test::new(match_file, &config);
         test.verify(input_file).map(|_| ExitCode::SUCCESS)
     }

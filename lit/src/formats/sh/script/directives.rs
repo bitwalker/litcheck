@@ -1,6 +1,6 @@
 use std::{any::Any, fmt, str::FromStr};
 
-use litcheck::diagnostics::{Diagnostic, SourceSpan, Span, Spanned};
+use litcheck::diagnostics::{Diagnostic, SourceId, SourceSpan, Span, Spanned};
 use regex::Regex;
 
 use crate::config::ScopedSubstitutionSet;
@@ -16,13 +16,14 @@ pub struct RawDirective<'a> {
     pub content: &'a str,
 }
 impl<'a> RawDirective<'a> {
-    pub fn parse(input: Span<&'a str>) -> Option<Span<Self>> {
-        let start = input.span().offset();
+    pub fn parse(source_id: SourceId, input: Span<&'a str>) -> Option<Span<Self>> {
+        let start = input.span().start().to_usize();
         let captures = KEYWORD_RE.with(|re| re.captures(input.into_inner()))?;
         let range = captures.get(0).unwrap().range();
         let (_, [keyword, content]) = captures.extract();
         let kind = keyword.parse::<DirectiveKind>().unwrap();
-        let span = SourceSpan::from((range.start + start)..(range.end + start));
+        let span =
+            SourceSpan::from_range_unchecked(source_id, (range.start + start)..(range.end + start));
         Some(Span::new(span, Self { kind, content }))
     }
 }

@@ -23,6 +23,9 @@ impl Match for aho_corasick::Match {
 }
 
 impl<'input> Input for aho_corasick::Input<'input> {
+    fn source_id(&self) -> litcheck::diagnostics::SourceId {
+        litcheck::diagnostics::SourceId::UNKNOWN
+    }
     fn buffer(&self) -> &[u8] {
         self.haystack()
     }

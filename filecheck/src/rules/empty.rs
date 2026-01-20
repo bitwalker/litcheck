@@ -31,7 +31,8 @@ impl Rule for CheckEmpty {
             .unwrap_or_else(|| cursor.end_of_file());
         let next_line = next_line_start..next_eol;
         if cursor.at_end_of_line() && next_line.is_empty() {
-            let span = SourceSpan::from(next_line_start..next_eol);
+            let span =
+                SourceSpan::from_range_unchecked(cursor.source_id, next_line_start..next_eol);
             // Move to the end of the empty line
             cursor.set_start(next_eol);
             Ok(MatchResult {
@@ -55,20 +56,27 @@ impl Rule for CheckEmpty {
 
 #[cfg(test)]
 mod tests {
+    use crate::source_file;
+
     use super::*;
 
     #[test]
     fn check_empty_test() -> DiagResult<()> {
         let mut context = TestContext::new();
-        context.with_checks("CHECK-EMPTY:").with_input(
+        let match_file = source_file!(context.config, "CHECK-EMPTY:");
+        let input_file = source_file!(
+            context.config,
             "
 abc
 
 
-def",
+def"
         );
+        context
+            .with_checks(match_file.clone())
+            .with_input(input_file);
         let mut mctx = context.match_context();
-        let rule = CheckEmpty::new(SourceSpan::from(0..12));
+        let rule = CheckEmpty::new(match_file.source_span());
         let matches = rule
             .apply(&mut mctx)
             .expect("expected non-fatal application of rule");
@@ -90,7 +98,7 @@ def",
         assert_eq!(test_result.num_matched(), 1);
 
         let matched = test_result.into_result()?;
-        assert_eq!(matched[0].span.offset(), 6);
+        assert_eq!(matched[0].span.start().to_u32(), 6);
         let buffer = mctx.cursor().buffer();
         assert_eq!(buffer[5], b'\n');
         assert_eq!(buffer[6], b'\n');

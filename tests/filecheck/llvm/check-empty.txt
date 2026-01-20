@@ -17,7 +17,6 @@
 ; FOO: foo
 ; NOFOO-NOT: foo
 
-; EMPTY-ERR: FileCheck error: '<stdin>' is empty.
-; EMPTY-ERR-NEXT: FileCheck command line: {{.*}}{{F|f}}ile{{C|c}}heck{{.*}}-check-prefix={{.*}}FOO {{.*}}check-empty.txt
-; NO-EMPTY-ERR-NOT: FileCheck error: '<stdin>' is empty.
-; NOT-FOUND: error: FOO: expected string not found in input
+; EMPTY-ERR: the input file was rejected because it is empty
+; NO-EMPTY-ERR-NOT: the input file was rejected because it is empty
+; NOT-FOUND: pattern at this location was not matched

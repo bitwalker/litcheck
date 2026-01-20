@@ -5,6 +5,7 @@ use crate::common::*;
 use super::AhoCorasickSearcher;
 
 pub struct SubstringSetSearcher<'a, 'patterns, 'input> {
+    source_id: SourceId,
     buffer: &'input [u8],
     crlf: bool,
     /// The set of raw input patterns from which
@@ -20,6 +21,7 @@ impl<'a, 'patterns, 'input> SubstringSetSearcher<'a, 'patterns, 'input> {
         input: Input<'input>,
         patterns: Cow<'patterns, [Span<Cow<'a, str>>]>,
     ) -> DiagResult<Self> {
+        let source_id = input.source_id();
         let buffer = input.buffer();
         let crlf = input.is_crlf();
         let mut builder = AhoCorasickBuilder::new();
@@ -46,6 +48,7 @@ impl<'a, 'patterns, 'input> SubstringSetSearcher<'a, 'patterns, 'input> {
         let searcher = AhoCorasickSearcher::new(input.into());
 
         Ok(Self {
+            source_id,
             buffer,
             crlf,
             patterns,
@@ -56,8 +59,8 @@ impl<'a, 'patterns, 'input> SubstringSetSearcher<'a, 'patterns, 'input> {
 
     pub fn input(&self) -> Input<'input> {
         let input = self.searcher.input();
-        Input::new(self.buffer, self.crlf)
-            .span(input.get_range())
+        Input::new(self.source_id, self.buffer, self.crlf)
+            .bounded(input.get_range())
             .anchored(input.get_anchored().is_anchored())
     }
 
@@ -82,9 +85,19 @@ impl<'a, 'patterns, 'input> fmt::Debug for SubstringSetSearcher<'a, 'patterns, '
 
 impl<'a, 'patterns, 'input> Spanned for SubstringSetSearcher<'a, 'patterns, 'input> {
     fn span(&self) -> SourceSpan {
-        let start = self.patterns.iter().map(|p| p.start()).min().unwrap();
-        let end = self.patterns.iter().map(|p| p.end()).max().unwrap();
-        SourceSpan::from(start..end)
+        let start = self
+            .patterns
+            .iter()
+            .map(|p| p.span())
+            .min_by(|a, b| a.start().cmp(&b.start()))
+            .unwrap();
+        let end = self
+            .patterns
+            .iter()
+            .map(|p| p.span())
+            .max_by(|a, b| a.end().cmp(&b.end()))
+            .unwrap();
+        SourceSpan::new(start.source_id(), Range::new(start.start(), end.end()))
     }
 }
 impl<'a, 'patterns, 'input> PatternSearcher<'input>
@@ -120,7 +133,7 @@ impl<'a, 'patterns, 'input> PatternSearcher<'input>
             let pattern_id = matched.pattern().as_usize();
             let pattern_span = self.patterns[pattern_id].span();
             Ok(MatchResult::ok(MatchInfo::new_with_pattern(
-                matched.range(),
+                SourceSpan::try_from_range(self.input().source_id(), matched.range()).unwrap(),
                 pattern_span,
                 pattern_id,
             )))

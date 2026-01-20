@@ -70,10 +70,10 @@ impl<'a, 'input, S: PatternSearcher<'input>> StaticPatternSetVisitor<'a, S> {
                     }
 
                     // Ignore this match if we have already matched a pattern to it at this location
-                    let range = info.span.range();
+                    let range = info.span.into_slice_index();
                     if matches
                         .iter()
-                        .map(|mr| mr.info.as_ref().unwrap().span.range())
+                        .map(|mr| mr.info.as_ref().unwrap().span.into_slice_index())
                         .any(|span| span.contains(&range.start) || span.contains(&range.end))
                     {
                         continue;
@@ -93,7 +93,7 @@ impl<'a, 'input, S: PatternSearcher<'input>> StaticPatternSetVisitor<'a, S> {
                                     }
                                     VariableName::Pseudo(name) => {
                                         let diag = Diag::new("unsupported variable binding")
-                                            .with_label(Label::new(name.range(), "occurs here"))
+                                            .with_label(Label::new(name.span(), "occurs here"))
                                             .with_help(
                                                 "pseudo-variables like LINE cannot be bound",
                                             );

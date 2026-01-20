@@ -43,7 +43,7 @@ pub enum Lit {
     /// Run all discovered test suites
     ///
     /// If no command is given, this is the default
-    Run(lit::Config),
+    Run(lit::Options),
 
     /// List the discovered test suites and exit
     #[command(name = "show-suites")]
@@ -84,8 +84,11 @@ impl Command for Lit {
         let show_suites;
         let show_tests;
         match self {
-            Self::Run(cfg) => {
-                config = Arc::new(cfg);
+            Self::Run(options) => {
+                config = Arc::new(lit::Config {
+                    options,
+                    ..Default::default()
+                });
                 show_suites = false;
                 show_tests = false;
             }
@@ -95,8 +98,8 @@ impl Command for Lit {
                 filter_out,
             } => {
                 let mut cfg = Box::new(lit::Config::new(tests));
-                cfg.filter = filter;
-                cfg.filter_out = filter_out;
+                cfg.options.filter = filter;
+                cfg.options.filter_out = filter_out;
                 config = Arc::from(cfg);
                 show_suites = true;
                 show_tests = false;
@@ -107,8 +110,8 @@ impl Command for Lit {
                 filter_out,
             } => {
                 let mut cfg = Box::new(lit::Config::new(tests));
-                cfg.filter = filter;
-                cfg.filter_out = filter_out;
+                cfg.options.filter = filter;
+                cfg.options.filter_out = filter_out;
                 config = Arc::from(cfg);
                 show_suites = false;
                 show_tests = true;
@@ -207,7 +210,7 @@ where
 {
     let num_tests = registry.num_tests();
     let num_workers = core::cmp::max(
-        core::cmp::min(config.workers.unwrap_or(usize::MAX), num_tests),
+        core::cmp::min(config.options.workers.unwrap_or(usize::MAX), num_tests),
         0,
     );
 
@@ -230,9 +233,9 @@ where
     let runner = TestRunner {
         sender,
         progress,
-        show_all: config.all,
-        show_non_error: !config.quiet,
-        show_output: config.all || config.verbose,
+        show_all: config.options.all,
+        show_non_error: !config.options.quiet,
+        show_output: config.options.all || config.options.verbose,
     };
 
     let results = Arc::new(TestResultManager::new(
@@ -252,7 +255,7 @@ where
     if let Err(ref err) = result {
         println!("{err}: skipping remaining tests");
         println!();
-    } else if !config.quiet {
+    } else if !config.options.quiet {
         println!();
     }
 
@@ -402,7 +405,7 @@ impl TestRunner {
 }
 
 fn print_results(results_by_status: &BTreeMap<TestStatus, Vec<TestReport>>, config: &Config) {
-    let show_non_error = !config.quiet;
+    let show_non_error = !config.options.quiet;
 
     // Print tests by status (grouped)
     let prefix = "*".repeat(20);

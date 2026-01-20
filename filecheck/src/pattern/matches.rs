@@ -93,9 +93,10 @@ impl<'input> Matches<'input> {
             }, .., MatchResult {
                 info: Some(info2),
                 ty: ty2,
-            }] if ty.is_ok() && ty2.is_ok() => {
-                Some(Range::new(info.span.start(), info2.span.end()))
-            }
+            }] if ty.is_ok() && ty2.is_ok() => Some(Range::new(
+                info.span.start().to_usize(),
+                info2.span.end().to_usize(),
+            )),
             matches => matches
                 .iter()
                 .find_map(|mr| mr.matched_range())

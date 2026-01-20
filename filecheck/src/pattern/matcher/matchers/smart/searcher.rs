@@ -8,7 +8,10 @@ use crate::{
     common::*,
     errors::{InvalidNumericCastError, UndefinedVariableError},
     expr::ValueType,
-    pattern::matcher::{regex, SubstringMatcher},
+    pattern::{
+        matcher::{regex, SubstringMatcher},
+        search::Input as _,
+    },
 };
 
 use super::{CaptureGroup, MatchOp, Operand};
@@ -81,7 +84,7 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
             Err(err) => return ControlFlow::Break(Err(err)),
         };
         if let Some(info) = result.info.as_ref() {
-            self.part_matched(info.span.range());
+            self.part_matched(info.span.into_slice_index());
             self.cursor.set_anchored(true);
 
             let result = match self.match_parts(rest, &mut guard) {
@@ -169,7 +172,7 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
                 part => {
                     let result = self.match_part(part, context)?;
                     if let Some(matched) = result.info.as_ref() {
-                        self.part_matched(..matched.span.end());
+                        self.part_matched(..matched.span.end().to_usize());
                     } else {
                         return Ok(result);
                     }
@@ -188,7 +191,10 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
         self.match_pattern_id = PatternID::ZERO;
         self.captures.set_pattern(Some(PatternID::ZERO));
         Ok(MatchResult::ok(MatchInfo::new(
-            self.match_start..self.match_end,
+            SourceSpan::from_range_unchecked(
+                self.cursor.source_id(),
+                self.match_start..self.match_end,
+            ),
             self.span,
         )))
     }
@@ -241,8 +247,8 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
                     self.captures,
                     self.match_pattern_id,
                     0,
-                    info.span.start(),
-                    info.span.end(),
+                    info.span.start().to_usize(),
+                    info.span.end().to_usize(),
                 );
                 Ok(MatchResult::new(ty, Some(info)))
             }
@@ -265,7 +271,10 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
                 range.start,
                 range.end,
             );
-            Ok(MatchResult::ok(MatchInfo::new(range, span)))
+            Ok(MatchResult::ok(MatchInfo::new(
+                SourceSpan::from_range_unchecked(self.cursor.source_id(), range),
+                span,
+            )))
         } else {
             Ok(MatchResult::failed(
                 CheckFailedError::MatchNoneButExpected {
@@ -308,7 +317,10 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
                         Capture::Ignore(_) => continue,
                         capture => {
                             let captured_info = CaptureInfo {
-                                span: capture_span.range().into(),
+                                span: SourceSpan::from_range_unchecked(
+                                    input.source_id(),
+                                    capture_span.range(),
+                                ),
                                 index: capture_group.group_id,
                                 pattern_span,
                                 value: Value::Str(Cow::Borrowed(content)),
@@ -327,7 +339,11 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
                 }
             }
             Ok(MatchResult::ok(
-                MatchInfo::new(range, pattern_span).with_captures(captured),
+                MatchInfo::new(
+                    SourceSpan::from_range_unchecked(input.source_id(), range),
+                    pattern_span,
+                )
+                .with_captures(captured),
             ))
         } else {
             Ok(MatchResult::failed(
@@ -370,13 +386,14 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
         let pattern = Regex::new(&source).expect("syntax error in numeric regex");
 
         let input = self.cursor.into();
+        let input_source_id = self.cursor.source_id();
         if let Some(capture_group) = capture_group {
             let mut captures = pattern.create_captures();
             pattern.search_captures(&input, &mut captures);
             if let Some(matched) = captures.get_match() {
                 let range = Range::from(matched.range());
                 let pattern_span = span;
-                let span = SourceSpan::from(range);
+                let span = SourceSpan::from_range_unchecked(input_source_id, matched.range());
                 let raw = self.cursor.as_str(matched.range());
                 match Number::parse_with_format(Span::new(span, raw), format) {
                     Ok(parsed) => {
@@ -431,7 +448,10 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
                 range.end,
             );
             // Record the overall match
-            Ok(MatchResult::ok(MatchInfo::new(range, span)))
+            Ok(MatchResult::ok(MatchInfo::new(
+                SourceSpan::from_range_unchecked(input_source_id, range),
+                span,
+            )))
         } else {
             Ok(MatchResult::failed(
                 CheckFailedError::MatchNoneButExpected {
@@ -504,7 +524,7 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
             .syntax(
                 regex_automata::util::syntax::Config::new()
                     .multi_line(true)
-                    .case_insensitive(context.config().ignore_case),
+                    .case_insensitive(context.config().options.ignore_case),
             )
             .build(&pattern)
             .map_err(|error| regex::build_error_to_diagnostic(error, 1, |_| span))?;
@@ -551,7 +571,7 @@ fn evaluate_expr<'input>(
                 }
                 VariableName::Pseudo(ref name) => match context.env().resolve(**name) {
                     "LINE" => {
-                        let line = context.pseudo_line_for_offset(name.start());
+                        let line = context.pseudo_line_for_offset(name.span().start().to_usize());
                         Left(Number {
                             span: var_span,
                             format: Default::default(),

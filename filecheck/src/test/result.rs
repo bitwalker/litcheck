@@ -83,7 +83,7 @@ impl TestResult {
     }
 
     pub fn last_match_end(&self) -> Option<usize> {
-        self.matches.iter().map(|mi| mi.span.end()).max()
+        self.matches.iter().map(|mi| mi.span.end().to_usize()).max()
     }
 
     pub fn into_result(mut self) -> Result<Vec<MatchInfo<'static>>, TestFailed> {

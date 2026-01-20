@@ -62,7 +62,7 @@ where
                 ty,
                 info: Some(ref info),
             } if ty.is_ok() => {
-                context.cursor_mut().set_start(info.span.end());
+                context.cursor_mut().set_start(info.span.end().to_usize());
             }
             _ => (),
         }
@@ -73,31 +73,37 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pattern::matcher::*;
-    use crate::rules::CheckPlain;
+    use crate::{pattern::matcher::*, rules::CheckPlain, source_file};
 
     #[test]
     fn check_next_test() -> DiagResult<()> {
         let mut context = TestContext::new();
-        context
-            .with_checks(
-                "
+        let match_file = source_file!(
+            context.config,
+            "
 CHECK: @inc4
 CHECK-NEXT: entry:
-",
-            )
-            .with_input(
-                "
+"
+        );
+        let input_file = source_file!(
+            context.config,
+            "
 define void @inc4(i64* %p) {
 entry:
-        %0 = tail call i64 @llvm.atomic.load.add.i64.p0i64(i64* %p, i64 1)
-        ret void
+    %0 = tail call i64 @llvm.atomic.load.add.i64.p0i64(i64* %p, i64 1)
+    ret void
 }
-",
-            );
+"
+        );
+        context
+            .with_checks(match_file.clone())
+            .with_input(input_file);
         let mut mctx = context.match_context();
         let pattern = SubstringMatcher::new(
-            Span::new(SourceSpan::from(8..12), Cow::Borrowed("@inc4")),
+            Span::new(
+                SourceSpan::from_range_unchecked(match_file.id(), 8..12),
+                Cow::Borrowed("@inc4"),
+            ),
             mctx.config,
         )
         .expect("expected pattern to be valid");
@@ -108,7 +114,10 @@ entry:
         TestResult::from_matches(matches, &mctx).into_result()?;
 
         let pattern = SubstringMatcher::new(
-            Span::new(SourceSpan::from(22..30), Cow::Borrowed("entry:")),
+            Span::new(
+                SourceSpan::from_range_unchecked(match_file.id(), 22..30),
+                Cow::Borrowed("entry:"),
+            ),
             mctx.config,
         )
         .expect("expected pattern to be valid");
@@ -118,7 +127,7 @@ entry:
             .expect("expected non-fatal application of rule");
         let matched = TestResult::from_matches(matches, &mctx).into_result()?;
         assert_eq!(matched.len(), 1);
-        assert_eq!(matched[0].span.offset(), 30);
+        assert_eq!(matched[0].span.start().to_u32(), 30);
         assert_eq!(matched[0].span.len(), 6);
         let input = mctx.search();
         assert_eq!(input.as_str(matched[0].matched_range()), "entry:");
@@ -130,25 +139,27 @@ entry:
     #[test]
     fn check_next_multiple_times_test() -> DiagResult<()> {
         let mut context = TestContext::new();
-        context
-            .with_checks(
-                "
+        let match_file = source_file!(
+            context.config,
+            "
 CHECK: @inc4
 CHECK-NEXT: entry:
 CHECK-NEXT:         %0 = tail call
 CHECK-NEXT:         ret void
 CHECK-NEXT: }
-",
-            )
-            .with_input(
-                "
+"
+        );
+        let input_file = source_file!(
+            context.config,
+            "
 define void @inc4(i64* %p) {
 entry:
-        %0 = tail call i64 @llvm.atomic.load.add.i64.p0i64(i64* %p, i64 1)
-        ret void
+    %0 = tail call i64 @llvm.atomic.load.add.i64.p0i64(i64* %p, i64 1)
+    ret void
 }
-",
-            );
+"
+        );
+        context.with_checks(match_file).with_input(input_file);
 
         context.check()?;
 
@@ -158,17 +169,17 @@ entry:
     #[test]
     fn check_next_real() -> DiagResult<()> {
         let mut context = TestContext::new();
-        context
-            .with_checks(
-                "
+        let match_file = source_file!(
+            context.config,
+            "
 ;; RUN: midenc compile --stdout --emit=hir $s | filecheck %s
 (module
-    (func $main (local i32)
-        i32.const 1
-        local.set 0
-        local.get 0
-        drop
-    )
+(func $main (local i32)
+    i32.const 1
+    local.set 0
+    local.get 0
+    drop
+)
 )
 
 ;; CHECK: (module #locals
@@ -183,24 +194,26 @@ entry:
 ;; CHECK-NEXT:             (ret))
 ;; CHECK-NEXT:     )
 ;; CHECK-NEXT: )
-",
-            )
-            .with_input(
-                "
+"
+        );
+        let input_file = source_file!(
+            context.config,
+            "
 (module #locals
-    ;; Functions
-    (func (export #main)
-        (block 0
-            (let (v0 i32) (const.i32 0))
-            (let (v1 i32) (const.i32 1))
-            (br (block 1)))
+;; Functions
+(func (export #main)
+    (block 0
+        (let (v0 i32) (const.i32 0))
+        (let (v1 i32) (const.i32 1))
+        (br (block 1)))
 
-        (block 1
-            (ret))
-    )
+    (block 1
+        (ret))
 )
-",
-            );
+)
+"
+        );
+        context.with_checks(match_file).with_input(input_file);
 
         context.check()?;
 

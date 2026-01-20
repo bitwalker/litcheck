@@ -6,7 +6,7 @@ RUN: echo 'CHECK: foo COM: bar' > %t.chk
 RUN: %ProtectFileCheckOutput not FileCheck %t.chk < %t.in 2>&1 | FileCheck %s
 
 CHECK-LABEL: × no matches were found for expected pattern
-CHECK-NEXT:   ╭────
+CHECK-NEXT:   ╭─
 CHECK-NEXT: 1 │ CHECK: foo COM: bar
 CHECK-NEXT:   ·        ──────┬─────
 CHECK-NEXT:   ·              ╰── pattern at this location was not matched

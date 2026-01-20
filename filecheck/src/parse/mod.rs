@@ -18,7 +18,6 @@ pub enum ParserError {
     #[diagnostic(transparent)]
     Lexer(#[from] LexerError),
     #[error(transparent)]
-    #[diagnostic(transparent)]
     Expr(#[from] crate::expr::ExprError),
     #[error("invalid token")]
     #[diagnostic()]
@@ -60,6 +59,12 @@ pub enum ParserError {
         #[label("expected a non-empty pattern")]
         span: SourceSpan,
     },
+    #[error("invalid pattern")]
+    #[diagnostic(help("CHECK-EMPTY must be immediately followed by a newline"))]
+    ExpectedEmptyPattern {
+        #[label("found non-empty pattern for CHECK-EMPTY check")]
+        span: SourceSpan,
+    },
     #[error("invalid check modifier")]
     #[diagnostic()]
     InvalidCheckModifier {
@@ -92,5 +97,5 @@ pub trait Parser<'parser> {
 
     fn parse<'a: 'parser, S>(&mut self, code: &'a S) -> ParseResult<Self::Value<'a>>
     where
-        S: SourceFile + ?Sized + 'a;
+        S: ?Sized + AsRef<str> + 'a;
 }

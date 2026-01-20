@@ -463,9 +463,7 @@ impl Node {
     #[inline]
     pub fn component(&self) -> &Path {
         match self {
-            Self::Leaf { ref component, .. } | Self::Branch { ref component, .. } => {
-                component.as_path()
-            }
+            Self::Leaf { component, .. } | Self::Branch { component, .. } => component.as_path(),
         }
     }
 
@@ -473,7 +471,7 @@ impl Node {
     #[inline]
     pub fn data(&self) -> Option<DataKey> {
         match self {
-            Self::Leaf { ref data, .. } | Self::Branch { ref data, .. } => *data,
+            Self::Leaf { data, .. } | Self::Branch { data, .. } => *data,
         }
     }
 
@@ -558,9 +556,9 @@ impl Node {
         while let Some(node) = next.take() {
             match node {
                 Self::Branch {
-                    ref component,
-                    ref children,
-                    ref data,
+                    component,
+                    children,
+                    data,
                 } => {
                     if let Ok(rest) = path.strip_prefix(component) {
                         if rest == Path::new("") {
@@ -584,9 +582,7 @@ impl Node {
                     }
                 }
                 Self::Leaf {
-                    ref component,
-                    ref data,
-                    ..
+                    component, data, ..
                 } => {
                     // `component` may have a common prefix with `path`, but unless `path`
                     // is equal to `component`, it is not explicitly represented in the tree
@@ -603,8 +599,8 @@ impl Node {
         while let Some(node) = next.take() {
             match node {
                 Self::Branch {
-                    ref component,
-                    ref children,
+                    component,
+                    children,
                     ..
                 } => {
                     if let Ok(rest) = path.strip_prefix(component) {
@@ -623,7 +619,7 @@ impl Node {
                         }
                     }
                 }
-                Self::Leaf { ref component, .. } => {
+                Self::Leaf { component, .. } => {
                     if path == component {
                         return Some(node);
                     }
@@ -660,8 +656,8 @@ impl Node {
         while let Some(node) = next.take() {
             match node {
                 Self::Branch {
-                    ref component,
-                    ref children,
+                    component,
+                    children,
                     data,
                 } => {
                     if let Ok(rest) = path.strip_prefix(component) {
@@ -716,9 +712,9 @@ impl Node {
     fn take(&mut self, prefix: &Path) -> Self {
         match self {
             Node::Branch {
-                ref component,
-                ref mut children,
-                ref mut data,
+                component,
+                children,
+                data,
             } => {
                 let component = component.strip_prefix(prefix).unwrap().to_path_buf();
                 Node::Branch {
@@ -728,8 +724,8 @@ impl Node {
                 }
             }
             Node::Leaf {
-                ref component,
-                ref mut data,
+                component,
+                data,
                 ty,
             } => {
                 let component = component.strip_prefix(prefix).unwrap().to_path_buf();
@@ -754,9 +750,9 @@ impl Node {
     fn set_type(&mut self, ty: PathType) -> Result<(), TryInsertError> {
         match self {
             Self::Leaf {
-                ref mut component,
-                ref mut data,
-                ty: ref mut prev_ty,
+                component,
+                data,
+                ty: prev_ty,
                 ..
             } => match ty {
                 PathType::Unknown | PathType::File => *prev_ty = ty,
@@ -782,12 +778,10 @@ impl Node {
     fn set_data(&mut self, data: DataKey) {
         match self {
             Self::Branch {
-                data: ref mut prev_data,
-                ..
+                data: prev_data, ..
             }
             | Self::Leaf {
-                data: ref mut prev_data,
-                ..
+                data: prev_data, ..
             } => {
                 *prev_data = Some(data);
             }
@@ -813,15 +807,13 @@ impl Node {
             },
         };
         match self {
-            Self::Branch {
-                ref mut children, ..
-            } => {
+            Self::Branch { children, .. } => {
                 children.push(child);
                 children.sort();
             }
             Self::Leaf {
-                component: ref mut parent_component,
-                data: ref mut parent_data,
+                component: parent_component,
+                data: parent_data,
                 ty: PathType::Unknown,
             } => {
                 let children = vec![child];
@@ -847,9 +839,7 @@ impl Node {
         data: Option<DataKey>,
     ) -> Either<Result<(), TryInsertError>, &'a mut Node> {
         match self {
-            Self::Branch {
-                ref mut children, ..
-            } => {
+            Self::Branch { children, .. } => {
                 if let Some(index) = children.iter().position(|c| c.has_common_prefix(component)) {
                     // We can't insert this as new, but the given index is a child we can try to insert into next
                     return Right(&mut children[index]);
@@ -875,8 +865,8 @@ impl Node {
                 ty: PathType::File, ..
             } => Left(Err(TryInsertError::Unreachable(path.to_path_buf()))),
             Self::Leaf {
-                component: ref mut parent_component,
-                data: ref mut parent_data,
+                component: parent_component,
+                data: parent_data,
                 ..
             } => {
                 let child = match ty {
@@ -1000,7 +990,7 @@ impl<'a> DfsVisitor<'a> {
                 }
                 (
                     Node::Leaf {
-                        ref component,
+                        component,
                         data: Some(data),
                         ..
                     },
@@ -1017,8 +1007,8 @@ impl<'a> DfsVisitor<'a> {
                 }
                 (
                     Node::Branch {
-                        ref component,
-                        ref children,
+                        component,
+                        children,
                         data,
                     },
                     worklist,
@@ -1026,10 +1016,10 @@ impl<'a> DfsVisitor<'a> {
                     self.worklist = worklist;
 
                     let relative_depth = self.relative_depth(component, max_depth);
-                    if let Some(max_depth) = max_depth {
-                        if relative_depth > max_depth {
-                            continue;
-                        }
+                    if let Some(max_depth) = max_depth
+                        && relative_depth > max_depth
+                    {
+                        continue;
                     }
                     let suffix = self.strip_prefix(component);
                     let prefix = self.prefix.join(suffix);
@@ -1173,8 +1163,8 @@ impl<'a, V> Dfs<'a, V> {
                         Some(Prefix::Child) => {
                             match node {
                                 Node::Branch {
-                                    ref component,
-                                    ref children,
+                                    component,
+                                    children,
                                     ..
                                 } => {
                                     input_path = input_path.strip_prefix(component).unwrap();
@@ -1187,13 +1177,13 @@ impl<'a, V> Dfs<'a, V> {
                                 }
                                 // There are no children for `path`, so return an empty iterator
                                 Node::Leaf { .. } => {
-                                    break Self::empty(tree, only_leaves, max_depth)
+                                    break Self::empty(tree, only_leaves, max_depth);
                                 }
                             }
                         }
                         // There can be no children of `path` under `node`
                         Some(Prefix::Partial(_)) => {
-                            break Self::empty(tree, only_leaves, max_depth)
+                            break Self::empty(tree, only_leaves, max_depth);
                         }
                     }
                 }

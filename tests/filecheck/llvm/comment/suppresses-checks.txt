@@ -30,4 +30,4 @@ RUN: FileCheck --dump-input=never -vv %t-3.chk --comment-prefixes=Foo_1,Bar_2 \
 RUN:           --comment-prefixes=Baz_3 < %t-3.in 2>&1 | \
 RUN:   FileCheck -DCHECK_LINE=2 %s
 
-CHECK: .chk:[[CHECK_LINE]]:0: remark: CHECK: expected string found in input
+CHECK: .chk@[[CHECK_LINE]]:8]: remark: CHECK: expected string found in input

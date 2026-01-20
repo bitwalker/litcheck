@@ -40,7 +40,7 @@ impl<'a> RegexMatcher<'a> {
             .syntax(
                 syntax::Config::new()
                     .multi_line(true)
-                    .case_insensitive(config.ignore_case),
+                    .case_insensitive(config.options.ignore_case),
             )
             .build(pattern.as_ref())
             .map_err(|error| build_error_to_diagnostic(error, 1, |_| span))?;
@@ -82,9 +82,9 @@ impl<'a> RegexMatcher<'a> {
             .syntax(
                 syntax::Config::new()
                     .multi_line(true)
-                    .case_insensitive(config.ignore_case),
+                    .case_insensitive(config.options.ignore_case),
             )
-            .build(pattern.as_ref())
+            .build(pattern.inner().as_ref())
             .map_err(|error| build_error_to_diagnostic(error, 1, |_| span))?;
 
         // Compute capture group information
@@ -126,7 +126,7 @@ impl<'a> Matcher for RegexMatcher<'a> {
         let mut captures = self.regex.create_captures();
         self.regex.search_captures(&regex_input, &mut captures);
         if let Some(matched) = captures.get_match() {
-            let span = SourceSpan::from(matched.range());
+            let span = SourceSpan::from_range_unchecked(input.source_id(), matched.range());
             let mut capture_infos = Vec::with_capacity(captures.group_len());
             for (index, (maybe_capture_span, capture)) in captures
                 .iter()
@@ -135,7 +135,8 @@ impl<'a> Matcher for RegexMatcher<'a> {
             {
                 if let Some(capture_span) = maybe_capture_span {
                     let captured = input.as_str(capture_span.range());
-                    let capture_span = SourceSpan::from(capture_span.range());
+                    let capture_span =
+                        SourceSpan::from_range_unchecked(input.source_id(), capture_span.range());
                     let result = try_convert_capture_to_type(
                         matched.pattern(),
                         index,
@@ -312,25 +313,28 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::source_file;
+
     use super::*;
 
     #[test]
     fn test_regex_matcher() -> DiagResult<()> {
         let mut context = TestContext::new();
-        context
-            .with_checks(r"CHECK: {{Name: b[[:alpha:]]*}}")
-            .with_input(
-                "
+        let match_file = source_file!(context.config, r"CHECK: {{Name: b[[:alpha:]]*}}");
+        let input_file = source_file!(
+            context.config,
+            "
 Name: foo
 Field: 1
 
 Name: bar
 Field: 2
-",
-            );
+"
+        );
+        context.with_checks(match_file).with_input(input_file);
 
         let pattern = RegexPattern::new(Span::new(
-            SourceSpan::from(0..0),
+            SourceSpan::UNKNOWN,
             Cow::Borrowed("Name: b[[:alpha:]]*"),
         ));
         let matcher = RegexMatcher::new(pattern, &context.config, &context.interner)
@@ -339,10 +343,10 @@ Field: 2
         let input = mctx.search();
         let result = matcher.try_match(input, &mctx)?;
         let info = result.info.expect("expected match");
-        assert_eq!(info.span.offset(), 21);
+        assert_eq!(info.span.start().to_u32(), 21);
         assert_eq!(info.span.len(), 9);
         assert_eq!(
-            input.as_str(info.span.offset()..(info.span.offset() + info.span.len())),
+            input.as_str(info.span.start().to_usize()..info.span.end().to_usize()),
             "Name: bar"
         );
 

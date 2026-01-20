@@ -59,7 +59,7 @@ impl Matcher for AsciiWhitespaceMatcher {
         }
 
         Ok(MatchResult::ok(MatchInfo::new(
-            start..(start + len),
+            SourceSpan::from_range_unchecked(input.source_id(), start..(start + len)),
             self.span,
         )))
     }
@@ -73,6 +73,8 @@ impl Spanned for AsciiWhitespaceMatcher {
 
 #[cfg(test)]
 mod tests {
+    use crate::source_file;
+
     use super::*;
 
     #[test]
@@ -86,16 +88,20 @@ mod tests {
         input.push('\n');
 
         let mut context = TestContext::new();
-        context.with_checks("").with_input(input.clone());
+        let match_file = source_file!(context.config, "");
+        let input_file = source_file!(context.config, input.clone());
+        context
+            .with_checks(match_file)
+            .with_input(input_file.clone());
 
         let mctx = context.match_context();
 
-        let matcher = AsciiWhitespaceMatcher::new(SourceSpan::from(0..0));
+        let matcher = AsciiWhitespaceMatcher::new(SourceSpan::UNKNOWN);
         let bytes = input.as_bytes();
-        let input = Input::new(bytes, false).span(0..);
+        let input = Input::new(input_file.id(), bytes, false).bounded(0..);
         let result = matcher.try_match(input, &mctx)?;
         let info = result.info.expect("expected match");
-        assert_eq!(info.span.offset(), 0);
+        assert_eq!(info.span.start().to_u32(), 0);
         assert_eq!(info.span.len(), 3);
         Ok(())
     }

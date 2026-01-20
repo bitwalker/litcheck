@@ -1,10 +1,14 @@
 /// Simple macro used in the grammar definition for constructing spans
+#[macro_export]
 macro_rules! span {
-    ($l:expr, $r:expr) => {
-        litcheck::diagnostics::SourceSpan::from($l..$r)
+    ($source_id:expr, $l:expr, $r:expr) => {
+        litcheck::diagnostics::SourceSpan::new(
+            $source_id,
+            litcheck::range::Range::new($l as u32, $r as u32),
+        )
     };
-    ($i:expr) => {
-        litcheck::diagnostics::SourceSpan::from($i..$i)
+    ($source_id:expr, $i:expr) => {
+        litcheck::diagnostics::SourceSpan::at($source_id, $i as u32)
     };
 }
 
@@ -18,7 +22,10 @@ use std::fmt;
 
 use logos::{Lexer, Logos};
 
-use litcheck::{diagnostics::SourceSpan, StringInterner};
+use litcheck::{
+    diagnostics::{Report, SourceId, SourceSpan, Span},
+    StringInterner,
+};
 
 use crate::expr::{ExprError, Var};
 
@@ -32,38 +39,40 @@ impl<'config> NumericVarParser<'config> {
         Self { interner }
     }
 
-    pub fn parse<'a>(&mut self, source: &'a str) -> Result<Var<'a>, ExprError> {
+    pub fn parse<'a>(&mut self, source: Span<&'a str>) -> Result<Var<'a>, Report> {
+        let (span, source) = source.into_parts();
         let lexer = Token::lexer(source)
             .spanned()
             .map(|(t, span)| t.map(|t| (span.start, t, span.end)));
         grammar::NumericVarParser::new()
-            .parse(source, self.interner, lexer)
-            .map_err(handle_parse_error)
+            .parse(span.source_id(), source, self.interner, lexer)
+            .map_err(|err| handle_parse_error(span.source_id(), err))
+            .map_err(|err| Report::from(err).with_source_code(source.to_string()))
     }
 }
 
-fn handle_parse_error(err: ParseError) -> ExprError {
+fn handle_parse_error(source_id: SourceId, err: ParseError) -> ExprError {
     match err {
         ParseError::InvalidToken { location: at } => ExprError::InvalidToken {
-            span: SourceSpan::from(at..at),
+            span: SourceSpan::at(source_id, at as u32),
         },
         ParseError::UnrecognizedToken {
             token: (l, tok, r),
             expected,
         } => ExprError::UnrecognizedToken {
-            span: SourceSpan::from(l..r),
+            span: SourceSpan::from_range_unchecked(source_id, l..r),
             token: tok.to_string(),
             expected,
         },
         ParseError::ExtraToken { token: (l, tok, r) } => ExprError::ExtraToken {
-            span: SourceSpan::from(l..r),
+            span: SourceSpan::from_range_unchecked(source_id, l..r),
             token: tok.to_string(),
         },
         ParseError::UnrecognizedEof {
             location: at,
             expected,
         } => ExprError::UnrecognizedEof {
-            span: SourceSpan::from(at..at),
+            span: SourceSpan::at(source_id, at as u32),
             expected,
         },
         ParseError::User { error } => error,
@@ -72,6 +81,7 @@ fn handle_parse_error(err: ParseError) -> ExprError {
 
 #[derive(Debug, Clone, Logos)]
 #[logos(error = ExprError)]
+#[logos(extras = SourceId)]
 #[logos(skip r"[ \t]+")]
 pub enum Token<'input> {
     #[token("(")]
@@ -161,7 +171,7 @@ fn parse_int<'input>(lexer: &mut Lexer<'input, Token<'input>>) -> Result<i64, Ex
         .slice()
         .parse::<i64>()
         .map_err(|error| ExprError::Number {
-            span: SourceSpan::from(lexer.span()),
+            span: SourceSpan::try_from_range(lexer.extras, lexer.span()).unwrap(),
             error,
         })
 }

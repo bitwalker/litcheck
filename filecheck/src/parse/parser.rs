@@ -1,10 +1,10 @@
 /// Simple macro used in the grammar definition for constructing spans
 macro_rules! span {
-    ($l:expr, $r:expr) => {
-        litcheck::diagnostics::SourceSpan::from($l..$r)
+    ($source_id:expr, $l:expr, $r:expr) => {
+        litcheck::diagnostics::SourceSpan::from_range_unchecked($source_id, $l..$r)
     };
-    ($i:expr) => {
-        litcheck::diagnostics::SourceSpan::from($i..$i)
+    ($source_id:expr, $i:expr) => {
+        litcheck::diagnostics::SourceSpan::at($source_id, $i as u32)
     };
 }
 
@@ -15,7 +15,7 @@ lalrpop_util::lalrpop_mod!(
 );
 
 use litcheck::{
-    diagnostics::{SourceFile, SourceSpan, Span, Spanned},
+    diagnostics::{SourceId, SourceSpan, Span, Spanned},
     StringInterner,
 };
 use std::borrow::Cow;
@@ -50,7 +50,7 @@ macro_rules! expect {
             )*
             Some((start, token, end)) => {
                 return Err(ParserError::UnrecognizedToken {
-                    span: SourceSpan::from(start..end),
+                    span: SourceSpan::from_range_unchecked($lexer.source_id(), start..end),
                     token: token.to_string(),
                     expected: vec![$(expected_token!($expected_ty :: $expected_variant $(($expected_pat))?)),*],
                 });
@@ -68,10 +68,13 @@ macro_rules! expect {
 macro_rules! expect_literal {
     ($lexer:ident) => {
         match lex!($lexer) {
-            Some((start, Token::Raw(raw), end)) => Span::new(SourceSpan::from(start..end), raw),
+            Some((start, Token::Raw(raw), end)) => Span::new(
+                SourceSpan::from_range_unchecked($lexer.source_id(), start..end),
+                raw,
+            ),
             Some((start, token, end)) => {
                 return Err(ParserError::UnrecognizedToken {
-                    span: SourceSpan::from(start..end),
+                    span: SourceSpan::from_range_unchecked($lexer.source_id(), start..end),
                     token: token.to_string(),
                     expected: vec!["literal".to_string()],
                 });
@@ -92,7 +95,7 @@ macro_rules! expect_ignore {
             Some((start, token, end)) => {
                 if !matches!(token, $($expected_ty :: $expected_variant $(($expected_pat))?)|*) {
                     return Err(ParserError::UnrecognizedToken {
-                        span: SourceSpan::from(start..end),
+                        span: SourceSpan::from_range_unchecked($lexer.source_id(), start..end),
                         token: token.to_string(),
                         expected: vec![$(expected_token!($expected_ty :: $expected_variant $(($expected_pat))?)),*],
                     });
@@ -117,12 +120,12 @@ impl<'config> CheckFileParser<'config> {
         Self { config, interner }
     }
 
-    pub fn parse<'a, S>(&mut self, code: &'a S) -> ParseResult<CheckFile<'a>>
+    pub fn parse<'a, S>(&mut self, source_id: SourceId, code: &'a S) -> ParseResult<CheckFile<'a>>
     where
-        S: SourceFile + ?Sized + 'a,
+        S: ?Sized + AsRef<str> + 'a,
     {
-        let source = code.source();
-        let mut lexer = Lexer::<'a>::new(code, self.config);
+        let source = code.as_ref();
+        let mut lexer = Lexer::<'a>::new(source_id, code, self.config);
         let mut comment = vec![];
         let mut lines = vec![];
         while let Some(lexed) = lexer.next() {
@@ -133,8 +136,11 @@ impl<'config> CheckFileParser<'config> {
                     continue;
                 }
                 Token::Check(ty) => {
-                    let mut line =
-                        self.parse_check(Span::new(start..end, ty), source, &mut lexer)?;
+                    let mut line = self.parse_check(
+                        Span::new(SourceSpan::from_range_unchecked(source_id, start..end), ty),
+                        source,
+                        &mut lexer,
+                    )?;
                     line.comment.append(&mut comment);
                     lines.push(line);
                 }
@@ -142,7 +148,7 @@ impl<'config> CheckFileParser<'config> {
                 Token::Error(err) => return Err(ParserError::from(err)),
                 token => {
                     return Err(ParserError::ExtraToken {
-                        span: SourceSpan::from(start..end),
+                        span: SourceSpan::from_range_unchecked(source_id, start..end),
                         token: token.to_string(),
                     })
                 }
@@ -150,7 +156,7 @@ impl<'config> CheckFileParser<'config> {
         }
 
         let unused_prefixes = lexer.unused_prefixes();
-        if !unused_prefixes.is_empty() && !self.config.allow_unused_prefixes {
+        if !unused_prefixes.is_empty() && !self.config.options.allow_unused_prefixes {
             return Err(ParserError::UnusedCheckPrefixes(unused_prefixes));
         }
 
@@ -163,12 +169,13 @@ impl<'config> CheckFileParser<'config> {
         source: &'a str,
         lexer: &mut Lexer<'a>,
     ) -> ParseResult<CheckLine<'a>> {
-        let line_start = ty.start();
-        let check_end = ty.end();
+        let span = ty.span();
+        let line_start = span.start().to_usize();
+        let check_end = span.end().to_usize();
 
         // Modifiers (optional)
         let mut modifiers = CheckModifier::default();
-        let mut modifier_start = ty.end();
+        let mut modifier_start = span.end().to_usize();
         let mut modifier_end = modifier_start;
         while let (start, Token::Modifier(modifier), end) =
             expect!(lexer, Token::Modifier(_) | Token::Colon)
@@ -177,33 +184,50 @@ impl<'config> CheckFileParser<'config> {
             modifier_end = end;
             modifiers |= modifier;
         }
-        let modifiers = Span::new(modifier_start..modifier_end, modifiers);
+        let modifiers = Span::new(
+            SourceSpan::from_range_unchecked(span.source_id(), modifier_start..modifier_end),
+            modifiers,
+        );
 
         // CheckType
-        let ty_span = ty.range();
         let ty = ty.into_inner();
-        let ty = CheckType::new(ty_span.into(), ty).with_modifiers(modifiers);
+        let ty = CheckType::new(span, ty).with_modifiers(modifiers);
 
         // CheckPattern
         if modifiers.contains(CheckModifier::LITERAL) {
             match expect!(lexer, Token::Raw(_) | Token::Lf) {
                 (start, Token::Raw(pattern), end) => {
-                    let pattern = Span::new(start..end, pattern);
+                    if matches!(ty.kind, Check::Empty) {
+                        // Expected an empty pattern
+                        return Err(ParserError::ExpectedEmptyPattern {
+                            span: SourceSpan::from_range_unchecked(
+                                span.source_id(),
+                                line_start..end,
+                            ),
+                        });
+                    }
+                    let pattern = Span::new(
+                        SourceSpan::from_range_unchecked(span.source_id(), start..end),
+                        pattern,
+                    );
                     Ok(CheckLine::new(
-                        SourceSpan::from(line_start..end),
+                        SourceSpan::from_range_unchecked(span.source_id(), line_start..end),
                         ty,
                         CheckPattern::Literal(pattern.map(Cow::Borrowed)),
                     ))
                 }
-                (_, _, end) if matches!(ty.kind, Check::Empty) => Ok(CheckLine::new(
-                    SourceSpan::from(line_start..end),
+                (_, Token::Lf, end) if matches!(ty.kind, Check::Empty) => Ok(CheckLine::new(
+                    SourceSpan::from_range_unchecked(span.source_id(), line_start..end),
                     ty,
-                    CheckPattern::Empty(SourceSpan::from(line_start..end)),
+                    CheckPattern::Empty(SourceSpan::from_range_unchecked(
+                        span.source_id(),
+                        line_start..end,
+                    )),
                 )),
                 (_, _, end) => {
                     // Expected a non-empty pattern
                     Err(ParserError::EmptyPattern {
-                        span: SourceSpan::from(line_start..end),
+                        span: SourceSpan::from_range_unchecked(span.source_id(), line_start..end),
                     })
                 }
             }
@@ -234,7 +258,7 @@ impl<'config> CheckFileParser<'config> {
                     Some(_) => {
                         let (start, token, end) = lex!(lexer).unwrap();
                         return Err(ParserError::UnrecognizedToken {
-                            span: SourceSpan::from(start..end),
+                            span: SourceSpan::from_range_unchecked(span.source_id(), start..end),
                             token: token.to_string(),
                             expected: vec![
                                 "literal".to_string(),
@@ -250,14 +274,23 @@ impl<'config> CheckFileParser<'config> {
                 }
             }
 
+            if matches!(ty.kind, Check::Empty if !parts.is_empty()) {
+                return Err(ParserError::ExpectedEmptyPattern {
+                    span: SourceSpan::from_range_unchecked(span.source_id(), line_start..check_end),
+                });
+            }
+
             match parts.len() {
                 0 if matches!(ty.kind, Check::Empty) => Ok(CheckLine::new(
-                    SourceSpan::from(line_start..check_end),
+                    SourceSpan::from_range_unchecked(span.source_id(), line_start..check_end),
                     ty,
-                    CheckPattern::Empty(SourceSpan::from(line_start..check_end)),
+                    CheckPattern::Empty(SourceSpan::from_range_unchecked(
+                        span.source_id(),
+                        line_start..check_end,
+                    )),
                 )),
                 0 => Err(ParserError::EmptyPattern {
-                    span: SourceSpan::from(line_start..check_end),
+                    span: SourceSpan::from_range_unchecked(span.source_id(), line_start..check_end),
                 }),
                 1 => {
                     let pattern = match parts.pop().unwrap() {
@@ -270,18 +303,24 @@ impl<'config> CheckFileParser<'config> {
                         }
                     };
                     Ok(CheckLine::new(
-                        SourceSpan::from(line_start..pattern.end()),
+                        SourceSpan::from_range_unchecked(
+                            span.source_id(),
+                            line_start..pattern.span().end().to_usize(),
+                        ),
                         ty,
                         pattern,
                     ))
                 }
                 _ => {
-                    let start = parts.first().unwrap().start();
-                    let end = parts.last().unwrap().end();
+                    let start = parts.first().unwrap().span().start().to_usize();
+                    let end = parts.last().unwrap().span().end().to_usize();
                     Ok(CheckLine::new(
-                        SourceSpan::from(line_start..end),
+                        SourceSpan::from_range_unchecked(span.source_id(), line_start..end),
                         ty,
-                        CheckPattern::Match(Span::new(start..end, parts)),
+                        CheckPattern::Match(Span::new(
+                            SourceSpan::from_range_unchecked(span.source_id(), start..end),
+                            parts,
+                        )),
                     ))
                 }
             }
@@ -303,7 +342,7 @@ impl<'config> CheckFileParser<'config> {
             match lex!(lexer) {
                 Some((start, Token::Lf, end)) => {
                     return Err(ParserError::UnrecognizedToken {
-                        span: SourceSpan::from(start..end),
+                        span: SourceSpan::from_range_unchecked(lexer.source_id(), start..end),
                         token: Token::Lf.to_string(),
                         expected: vec!["]]".to_string()],
                     });
@@ -324,7 +363,10 @@ impl<'config> CheckFileParser<'config> {
 
         if tokens.len() == 1 {
             return Err(ParserError::UnrecognizedToken {
-                span: SourceSpan::from(match_end_start..match_end_end),
+                span: SourceSpan::from_range_unchecked(
+                    lexer.source_id(),
+                    match_end_start..match_end_end,
+                ),
                 token: match_end.to_string(),
                 expected: vec!["a non-empty match expression".to_string()],
             });
@@ -332,43 +374,48 @@ impl<'config> CheckFileParser<'config> {
 
         tokens.push(Ok((match_end_start, match_end, match_end_end)));
 
-        Ok(CheckPatternPart::Match(self.parse_match(source, tokens)?))
+        Ok(CheckPatternPart::Match(self.parse_match(
+            lexer.source_id(),
+            source,
+            tokens,
+        )?))
     }
 
     fn parse_match<'a>(
         &mut self,
+        source_id: SourceId,
         source: &'a str,
         tokens: Vec<Lexed<'a>>,
     ) -> ParseResult<Match<'a>> {
         let lexer = tokens.into_iter();
         grammar::MatchParser::new()
-            .parse(source, self.interner, lexer)
-            .map_err(handle_parse_error)
+            .parse(source_id, source, self.interner, lexer)
+            .map_err(|err| handle_parse_error(source_id, err))
     }
 }
 
-fn handle_parse_error(err: ParseError) -> ParserError {
+fn handle_parse_error(source_id: SourceId, err: ParseError) -> ParserError {
     match err {
         ParseError::InvalidToken { location: at } => ParserError::InvalidToken {
-            span: SourceSpan::from(at..at),
+            span: SourceSpan::at(source_id, at as u32),
         },
         ParseError::UnrecognizedToken {
             token: (l, tok, r),
             expected,
         } => ParserError::UnrecognizedToken {
-            span: SourceSpan::from(l..r),
+            span: SourceSpan::from_range_unchecked(source_id, l..r),
             token: tok.to_string(),
             expected,
         },
         ParseError::ExtraToken { token: (l, tok, r) } => ParserError::ExtraToken {
-            span: SourceSpan::from(l..r),
+            span: SourceSpan::from_range_unchecked(source_id, l..r),
             token: tok.to_string(),
         },
         ParseError::UnrecognizedEof {
             location: at,
             expected,
         } => ParserError::UnrecognizedEof {
-            span: SourceSpan::from(at..at),
+            span: SourceSpan::at(source_id, at as u32),
             expected,
         },
         ParseError::User { error } => error,

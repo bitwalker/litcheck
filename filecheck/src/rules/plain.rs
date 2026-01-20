@@ -42,7 +42,7 @@ where
                 ty,
                 info: Some(info),
             } if ty.is_ok() => {
-                context.cursor_mut().set_start(info.span.end());
+                context.cursor_mut().set_start(info.span.end().to_usize());
             }
             _ => (),
         }
@@ -53,12 +53,14 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pattern::matcher::*;
+    use crate::{pattern::matcher::*, source_file};
 
     #[test]
     fn check_plain_test() -> DiagResult<()> {
         let mut context = TestContext::new();
-        context.with_checks("CHECK: @inc4").with_input(
+        let match_file = source_file!(context.config, "CHECK: @inc4");
+        let input_file = source_file!(
+            context.config,
             "
 define void @sub1(i32* %p, i32 %v) {
 entry:
@@ -71,11 +73,17 @@ entry:
         %0 = tail call i64 @llvm.atomic.load.add.i64.p0i64(i64* %p, i64 1)
         ret void
 }
-",
+"
         );
+        context
+            .with_checks(match_file.clone())
+            .with_input(input_file);
         let mut mctx = context.match_context();
         let pattern = SubstringMatcher::new(
-            Span::new(SourceSpan::from(8..12), Cow::Borrowed("@inc4")),
+            Span::new(
+                SourceSpan::from_range_unchecked(match_file.id(), 8..12),
+                Cow::Borrowed("@inc4"),
+            ),
             mctx.config,
         )
         .expect("expected pattern to be valid");
@@ -84,7 +92,7 @@ entry:
             .apply(&mut mctx)
             .expect("expected non-fatal application of rule");
         let matched = TestResult::from_matches(matches, &mctx).into_result()?;
-        assert_eq!(matched[0].span.offset(), 153);
+        assert_eq!(matched[0].span.start().to_u32(), 153);
         assert_eq!(matched[0].span.len(), 5);
         let input = mctx.search();
         assert_eq!(input.as_str(matched[0].matched_range()), "@inc4");

@@ -102,7 +102,7 @@ impl Spanned for ExprError {
             | Self::Number { span, .. }
             | Self::InvalidFormatSpecifier { span, .. }
             | Self::InvalidNumericPrecision { span, .. } => *span,
-            Self::Unknown => SourceSpan::from(0..0),
+            Self::Unknown => SourceSpan::UNKNOWN,
         }
     }
 }

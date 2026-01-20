@@ -1,9 +1,9 @@
 use std::{
-    borrow::Cow,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
-use crate::diagnostics::{ArcSource, FileName, Source};
+use crate::diagnostics::{FileName, SourceFile, SourceManager};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Input(PathBuf);
@@ -48,19 +48,19 @@ impl Input {
         if self.0.as_os_str() == "-" {
             FileName::Stdin
         } else {
-            FileName::Path(self.0.clone().into_boxed_path())
+            FileName::from(self.0.clone())
         }
     }
 
-    pub fn into_arc_source(&self, strict: bool) -> std::io::Result<ArcSource> {
-        self.into_source(strict).map(ArcSource::new)
-    }
-
-    pub fn into_source(&self, strict: bool) -> std::io::Result<Source<'static>> {
+    pub fn into_source(
+        &self,
+        strict: bool,
+        source_manager: &dyn SourceManager,
+    ) -> std::io::Result<Arc<SourceFile>> {
         let name = self.filename();
-        let code = self.read_to_string(strict).map(Cow::Owned)?;
+        let code = self.read_to_string(strict)?;
         log::trace!(target: "input", "read '{name}': '{code}'");
-        Ok(Source { name, code })
+        Ok(source_manager.load(name.language(), name, code))
     }
 
     pub fn get_file_types(&self, file_types: &[String]) -> Result<Vec<Input>, walkdir::Error> {

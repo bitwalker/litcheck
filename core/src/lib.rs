@@ -45,6 +45,7 @@ pub mod diagnostics;
 pub mod fs;
 mod input;
 pub mod range;
+pub mod reporting;
 pub mod text;
 pub mod variables;
 

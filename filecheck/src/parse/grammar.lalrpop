@@ -3,12 +3,12 @@ use std::borrow::Cow;
 use either::Either;
 use either::Either::*;
 
-use crate::common::{Spanned, Span, Symbol, StringInterner};
+use crate::common::{Spanned, Span, Symbol, StringInterner, SourceId};
 use crate::ast::*;
 use crate::expr::*;
 use crate::parse::{LexerError, Token, ParserError, ParseError};
 
-grammar<'input, 'parser>(_source: &'input str, interner: &'parser mut StringInterner);
+grammar<'input, 'parser>(source_id: SourceId, _source: &'input str, interner: &'parser mut StringInterner);
 
 // LEXER
 // ================================================================================================
@@ -71,13 +71,13 @@ Comma<T>: Vec<T> = {
 /// MATCH
 
 pub Match: Match<'input> = {
-    <l:@L> "[[" <name:PatternVar> "]]" <r:@R> => Match::Substitution { span: span!(l, r), name, pattern: None },
+    <l:@L> "[[" <name:PatternVar> "]]" <r:@R> => Match::Substitution { span: span!(source_id, l, r), name, pattern: None },
 
-    <l:@L> "[[" <name:MaybeGlobalVar> ":" <pattern:String>  "]]" <r:@R> => Match::Substitution { span: span!(l, r), name, pattern: Some(pattern.map(Cow::Borrowed)) },
+    <l:@L> "[[" <name:MaybeGlobalVar> ":" <pattern:String>  "]]" <r:@R> => Match::Substitution { span: span!(source_id, l, r), name, pattern: Some(pattern.map(Cow::Borrowed)) },
 
     <l:@L> "[[" "#" <format:(<NumberFormat> ",")?> <capture:CaptureNumericOrExpr?> "]]" <r:@R> => {
         let format = format.unwrap_or_default();
-        let span = span!(l, r);
+        let span = span!(source_id, l, r);
         match capture {
             None => Match::Numeric {
                 span,
@@ -108,11 +108,11 @@ pub Match: Match<'input> = {
 MatchPatternInner: Match<'input> = {
     <name:PatternVar> => Match::Substitution { span: name.span(), name, pattern: None },
 
-    <l:@L> <name:Var> ":" <pattern:String>  <r:@R> => Match::Substitution { span: span!(l, r), name, pattern: Some(pattern.map(Cow::Borrowed)) },
+    <l:@L> <name:Var> ":" <pattern:String>  <r:@R> => Match::Substitution { span: span!(source_id, l, r), name, pattern: Some(pattern.map(Cow::Borrowed)) },
 
     <l:@L> "#" <format:(<NumberFormat> ",")?> <capture:CaptureNumericOrExpr?> <r:@R> => {
         let format = format.unwrap_or_default();
-        let span = span!(l, r);
+        let span = span!(source_id, l, r);
         match capture {
             None => Match::Numeric {
                 span,
@@ -147,8 +147,8 @@ CaptureNumericOrExpr: CaptureNumericOrExpr = {
             Right(None) => CaptureNumericOrExpr::Expr(Expr::Var(var)),
             Right(Some(BinaryOpAndOperand { op, operand: rhs })) => {
                 let rhs_span = rhs.span();
-                let end = rhs_span.offset() + rhs_span.len();
-                CaptureNumericOrExpr::Expr(Expr::Binary { span: span!(l, end), op, lhs: Box::new(Expr::Var(var)), rhs })
+                let end = rhs_span.end().to_usize();
+                CaptureNumericOrExpr::Expr(Expr::Binary { span: span!(source_id, l, end), op, lhs: Box::new(Expr::Var(var)), rhs })
             }
         }
     },
@@ -183,8 +183,8 @@ NumberFormat: NumberFormat = {
 /// EXPRS
 
 Expr: Expr = {
-    <l:@L> <x:Expr> "+" <y:Subexpr> <r:@R> => Expr::Binary { span: span!(l, r), op: BinaryOp::Add, lhs: Box::new(x), rhs: Box::new(y) },
-    <l:@L> <x:Expr> "-" <y:Subexpr> <r:@R> => Expr::Binary { span: span!(l, r), op: BinaryOp::Sub, lhs: Box::new(x), rhs: Box::new(y) },
+    <l:@L> <x:Expr> "+" <y:Subexpr> <r:@R> => Expr::Binary { span: span!(source_id, l, r), op: BinaryOp::Add, lhs: Box::new(x), rhs: Box::new(y) },
+    <l:@L> <x:Expr> "-" <y:Subexpr> <r:@R> => Expr::Binary { span: span!(source_id, l, r), op: BinaryOp::Sub, lhs: Box::new(x), rhs: Box::new(y) },
     Subexpr,
 }
 
@@ -196,12 +196,12 @@ Subexpr: Expr = {
 
 #[inline]
 Builtin: Expr = {
-    <l:@L> <op:BinaryOp> "(" <x:Expr> "," <y:Expr> ")" <r:@R> => Expr::Binary { span: span!(l, r), op, lhs: Box::new(x), rhs: Box::new(y) },
+    <l:@L> <op:BinaryOp> "(" <x:Expr> "," <y:Expr> ")" <r:@R> => Expr::Binary { span: span!(source_id, l, r), op, lhs: Box::new(x), rhs: Box::new(y) },
 }
 
 Call: Expr = {
     <l:@L> <callee:Callee> "(" <args:Comma<Expr>> ")" <r:@R> =>? {
-        Expr::from_call(interner, span!(l, r), callee, args).map_err(|err| ParseError::User { error: ExprError::from(err).into() })
+        Expr::from_call(interner, span!(source_id, l, r), callee, args).map_err(|err| ParseError::User { error: ExprError::from(err).into() })
     }
 }
 
@@ -230,29 +230,29 @@ PatternVar: VariableName = {
 }
 
 GlobalVar: VariableName = {
-    <l:@L> "$" <name:Ident> <r:@R> => VariableName::Global(Span::new(l..r, name)),
+    <l:@L> "$" <name:Ident> <r:@R> => VariableName::Global(Span::new(span!(source_id, l, r), name)),
 }
 
 MaybeGlobalVar: VariableName = {
-    <l:@L> "$" <name:Ident> <r:@R> => VariableName::Global(Span::new(l..r, name)),
+    <l:@L> "$" <name:Ident> <r:@R> => VariableName::Global(Span::new(span!(source_id, l, r), name)),
     Var,
 }
 
 PseudoVar: VariableName = {
-    <l:@L> "@" <name:Ident> <r:@R> => VariableName::Pseudo(Span::new(l..r, name)),
-    <l:@L> "@" "LINE" <r:@R> => VariableName::Pseudo(Span::new(l..r, interner.get_or_intern("LINE"))),
+    <l:@L> "@" <name:Ident> <r:@R> => VariableName::Pseudo(Span::new(span!(source_id, l, r), name)),
+    <l:@L> "@" "LINE" <r:@R> => VariableName::Pseudo(Span::new(span!(source_id, l, r), interner.get_or_intern("LINE"))),
 }
 
 Var: VariableName = {
-    <l:@L> <name:Ident> <r:@R> => VariableName::User(Span::new(l..r, name)),
+    <l:@L> <name:Ident> <r:@R> => VariableName::User(Span::new(span!(source_id, l, r), name)),
 }
 
 Callee: Span<Symbol> = {
-    <l:@L> <name:Ident> <r:@R> => Span::new(l..r, name),
+    <l:@L> <name:Ident> <r:@R> => Span::new(span!(source_id, l, r), name),
 }
 
 Num: Expr = {
-    <l:@L> <n:number> <r:@R> =>? Ok(Expr::Num(Number::new(span!(l, r), n))),
+    <l:@L> <n:number> <r:@R> =>? Ok(Expr::Num(Number::new(span!(source_id, l, r), n))),
     <error:ERROR> =>? Err(ParseError::User { error: error.into() }),
 }
 
@@ -269,7 +269,7 @@ FormatSpecifier: FormatSpecifier = {
             "x" => Ok(FormatSpecifier::Hex),
             "X" => Ok(FormatSpecifier::Hex),
             _ => Err(ParseError::User {
-                error: ParserError::from(ExprError::InvalidFormatSpecifier { span: span!(l, r) }).into()
+                error: ParserError::from(ExprError::InvalidFormatSpecifier { span: span!(source_id, l, r) }).into()
             }),
         }
     }
@@ -278,7 +278,7 @@ FormatSpecifier: FormatSpecifier = {
 Precision: u8 = {
     <l:@L> <n:number> <r:@R> =>? {
         u8::try_from(n).map_err(|_| ParseError::User {
-            error: ParserError::from(ExprError::InvalidNumericPrecision { span: span!(l, r) }).into()
+            error: ParserError::from(ExprError::InvalidNumericPrecision { span: span!(source_id, l, r) }).into()
         })
     },
     <error:ERROR> =>? Err(ParseError::User { error: error.into() }),
@@ -289,5 +289,5 @@ Ident: Symbol = {
 }
 
 String: Span<&'input str> = {
-    <l:@L> <raw:raw> <r:@R> => Span::new(l..r, raw),
+    <l:@L> <raw:raw> <r:@R> => Span::new(span!(source_id, l, r), raw),
 }

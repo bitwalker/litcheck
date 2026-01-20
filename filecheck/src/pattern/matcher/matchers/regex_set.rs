@@ -12,7 +12,7 @@ use regex_automata::{
 use crate::{
     ast::{Capture, RegexPattern},
     common::*,
-    pattern::matcher::regex,
+    pattern::{matcher::regex, search::Input as _},
 };
 
 #[derive(Default, Clone)]
@@ -134,9 +134,22 @@ impl<'a, 'input, A> fmt::Debug for RegexSetSearcher<'a, 'input, A> {
 }
 impl<'a, 'input, A> Spanned for RegexSetSearcher<'a, 'input, A> {
     fn span(&self) -> SourceSpan {
-        let start = self.patterns.iter().map(|p| p.start()).min().unwrap();
-        let end = self.patterns.iter().map(|p| p.end()).max().unwrap();
-        SourceSpan::from(start..end)
+        let start = self
+            .patterns
+            .iter()
+            .map(|p| p.span())
+            .min_by_key(|span| span.start())
+            .unwrap();
+        let end = self
+            .patterns
+            .iter()
+            .map(|p| p.span())
+            .max_by_key(|span| span.end())
+            .unwrap();
+        SourceSpan::from_range_unchecked(
+            start.source_id(),
+            start.start().to_usize()..end.end().to_usize(),
+        )
     }
 }
 
@@ -182,7 +195,7 @@ impl<'a> RegexSetMatcher<'a> {
             .syntax(
                 syntax::Config::new()
                     .multi_line(true)
-                    .case_insensitive(config.ignore_case),
+                    .case_insensitive(config.options.ignore_case),
             )
             .build_many(&patterns)
             .map_err(|error| {
@@ -198,7 +211,7 @@ impl<'a> RegexSetMatcher<'a> {
                     syntax::Config::new()
                         .utf8(false)
                         .multi_line(true)
-                        .case_insensitive(config.ignore_case),
+                        .case_insensitive(config.options.ignore_case),
                 )
                 .thompson(thompson::Config::new().utf8(false))
                 .configure(onepass::Config::new().starts_for_each_pattern(true))
@@ -210,7 +223,7 @@ impl<'a> RegexSetMatcher<'a> {
                             .syntax(
                                 syntax::Config::new()
                                     .multi_line(true)
-                                    .case_insensitive(config.ignore_case),
+                                    .case_insensitive(config.options.ignore_case),
                             )
                             .build_many(&patterns)
                             .unwrap();
@@ -282,7 +295,7 @@ impl<'a> RegexSetMatcher<'a> {
             .iter()
             .enumerate()
             .map(|(i, p)| Span::new(p.span(), i))
-            .min_by_key(|span| span.start())
+            .min_by_key(|span| span.span().start())
             .unwrap()
     }
 
@@ -312,9 +325,22 @@ impl<'a, A> fmt::Debug for RegexSetMatcher<'a, A> {
 }
 impl<'a, A> Spanned for RegexSetMatcher<'a, A> {
     fn span(&self) -> SourceSpan {
-        let start = self.patterns.iter().map(|p| p.start()).min().unwrap();
-        let end = self.patterns.iter().map(|p| p.end()).max().unwrap();
-        SourceSpan::from(start..end)
+        let start = self
+            .patterns
+            .iter()
+            .map(|p| p.span())
+            .min_by_key(|span| span.start())
+            .unwrap();
+        let end = self
+            .patterns
+            .iter()
+            .map(|p| p.span())
+            .max_by_key(|span| span.end())
+            .unwrap();
+        SourceSpan::from_range_unchecked(
+            start.source_id(),
+            start.start().to_usize()..end.end().to_usize(),
+        )
     }
 }
 impl<'a, A: Automaton + Clone> MatcherMut for RegexSetMatcher<'a, A> {
@@ -421,7 +447,10 @@ where
             let pattern_id = matched.pattern();
             match self.capturing_regex {
                 CapturingRegex::None => {
-                    let overall_span = SourceSpan::from(matched.range());
+                    let overall_span = SourceSpan::from_range_unchecked(
+                        self.search.input.source_id(),
+                        matched.range(),
+                    );
                     let pattern_index = pattern_id.as_usize();
                     let pattern_span = self.patterns[pattern_index].span();
                     Ok(MatchResult::ok(MatchInfo {
@@ -451,10 +480,15 @@ where
                             context,
                         )
                     } else {
+                        let span = SourceSpan::from_range_unchecked(
+                            self.search.input.source_id(),
+                            matched.range(),
+                        );
+                        let pattern_span = self.patterns[pattern_id.as_usize()].span();
                         let error = CheckFailedError::MatchError {
-                            span: SourceSpan::from(matched.range()),
+                            span,
                             input_file: context.input_file(),
-                            labels: vec![RelatedLabel::note(Label::at(matched.range()), context.match_file())],
+                            labels: vec![RelatedLabel::note(Label::at(pattern_span), context.match_file())],
                             help: Some("meta regex searcher failed to match the input even though an initial DFA pass found a match".to_string()),
                         };
                         Err(Report::new(error))
@@ -480,10 +514,15 @@ where
                             context,
                         )
                     } else {
+                        let span = SourceSpan::from_range_unchecked(
+                            self.search.input.source_id(),
+                            matched.range(),
+                        );
+                        let pattern_span = self.patterns[pattern_id.as_usize()].span();
                         let error = CheckFailedError::MatchError {
-                            span: SourceSpan::from(matched.range()),
+                            span,
                             input_file: context.input_file(),
-                            labels: vec![RelatedLabel::note(Label::at(matched.range()), context.match_file())],
+                            labels: vec![RelatedLabel::note(Label::at(pattern_span), context.match_file())],
                             help: Some("onepass regex searcher failed to match the input even though an initial DFA pass found a match".to_string()),
                         };
                         Err(Report::new(error))
@@ -515,7 +554,7 @@ where
     let pattern_id = matched.pattern();
     let pattern_index = pattern_id.as_usize();
     let pattern_span = patterns[pattern_index].span();
-    let overall_span = SourceSpan::from(matched.range());
+    let overall_span = SourceSpan::from_range_unchecked(search.input.source_id(), matched.range());
     let mut capture_infos = Vec::with_capacity(search.captures.group_len());
     for (index, (maybe_capture_span, capture)) in search
         .captures
@@ -526,7 +565,8 @@ where
         if let Some(capture_span) = maybe_capture_span {
             let input = context.search();
             let captured = input.as_str(capture_span.range());
-            let capture_span = SourceSpan::from(capture_span.range());
+            let capture_span =
+                SourceSpan::from_range_unchecked(search.input.source_id(), capture_span.range());
             let result = regex::try_convert_capture_to_type(
                 pattern_id,
                 index,

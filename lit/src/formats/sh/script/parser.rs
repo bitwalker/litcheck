@@ -1,5 +1,6 @@
 use std::{fmt, ops::Range};
 
+use litcheck::diagnostics::SourceId;
 use regex::Regex;
 
 use super::*;
@@ -9,21 +10,18 @@ thread_local! {
     static SUBSTITUTION_NAME_RE: Regex = Regex::new(r"^%\{[_a-zA-Z][-_:0-9a-zA-Z]*\}$").unwrap();
 }
 
-pub struct TestScriptParser<'a, S: ?Sized> {
+pub struct TestScriptParser<'a> {
     script: TestScript,
-    source: &'a S,
+    source: &'a SourceFile,
     lines: Lines<'a>,
     errors: Vec<TestScriptError>,
     effective_line_number: usize,
     current_line_number: usize,
 }
-impl<'a, S> TestScriptParser<'a, S>
-where
-    S: NamedSourceFile + ?Sized,
-{
-    pub fn new(source: &'a S) -> Self {
+impl<'a> TestScriptParser<'a> {
+    pub fn new(source: &'a SourceFile) -> Self {
         let script = TestScript::default();
-        let lines = Lines::new(source.source());
+        let lines = Lines::new(source.id(), source.as_str());
 
         Self {
             script,
@@ -37,13 +35,17 @@ where
 
     pub fn parse(mut self) -> Result<TestScript, InvalidTestScriptError> {
         match self.try_parse() {
-            Ok(_) if !self.errors.is_empty() => {
-                Err(InvalidTestScriptError::new(self.source.name(), self.errors))
-            }
+            Ok(_) if !self.errors.is_empty() => Err(InvalidTestScriptError::new(
+                self.source.uri().clone(),
+                self.errors,
+            )),
             Ok(_) => Ok(self.script),
             Err(err) => {
                 self.errors.push(err);
-                Err(InvalidTestScriptError::new(self.source.name(), self.errors))
+                Err(InvalidTestScriptError::new(
+                    self.source.uri().clone(),
+                    self.errors,
+                ))
             }
         }
     }
@@ -51,7 +53,7 @@ where
     fn try_parse(&mut self) -> Result<(), TestScriptError> {
         while let Some(line) = self.next_line() {
             self.effective_line_number = self.current_line_number;
-            if let Some(directive) = RawDirective::parse(line) {
+            if let Some(directive) = RawDirective::parse(self.lines.source_id, line) {
                 match directive.kind {
                     DirectiveKind::End => {
                         if directive.content.trim().is_empty() {
@@ -96,7 +98,7 @@ where
     ) -> Result<Span<Cow<'a, str>>, TestScriptError> {
         let mut needs_continuation;
         let rest;
-        let mut stripped_eol = directive.end();
+        let mut stripped_eol = directive.span().end().to_usize();
         if let Some(stripped) = directive.content.strip_suffix('\\') {
             stripped_eol -= 1;
             needs_continuation = true;
@@ -109,10 +111,11 @@ where
         };
 
         let trimmed = rest.trim_start();
-        let start = directive.start() + (rest.len() - trimmed.len());
+        let start = directive.span().start().to_usize() + (rest.len() - trimmed.len());
         let mut span = start..stripped_eol;
         let mut output = StringRewriter::<'a>::new("");
         push_str_replacing_line_numbers(
+            self.lines.source_id,
             trimmed,
             &mut output,
             &span,
@@ -124,15 +127,18 @@ where
             let Some(line) = self.next_line() else {
                 break;
             };
-            span.end = line.end();
+            span.end = line.span().end().to_usize();
             let line_span = line.span();
-            let line = match RawDirective::parse(line) {
+            let line = match RawDirective::parse(self.lines.source_id, line) {
                 Some(cont_directive) => {
                     if cont_directive.kind != directive.kind {
                         self.errors
                             .push(TestScriptError::InvalidDirectiveContinuation {
                                 span: line_span,
-                                prev_line: SourceSpan::from(prev_line),
+                                prev_line: SourceSpan::from_range_unchecked(
+                                    cont_directive.span().source_id(),
+                                    prev_line,
+                                ),
                                 expected: directive.kind,
                             });
                     }
@@ -143,7 +149,10 @@ where
                     self.errors
                         .push(TestScriptError::MissingDirectiveContinuation {
                             span: line_span,
-                            prev_line: SourceSpan::from(prev_line),
+                            prev_line: SourceSpan::from_range_unchecked(
+                                directive.span().source_id(),
+                                prev_line,
+                            ),
                             expected: directive.kind,
                         });
                     line
@@ -174,6 +183,7 @@ where
             }
 
             push_str_replacing_line_numbers(
+                self.lines.source_id,
                 rest,
                 &mut output,
                 &span,
@@ -182,7 +192,10 @@ where
             );
         }
 
-        Ok(Span::new(span, output.build()))
+        Ok(Span::new(
+            SourceSpan::from_range_unchecked(directive.span().source_id(), span),
+            output.build(),
+        ))
     }
 
     fn parse_run(&mut self, directive: Span<RawDirective<'a>>) -> Result<(), TestScriptError> {
@@ -230,7 +243,7 @@ where
     }
 
     fn parse_bools(&mut self, directive: Span<RawDirective<'a>>) {
-        let start = directive.start();
+        let start = directive.span().start().to_usize();
         for expr in directive.content.split(',') {
             let len = expr.len();
             let expr = expr.trim_start();
@@ -238,7 +251,7 @@ where
             let start = start + (len - trimmed_len);
             let expr = expr.trim_end();
             let end = start + expr.len();
-            let span = SourceSpan::from(start..end);
+            let span = SourceSpan::from_range_unchecked(directive.span().source_id(), start..end);
             let expr = if expr == "*" {
                 Ok(Span::new(span, BooleanExpr::Lit(true)))
             } else {
@@ -359,13 +372,15 @@ impl<'a> StringRewriter<'a> {
 }
 
 struct Lines<'a> {
+    source_id: SourceId,
     iter: std::str::SplitInclusive<'a, char>,
     offset: usize,
     current_line: usize,
 }
 impl<'a> Lines<'a> {
-    pub fn new(s: &'a str) -> Self {
+    pub fn new(source_id: SourceId, s: &'a str) -> Self {
         Self {
+            source_id,
             iter: s.split_inclusive('\n'),
             offset: 0,
             current_line: 0,
@@ -389,7 +404,10 @@ impl<'a> Iterator for Lines<'a> {
             .map(|line| (stripped + 1, line))
             .unwrap_or((stripped, line));
         let end = self.offset - stripped;
-        Some(Span::new(SourceSpan::from(start..end), line))
+        Some(Span::new(
+            SourceSpan::from_range_unchecked(self.source_id, start..end),
+            line,
+        ))
     }
 }
 
@@ -398,6 +416,7 @@ thread_local! {
 }
 
 fn push_str_replacing_line_numbers<'a>(
+    source_id: SourceId,
     input: &'a str,
     buf: &mut StringRewriter<'a>,
     span: &Range<usize>,
@@ -421,7 +440,7 @@ fn push_str_replacing_line_numbers<'a>(
                     Ok(offset) => offset,
                     Err(error) => {
                         errors.push(TestScriptError::InvalidLineSubstitution {
-                            span: offset_span.into(),
+                            span: SourceSpan::from_range_unchecked(source_id, offset_span),
                             error,
                         });
                         0

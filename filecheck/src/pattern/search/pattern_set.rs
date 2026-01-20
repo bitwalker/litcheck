@@ -47,9 +47,19 @@ impl<'a, 'patterns, 'input> fmt::Debug for PatternSetSearcher<'a, 'patterns, 'in
 
 impl<'a, 'patterns, 'input> Spanned for PatternSetSearcher<'a, 'patterns, 'input> {
     fn span(&self) -> SourceSpan {
-        let start = self.patterns.iter().map(|p| p.start()).min().unwrap();
-        let end = self.patterns.iter().map(|p| p.end()).max().unwrap();
-        SourceSpan::from(start..end)
+        let start = self
+            .patterns
+            .iter()
+            .map(|p| p.span())
+            .min_by(|a, b| a.start().cmp(&b.start()))
+            .unwrap();
+        let end = self
+            .patterns
+            .iter()
+            .map(|p| p.span())
+            .max_by(|a, b| a.end().cmp(&b.end()))
+            .unwrap();
+        SourceSpan::new(start.source_id(), Range::new(start.start(), end.end()))
     }
 }
 impl<'a, 'patterns, 'input> PatternSearcher<'input> for PatternSetSearcher<'a, 'patterns, 'input> {
@@ -106,10 +116,10 @@ impl<'a, 'patterns, 'input> PatternSearcher<'input> for PatternSetSearcher<'a, '
                     info: Some(mut info),
                     ty,
                 } if ty.is_ok() => {
-                    let end = info.span.end();
+                    let end = info.span.end().to_usize();
                     next_start = core::cmp::min(end, next_start);
                     self.next_starts[pattern_id] =
-                        if info.span.range().is_empty() && Some(end) == self.last_match_end {
+                        if info.span.is_empty() && Some(end) == self.last_match_end {
                             end.saturating_add(1)
                         } else {
                             end
@@ -130,10 +140,10 @@ impl<'a, 'patterns, 'input> PatternSearcher<'input> for PatternSetSearcher<'a, '
                     ty,
                 } => {
                     // This is an error that we are going to return before other valid matches.
-                    let end = info.span.end();
+                    let end = info.span.end().to_usize();
                     next_start = core::cmp::min(end, next_start);
                     self.next_starts[pattern_id] =
-                        if info.span.range().is_empty() && Some(end) == self.last_match_end {
+                        if info.span.is_empty() && Some(end) == self.last_match_end {
                             end.saturating_add(1)
                         } else {
                             end

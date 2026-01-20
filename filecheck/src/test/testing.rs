@@ -11,13 +11,13 @@ use crate::{
 pub struct TestContext {
     pub config: Config,
     pub interner: StringInterner,
-    input_file: Option<ArcSource>,
-    match_file: Option<ArcSource>,
+    input_file: Option<Arc<SourceFile>>,
+    match_file: Option<Arc<SourceFile>>,
 }
 impl Default for TestContext {
     fn default() -> Self {
-        let result = diagnostics::reporting::set_hook(Box::new(|_| {
-            Box::new(diagnostics::reporting::ReportHandlerOpts::new().build())
+        let result = reporting::set_hook(Box::new(|_| {
+            Box::new(reporting::ReportHandlerOpts::new().build())
         }));
 
         if result.is_ok() {
@@ -38,60 +38,54 @@ impl TestContext {
         Self::default()
     }
 
-    pub fn with_checks<S>(&mut self, match_file: S) -> &mut Self
-    where
-        ArcSource: From<S>,
-    {
-        self.match_file = Some(ArcSource::from(match_file));
+    pub fn with_checks(&mut self, match_file: Arc<SourceFile>) -> &mut Self {
+        self.match_file = Some(match_file);
         self
     }
 
-    pub fn with_input<S>(&mut self, input_file: S) -> &mut Self
-    where
-        ArcSource: From<S>,
-    {
-        self.input_file = Some(ArcSource::from(input_file));
+    pub fn with_input(&mut self, input_file: Arc<SourceFile>) -> &mut Self {
+        self.input_file = Some(input_file);
         self
     }
 
     #[track_caller]
-    pub fn match_file(&self) -> ArcSource {
+    pub fn match_file(&self) -> Arc<SourceFile> {
         self.match_file.clone().expect("no match file was set")
     }
 
     #[track_caller]
-    pub fn input_file(&self) -> ArcSource {
+    pub fn input_file(&self) -> Arc<SourceFile> {
         self.input_file.clone().expect("no input file was set")
     }
 
     #[track_caller]
     pub fn check(&self) -> DiagResult<Vec<MatchInfo<'static>>> {
-        self.check_input(self.input_file())
+        let mut test = Test::new(self.match_file(), &self.config);
+        test.verify(self.input_file())
     }
 
     #[track_caller]
     pub fn check_failed(&self) -> TestFailed {
-        self.check_input(self.input_file())
+        let match_file = self.match_file();
+        let mut test = Test::new(match_file, &self.config);
+        test.verify(self.input_file())
             .unwrap_err()
             .downcast::<TestFailed>()
             .unwrap()
     }
 
     #[track_caller]
-    pub fn check_input<S>(&self, input_file: S) -> DiagResult<Vec<MatchInfo<'static>>>
-    where
-        ArcSource: From<S>,
-    {
+    pub fn check_input(&self, input: Arc<SourceFile>) -> DiagResult<Vec<MatchInfo<'static>>> {
         let match_file = self.match_file();
-        let input_file = ArcSource::from(input_file);
-        self.check_with_match_and_input(match_file, input_file)
+        let mut test = Test::new(match_file, &self.config);
+        test.verify(input)
     }
 
     #[track_caller]
     pub fn check_with_match_and_input(
         &self,
-        match_file: ArcSource,
-        input_file: ArcSource,
+        match_file: Arc<SourceFile>,
+        input_file: Arc<SourceFile>,
     ) -> DiagResult<Vec<MatchInfo<'static>>> {
         let mut test = Test::new(match_file, &self.config);
         test.verify(input_file)
@@ -106,40 +100,58 @@ impl TestContext {
             &mut self.interner,
             match_file,
             input_file,
-            self.input_file.as_ref().unwrap().source_bytes(),
+            self.input_file.as_ref().unwrap().as_bytes(),
         )
     }
 
     #[track_caller]
-    pub fn lex<'a, S: SourceFile + ?Sized>(&self, source: &'a S) -> Tokens<'a, S> {
+    pub fn lex<'a>(&self, source: &'a SourceFile) -> Tokens<'a, str> {
         Tokens {
-            source,
-            lexer: Lexer::<'a>::new(source, &self.config),
+            source: source.as_str(),
+            lexer: Lexer::<'a>::new(source.id(), source.as_str(), &self.config),
         }
     }
 
     #[track_caller]
-    pub fn lex_with_errors<'a, S: SourceFile + ?Sized>(
-        &self,
-        source: &'a S,
-    ) -> TokensWithErrors<'a> {
+    pub fn lex_with_errors<'a>(&self, source: &'a SourceFile) -> TokensWithErrors<'a> {
         TokensWithErrors {
-            lexer: Lexer::<'a>::new(source, &self.config),
+            lexer: Lexer::<'a>::new(source.id(), source.as_str(), &self.config),
         }
     }
 
     #[track_caller]
-    pub fn parse<'a>(&mut self, source: &'a str) -> DiagResult<CheckFile<'a>> {
+    pub fn parse_str<'a, 'ctx: 'a>(&'ctx mut self, source: &str) -> DiagResult<CheckFile<'a>> {
+        let caller = core::panic::Location::caller();
+        let test_name = format!("{}{}_checks", &caller.file(), &caller.line());
+        let source_file = self.config.source_manager.load(
+            SourceLanguage::Unknown,
+            FileName::from(test_name),
+            source.to_string(),
+        );
+        let mut parser = parse::CheckFileParser::new(&self.config, &mut self.interner);
+
+        let source = unsafe { &*(source_file.as_ref() as *const SourceFile) };
+
+        parser
+            .parse(source.id(), source.as_str())
+            .map_err(|err| Report::from(err).with_source_code(source_file))
+    }
+
+    #[track_caller]
+    pub fn parse<'a>(&mut self, source: &'a Arc<SourceFile>) -> DiagResult<CheckFile<'a>> {
         let mut parser = parse::CheckFileParser::new(&self.config, &mut self.interner);
         parser
-            .parse(source)
-            .map_err(|err| Report::from(err).with_source_code(source.to_string()))
+            .parse(source.id(), source.as_str())
+            .map_err(|err| Report::from(err).with_source_code(source.clone()))
     }
 
     #[track_caller]
-    pub fn parse_err<'a>(&mut self, source: &'a str) -> Result<CheckFile<'a>, ParserError> {
+    pub fn parse_err<'a>(
+        &mut self,
+        source: &'a Arc<SourceFile>,
+    ) -> Result<CheckFile<'a>, ParserError> {
         let mut parser = parse::CheckFileParser::new(&self.config, &mut self.interner);
-        parser.parse(source)
+        parser.parse(source.id(), source.as_str())
     }
 
     #[track_caller]
@@ -152,13 +164,13 @@ pub struct Tokens<'a, S: ?Sized> {
     source: &'a S,
     lexer: Lexer<'a>,
 }
-impl<'a, S: SourceFile + ?Sized> Tokens<'a, S> {
+impl<'a, S: ?Sized + AsRef<str>> Tokens<'a, S> {
     #[inline]
     pub fn next(&mut self) -> DiagResult<Option<Token<'a>>> {
         self.lexer
             .next()
             .transpose()
-            .map_err(|err| Report::from(err).with_source_code(self.source.source().to_string()))
+            .map_err(|err| Report::from(err).with_source_code(self.source.as_ref().to_string()))
             .map(|opt| opt.map(|(_, tok, _)| tok))
     }
 }

@@ -13,7 +13,9 @@ pub use crate::pattern::matcher::RegexSetSearcher;
 
 use std::{fmt, ops::RangeBounds};
 
-use crate::common::{Context, DiagResult, MatchResult, PatternIdentifier, Range, SourceSpan};
+use crate::common::{
+    Context, DiagResult, MatchResult, PatternIdentifier, Range, SourceId, SourceSpan,
+};
 
 pub trait Searcher {
     type Input: Input;
@@ -72,6 +74,7 @@ pub trait Match: fmt::Debug {
 }
 
 pub trait Input: fmt::Debug {
+    fn source_id(&self) -> SourceId;
     fn buffer(&self) -> &[u8];
     fn anchored(&self) -> bool;
     fn range(&self) -> Range<usize>;
@@ -79,13 +82,17 @@ pub trait Input: fmt::Debug {
     fn set_start(&mut self, start: usize);
     fn set_range(&mut self, range: Range<usize>);
     fn as_input(&self) -> crate::common::Input<'_> {
-        crate::common::Input::new(self.buffer(), false)
+        crate::common::Input::new(self.source_id(), self.buffer(), false)
             .anchored(self.anchored())
-            .span(self.range())
+            .bounded(self.range())
     }
 }
 
 impl<'a> Input for crate::common::Input<'a> {
+    #[inline(always)]
+    fn source_id(&self) -> SourceId {
+        crate::common::Input::source_id(self)
+    }
     #[inline(always)]
     fn buffer(&self) -> &[u8] {
         crate::common::Input::buffer(self)
@@ -108,6 +115,6 @@ impl<'a> Input for crate::common::Input<'a> {
     }
     #[inline(always)]
     fn set_range(&mut self, range: Range<usize>) {
-        crate::common::Input::set_span(self, range)
+        crate::common::Input::set_bounds(self, range)
     }
 }

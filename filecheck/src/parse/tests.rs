@@ -6,44 +6,39 @@ use crate::{
     ast::*,
     common::*,
     parse::{ParserError, Token},
+    source_file,
 };
-
-macro_rules! empty_span {
-    () => {
-        SourceSpan::from(0..0)
-    };
-}
 
 macro_rules! literal {
     ($s:literal) => {
-        CheckPattern::Literal(Span::new(empty_span!(), Cow::Borrowed($s)))
+        CheckPattern::Literal(Span::new(SourceSpan::UNKNOWN, Cow::Borrowed($s)))
     };
 
     ($s:expr) => {
-        CheckPattern::Literal(Span::new(empty_span!(), $s.into()))
+        CheckPattern::Literal(Span::new(SourceSpan::UNKNOWN, $s.into()))
     };
 }
 
 macro_rules! regex {
     ($s:literal) => {
         CheckPattern::Regex(RegexPattern::new(Span::new(
-            empty_span!(),
+            SourceSpan::UNKNOWN,
             Cow::Borrowed($s),
         )))
     };
 
     ($s:expr) => {
-        CheckPattern::Regex(RegexPattern::new(Span::new(empty_span!(), $s.into())))
+        CheckPattern::Regex(RegexPattern::new(Span::new(SourceSpan::UNKNOWN, $s.into())))
     };
 }
 
 macro_rules! literal_part {
     ($s:literal) => {
-        CheckPatternPart::Literal(Span::new(empty_span!(), Cow::Borrowed($s)))
+        CheckPatternPart::Literal(Span::new(SourceSpan::UNKNOWN, Cow::Borrowed($s)))
     };
 
     ($s:expr) => {
-        CheckPatternPart::Literal(Span::new(empty_span!(), $s.into()))
+        CheckPatternPart::Literal(Span::new(SourceSpan::UNKNOWN, $s.into()))
     };
 }
 
@@ -61,8 +56,9 @@ int main() {
 }
 "#;
     let context = TestContext::new();
+    let input = source_file!(context.config, input);
 
-    let mut lexer = context.lex(input);
+    let mut lexer = context.lex(&input);
 
     assert_eq!(
         lexer.next()?,
@@ -102,8 +98,9 @@ int main() {
 }
 "#;
     let mut context = TestContext::new();
+    let input = source_file!(context.config, input);
 
-    let file = context.parse(input).unwrap();
+    let file = context.parse(&input).unwrap();
 
     let lines = file.lines();
     assert_eq!(lines.len(), 1);
@@ -112,25 +109,25 @@ int main() {
     let pattern_parts = vec![
         literal_part!("Hello from line "),
         CheckPatternPart::Match(Match::Numeric {
-            span: empty_span!(),
+            span: SourceSpan::UNKNOWN,
             format: Default::default(),
             capture: None,
             constraint: Constraint::Eq,
             expr: Some(Expr::Binary {
-                span: empty_span!(),
+                span: SourceSpan::UNKNOWN,
                 op: BinaryOp::Add,
                 lhs: Box::new(Expr::Var(VariableName::Pseudo(Span::new(
-                    empty_span!(),
+                    SourceSpan::UNKNOWN,
                     context.interner.get_or_intern("LINE"),
                 )))),
-                rhs: Box::new(Expr::Num(Number::new(empty_span!(), 1))),
+                rhs: Box::new(Expr::Num(Number::new(SourceSpan::UNKNOWN, 1))),
             }),
         }),
     ];
-    let pattern = CheckPattern::Match(Span::new(empty_span!(), pattern_parts));
+    let pattern = CheckPattern::Match(Span::new(SourceSpan::UNKNOWN, pattern_parts));
     let expected = CheckLine::new(
-        empty_span!(),
-        CheckType::new(empty_span!(), Check::Plain),
+        SourceSpan::UNKNOWN,
+        CheckType::new(SourceSpan::UNKNOWN, Check::Plain),
         pattern,
     )
     .with_comment(Cow::Borrowed("gcc %s -o %t && %t \\"))
@@ -147,7 +144,8 @@ fn main() -> i32 { std::process::exit(); }
 "#;
     let context = TestContext::new();
 
-    let mut lexer = context.lex(input);
+    let input = source_file!(context.config, input);
+    let mut lexer = context.lex(&input);
 
     assert_eq!(lexer.next()?, Some(Token::Check(Check::Plain)));
     assert_eq!(lexer.next()?, Some(Token::Colon));
@@ -165,7 +163,8 @@ fn main() -> i32 { std::process::exit(); }
 "#;
     let mut context = TestContext::new();
 
-    let file = context.parse(input).unwrap();
+    let input = source_file!(context.config, input);
+    let file = context.parse(&input).unwrap();
 
     let lines = file.lines();
     assert_eq!(lines.len(), 1);
@@ -174,8 +173,8 @@ fn main() -> i32 { std::process::exit(); }
     assert_eq!(
         check_line,
         &CheckLine::new(
-            empty_span!(),
-            CheckType::new(empty_span!(), Check::Plain),
+            SourceSpan::UNKNOWN,
+            CheckType::new(SourceSpan::UNKNOWN, Check::Plain),
             literal!("main"),
         )
     );
@@ -190,7 +189,8 @@ fn main() -> i32 { std::process::exit(); }
 "#;
     let context = TestContext::new();
 
-    let mut lexer = context.lex(input);
+    let input = source_file!(context.config, input);
+    let mut lexer = context.lex(&input);
 
     assert_eq!(lexer.next()?, Some(Token::Check(Check::Plain)));
     assert_eq!(lexer.next()?, Some(Token::Colon));
@@ -213,7 +213,8 @@ fn main() -> i32 { std::process::exit(); }
 "#;
     let mut context = TestContext::new();
 
-    let file = context.parse(input).unwrap();
+    let input = source_file!(context.config, input);
+    let file = context.parse(&input).unwrap();
 
     let lines = file.lines();
     assert_eq!(lines.len(), 1);
@@ -222,8 +223,8 @@ fn main() -> i32 { std::process::exit(); }
     assert_eq!(
         check_line,
         &CheckLine::new(
-            empty_span!(),
-            CheckType::new(empty_span!(), Check::Plain),
+            SourceSpan::UNKNOWN,
+            CheckType::new(SourceSpan::UNKNOWN, Check::Plain),
             regex!("main.*[[:space:]]i32[[:space:]]")
         )
     );
@@ -241,7 +242,8 @@ fn main() -> i32 { foo(); }
 "#;
     let context = TestContext::new();
 
-    let mut lexer = context.lex(input);
+    let input = source_file!(context.config, input);
+    let mut lexer = context.lex(&input);
 
     assert_eq!(lexer.next()?, Some(Token::Check(Check::Plain)));
     assert_eq!(lexer.next()?, Some(Token::Colon));
@@ -273,7 +275,8 @@ fn main() -> i32 { foo(); }
 "#;
     let mut context = TestContext::new();
 
-    let file = context.parse(input).unwrap();
+    let input = source_file!(context.config, input);
+    let file = context.parse(&input).unwrap();
 
     let lines = file.lines();
     assert_eq!(lines.len(), 2);
@@ -283,15 +286,15 @@ fn main() -> i32 { foo(); }
     assert_eq!(
         capture_line,
         &CheckLine::new(
-            empty_span!(),
-            CheckType::new(empty_span!(), Check::Plain),
+            SourceSpan::UNKNOWN,
+            CheckType::new(SourceSpan::UNKNOWN, Check::Plain),
             CheckPattern::Match(Span::new(
-                empty_span!(),
+                SourceSpan::UNKNOWN,
                 vec![CheckPatternPart::Match(Match::Substitution {
-                    span: empty_span!(),
-                    name: VariableName::User(Span::new(empty_span!(), fun)),
+                    span: SourceSpan::UNKNOWN,
+                    name: VariableName::User(Span::new(SourceSpan::UNKNOWN, fun)),
                     pattern: Some(Span::new(
-                        empty_span!(),
+                        SourceSpan::UNKNOWN,
                         Cow::Borrowed("fn [a-z][a-zA-Z0-9_]+")
                     )),
                 })]
@@ -303,14 +306,14 @@ fn main() -> i32 { foo(); }
     assert_eq!(
         substitute_line,
         &CheckLine::new(
-            empty_span!(),
-            CheckType::new(empty_span!(), Check::Plain),
+            SourceSpan::UNKNOWN,
+            CheckType::new(SourceSpan::UNKNOWN, Check::Plain),
             CheckPattern::Match(Span::new(
-                empty_span!(),
+                SourceSpan::UNKNOWN,
                 vec![
                     CheckPatternPart::Match(Match::Substitution {
-                        span: empty_span!(),
-                        name: VariableName::User(Span::new(empty_span!(), fun)),
+                        span: SourceSpan::UNKNOWN,
+                        name: VariableName::User(Span::new(SourceSpan::UNKNOWN, fun)),
                         pattern: None,
                     }),
                     literal_part!("("),
@@ -331,7 +334,8 @@ fn main() -> i64 { foo(); }
 "#;
     let context = TestContext::new();
 
-    let mut lexer = context.lex(input);
+    let input = source_file!(context.config, input);
+    let mut lexer = context.lex(&input);
 
     assert_eq!(lexer.next()?, Some(Token::Check(Check::Plain)));
     assert_eq!(lexer.next()?, Some(Token::Colon));
@@ -370,7 +374,8 @@ fn main() -> i64 { foo(); }
 "#;
     let mut context = TestContext::new();
 
-    let file = context.parse(input).unwrap();
+    let input = source_file!(context.config, input);
+    let file = context.parse(&input).unwrap();
 
     let lines = file.lines();
     assert_eq!(lines.len(), 2);
@@ -378,16 +383,16 @@ fn main() -> i64 { foo(); }
     let bits = context.interner.get_or_intern("BITS");
     let capture_line = &lines[0];
     let expected = CheckLine::new(
-        empty_span!(),
-        CheckType::new(empty_span!(), Check::Plain),
+        SourceSpan::UNKNOWN,
+        CheckType::new(SourceSpan::UNKNOWN, Check::Plain),
         CheckPattern::Match(Span::new(
-            empty_span!(),
+            SourceSpan::UNKNOWN,
             vec![
                 literal_part!("i"),
                 CheckPatternPart::Match(Match::Numeric {
-                    span: empty_span!(),
+                    span: SourceSpan::UNKNOWN,
                     format: NumberFormat::Unsigned { precision: 0 },
-                    capture: Some(VariableName::User(Span::new(empty_span!(), bits))),
+                    capture: Some(VariableName::User(Span::new(SourceSpan::UNKNOWN, bits))),
                     constraint: Constraint::Eq,
                     expr: None,
                 }),
@@ -401,25 +406,25 @@ fn main() -> i64 { foo(); }
     assert_eq!(
         substitute_line,
         &CheckLine::new(
-            empty_span!(),
-            CheckType::new(empty_span!(), Check::Next),
+            SourceSpan::UNKNOWN,
+            CheckType::new(SourceSpan::UNKNOWN, Check::Next),
             CheckPattern::Match(Span::new(
-                empty_span!(),
+                SourceSpan::UNKNOWN,
                 vec![
                     literal_part!("i"),
                     CheckPatternPart::Match(Match::Numeric {
-                        span: empty_span!(),
+                        span: SourceSpan::UNKNOWN,
                         format: NumberFormat::Unsigned { precision: 0 },
                         capture: None,
                         constraint: Constraint::Eq,
                         expr: Some(Expr::Binary {
-                            span: empty_span!(),
+                            span: SourceSpan::UNKNOWN,
                             op: BinaryOp::Mul,
                             lhs: Box::new(Expr::Var(VariableName::User(Span::new(
-                                empty_span!(),
+                                SourceSpan::UNKNOWN,
                                 bits
                             )))),
-                            rhs: Box::new(Expr::Num(Number::new(empty_span!(), 2))),
+                            rhs: Box::new(Expr::Num(Number::new(SourceSpan::UNKNOWN, 2))),
                         })
                     }),
                 ]
@@ -439,7 +444,8 @@ fn main() -> i64 { foo(); }
 "#;
     let context = TestContext::new();
 
-    let mut lexer = context.lex(input);
+    let input = source_file!(context.config, input);
+    let mut lexer = context.lex(&input);
 
     assert_eq!(lexer.next()?, Some(Token::Check(Check::Plain)));
     assert_eq!(lexer.next()?, Some(Token::Colon));
@@ -483,7 +489,8 @@ fn main() -> i64 { foo(); }
 "#;
     let mut context = TestContext::new();
 
-    let file = context.parse(input).unwrap();
+    let input = source_file!(context.config, input);
+    let file = context.parse(&input).unwrap();
 
     let lines = file.lines();
     assert_eq!(lines.len(), 2);
@@ -491,16 +498,16 @@ fn main() -> i64 { foo(); }
     let bits = context.interner.get_or_intern("BITS");
     let capture_line = &lines[0];
     let expected = CheckLine::new(
-        empty_span!(),
-        CheckType::new(empty_span!(), Check::Plain),
+        SourceSpan::UNKNOWN,
+        CheckType::new(SourceSpan::UNKNOWN, Check::Plain),
         CheckPattern::Match(Span::new(
-            empty_span!(),
+            SourceSpan::UNKNOWN,
             vec![
                 literal_part!("i"),
                 CheckPatternPart::Match(Match::Numeric {
-                    span: empty_span!(),
+                    span: SourceSpan::UNKNOWN,
                     format: NumberFormat::Unsigned { precision: 2 },
-                    capture: Some(VariableName::User(Span::new(empty_span!(), bits))),
+                    capture: Some(VariableName::User(Span::new(SourceSpan::UNKNOWN, bits))),
                     constraint: Constraint::Eq,
                     expr: None,
                 }),
@@ -514,25 +521,25 @@ fn main() -> i64 { foo(); }
     assert_eq!(
         substitute_line,
         &CheckLine::new(
-            empty_span!(),
-            CheckType::new(empty_span!(), Check::Next),
+            SourceSpan::UNKNOWN,
+            CheckType::new(SourceSpan::UNKNOWN, Check::Next),
             CheckPattern::Match(Span::new(
-                empty_span!(),
+                SourceSpan::UNKNOWN,
                 vec![
                     literal_part!("i"),
                     CheckPatternPart::Match(Match::Numeric {
-                        span: empty_span!(),
+                        span: SourceSpan::UNKNOWN,
                         format: NumberFormat::Unsigned { precision: 2 },
                         capture: None,
                         constraint: Constraint::Eq,
                         expr: Some(Expr::Binary {
-                            span: empty_span!(),
+                            span: SourceSpan::UNKNOWN,
                             op: BinaryOp::Mul,
                             lhs: Box::new(Expr::Var(VariableName::User(Span::new(
-                                empty_span!(),
+                                SourceSpan::UNKNOWN,
                                 bits,
                             )))),
-                            rhs: Box::new(Expr::Num(Number::new(empty_span!(), 2))),
+                            rhs: Box::new(Expr::Num(Number::new(SourceSpan::UNKNOWN, 2))),
                         })
                     }),
                 ]
@@ -554,7 +561,8 @@ Output %r10: [[30, 40]]
 "#;
     let context = TestContext::new();
 
-    let mut lexer = context.lex(input);
+    let input = source_file!(context.config, input);
+    let mut lexer = context.lex(&input);
     assert_eq!(lexer.next()?, Some(Token::Check(Check::Plain)));
     assert_eq!(lexer.next()?, Some(Token::Modifier(CheckModifier::LITERAL)));
     assert_eq!(lexer.next()?, Some(Token::Colon));
@@ -587,34 +595,35 @@ Output %r10: [[30, 40]]
 "#;
     let mut context = TestContext::new();
 
-    let file = context.parse(input).unwrap();
+    let input = source_file!(context.config, input);
+    let file = context.parse(&input).unwrap();
 
     let lines = file.lines();
     assert_eq!(lines.len(), 3);
 
     let line = &lines[0];
     let expected = CheckLine::new(
-        empty_span!(),
-        CheckType::new(empty_span!(), Check::Plain)
-            .with_modifiers(Span::new(empty_span!(), CheckModifier::LITERAL)),
+        SourceSpan::UNKNOWN,
+        CheckType::new(SourceSpan::UNKNOWN, Check::Plain)
+            .with_modifiers(Span::new(SourceSpan::UNKNOWN, CheckModifier::LITERAL)),
         literal!("[[[10, 20]], [[30, 40]]]"),
     );
     assert_eq!(line, &expected);
 
     let line = &lines[1];
     let expected = CheckLine::new(
-        empty_span!(),
-        CheckType::new(empty_span!(), Check::Dag)
-            .with_modifiers(Span::new(empty_span!(), CheckModifier::LITERAL)),
+        SourceSpan::UNKNOWN,
+        CheckType::new(SourceSpan::UNKNOWN, Check::Dag)
+            .with_modifiers(Span::new(SourceSpan::UNKNOWN, CheckModifier::LITERAL)),
         literal!("[[30, 40]]"),
     );
     assert_eq!(line, &expected);
 
     let line = &lines[2];
     let expected = CheckLine::new(
-        empty_span!(),
-        CheckType::new(empty_span!(), Check::Dag)
-            .with_modifiers(Span::new(empty_span!(), CheckModifier::LITERAL)),
+        SourceSpan::UNKNOWN,
+        CheckType::new(SourceSpan::UNKNOWN, Check::Dag)
+            .with_modifiers(Span::new(SourceSpan::UNKNOWN, CheckModifier::LITERAL)),
         literal!("[[10, 20]]"),
     );
     assert_eq!(line, &expected);
@@ -632,7 +641,8 @@ Output %r10: [[30, 40]]
 "#;
     let context = TestContext::new();
 
-    let mut lexer = context.lex(input);
+    let input = source_file!(context.config, input);
+    let mut lexer = context.lex(&input);
 
     assert_eq!(
         lexer.next()?,
@@ -661,17 +671,17 @@ Output %r10: [[30, 40]]
 "#;
     let mut context = TestContext::new();
 
-    //let file = context.parse(input).unwrap();
-    let file = context.parse(input).unwrap();
+    let input = source_file!(context.config, input);
+    let file = context.parse(&input).unwrap();
 
     let lines = file.lines();
     assert_eq!(lines.len(), 1);
 
     let line = &lines[0];
     let expected = CheckLine::new(
-        empty_span!(),
-        CheckType::new(empty_span!(), Check::Dag)
-            .with_modifiers(Span::new(empty_span!(), CheckModifier::LITERAL)),
+        SourceSpan::UNKNOWN,
+        CheckType::new(SourceSpan::UNKNOWN, Check::Dag)
+            .with_modifiers(Span::new(SourceSpan::UNKNOWN, CheckModifier::LITERAL)),
         literal!("[[30, 40]]"),
     )
     .with_comment(Cow::Borrowed("CHECK{LITERAL}: [[[10, 20]], [[30, 40]]]"));
@@ -695,7 +705,8 @@ fn main() -> i32 { std::process::exit(); }
 "#;
     let context = TestContext::new();
 
-    let mut lexer = context.lex(input);
+    let input = source_file!(context.config, input);
+    let mut lexer = context.lex(&input);
 
     assert_eq!(lexer.next()?, Some(Token::Comment("main".into())));
     assert_eq!(lexer.next()?, Some(Token::Lf));
@@ -721,8 +732,9 @@ fn main() -> i32 { std::process::exit(); }
 "#;
     let mut context = TestContext::new();
 
+    let input = source_file!(context.config, input);
     assert_matches!(
-        context.parse_err(input),
+        context.parse_err(&input),
         Err(ParserError::UnusedCheckPrefixes(_))
     );
 }
@@ -741,7 +753,8 @@ fn main() -> i32 { std::process::exit(); }
 "#;
     let context = TestContext::new();
 
-    let mut lexer = context.lex(input);
+    let input = source_file!(context.config, input);
+    let mut lexer = context.lex(&input);
 
     for _ in 0..6 {
         assert_eq!(lexer.next()?, Some(Token::Check(Check::Plain)));
@@ -765,7 +778,8 @@ CHECK-DAG: v8 = add v6, v7
 ";
     let context = TestContext::new();
 
-    let mut lexer = context.lex(input);
+    let input = source_file!(context.config, input);
+    let mut lexer = context.lex(&input);
 
     assert_eq!(lexer.next()?, Some(Token::Check(Check::Label)));
     assert_eq!(lexer.next()?, Some(Token::Colon));
@@ -812,9 +826,10 @@ BREAK
 # CNT-NEXT: break
 ";
     let mut context = TestContext::new();
-    context.config.check_prefixes = vec![Arc::from("CNT".to_string().into_boxed_str())];
+    context.config.options.check_prefixes = vec![Arc::from("CNT".to_string().into_boxed_str())];
 
-    let mut lexer = context.lex(input);
+    let input = source_file!(context.config, input);
+    let mut lexer = context.lex(&input);
 
     assert_eq!(lexer.next()?, Some(Token::Check(Check::Count(6))));
     assert_eq!(lexer.next()?, Some(Token::Colon));
@@ -847,7 +862,8 @@ fn main() -> i32 { std::process::exit(); }
 "#;
     let context = TestContext::new();
 
-    let mut lexer = context.lex_with_errors(input);
+    let input = source_file!(context.config, input);
+    let mut lexer = context.lex_with_errors(&input);
 
     assert_eq!(lexer.next()?, Some(Token::Check(Check::Plain)));
     assert_eq!(lexer.next()?, Some(Token::Colon));
@@ -865,7 +881,8 @@ fn main() -> i32 { std::process::exit(); }
 "#;
     let context = TestContext::new();
 
-    let mut lexer = context.lex_with_errors(input);
+    let input = source_file!(context.config, input);
+    let mut lexer = context.lex_with_errors(&input);
 
     assert_eq!(lexer.next()?, Some(Token::Check(Check::Plain)));
     assert_eq!(lexer.next()?, Some(Token::Colon));
@@ -883,7 +900,8 @@ fn main() -> i32 { std::process::exit(); }
 "#;
     let context = TestContext::new();
 
-    let mut lexer = context.lex_with_errors(input);
+    let input = source_file!(context.config, input);
+    let mut lexer = context.lex_with_errors(&input);
 
     assert_eq!(lexer.next()?, Some(Token::Check(Check::Plain)));
     assert_eq!(lexer.next()?, Some(Token::Colon));
@@ -902,7 +920,8 @@ fn main() -> i32 { std::process::exit(); }
 "#;
     let context = TestContext::new();
 
-    let mut lexer = context.lex_with_errors(input);
+    let input = source_file!(context.config, input);
+    let mut lexer = context.lex_with_errors(&input);
 
     assert_eq!(lexer.next()?, Some(Token::Check(Check::Plain)));
     assert_eq!(lexer.next()?, Some(Token::Colon));
@@ -921,14 +940,15 @@ fn parser_sanity_test() -> DiagResult<()> {
 
     let mut context = TestContext::new();
 
-    let file = context.parse(INPUT).unwrap();
+    let input = source_file!(context.config, INPUT);
+    let file = context.parse(&input).unwrap();
 
     let lines = file.lines();
     assert_eq!(lines.len(), 6);
 
     let expected = CheckLine::new(
-        empty_span!(),
-        CheckType::new(empty_span!(), Check::Label),
+        SourceSpan::UNKNOWN,
+        CheckType::new(SourceSpan::UNKNOWN, Check::Label),
         literal!("Some random"),
     )
     .with_comment(Cow::Borrowed(
@@ -937,30 +957,30 @@ fn parser_sanity_test() -> DiagResult<()> {
     assert_eq!(&lines[0], &expected);
 
     let expected = CheckLine::new(
-        empty_span!(),
-        CheckType::new(empty_span!(), Check::Empty),
-        CheckPattern::Empty(empty_span!()),
+        SourceSpan::UNKNOWN,
+        CheckType::new(SourceSpan::UNKNOWN, Check::Empty),
+        CheckPattern::Empty(SourceSpan::UNKNOWN),
     );
     assert_eq!(&lines[1], &expected);
     assert_eq!(&lines[2], &expected);
 
     let expected = CheckLine::new(
-        empty_span!(),
-        CheckType::new(empty_span!(), Check::Plain),
+        SourceSpan::UNKNOWN,
+        CheckType::new(SourceSpan::UNKNOWN, Check::Plain),
         literal!("content to"),
     );
     assert_eq!(&lines[3], &expected);
 
     let expected = CheckLine::new(
-        empty_span!(),
-        CheckType::new(empty_span!(), Check::Same),
+        SourceSpan::UNKNOWN,
+        CheckType::new(SourceSpan::UNKNOWN, Check::Same),
         literal!("show output"),
     );
     assert_eq!(&lines[4], &expected);
 
     let expected = CheckLine::new(
-        empty_span!(),
-        CheckType::new(empty_span!(), Check::Next),
+        SourceSpan::UNKNOWN,
+        CheckType::new(SourceSpan::UNKNOWN, Check::Next),
         literal!("and some rules"),
     );
     assert_eq!(&lines[5], &expected);

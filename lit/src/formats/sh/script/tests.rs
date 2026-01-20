@@ -1,3 +1,4 @@
+use litcheck::diagnostics::{DefaultSourceManager, SourceManager};
 use regex::Regex;
 
 use super::*;
@@ -48,7 +49,9 @@ block3(v9: u32):
 ; CHECK-NEXT: }
 "#;
 
-    let script = TestScript::parse_str(SCRIPT)?;
+    let source_manager = DefaultSourceManager::default();
+    let source = source_manager.load(Default::default(), FileName::Stdin, SCRIPT.to_string());
+    let script = TestScript::parse(source)?;
     assert_eq!(script.commands.len(), 1);
     assert_eq!(
         script.commands[0].unwrap_run().command,
@@ -77,7 +80,9 @@ block0(v0: u32):
     ret v0
 }
 ";
-    let script = TestScript::parse_str(SCRIPT)?;
+    let source_manager = DefaultSourceManager::default();
+    let source = source_manager.load(Default::default(), FileName::Stdin, SCRIPT.to_string());
+    let script = TestScript::parse(source)?;
     assert_eq!(script.commands.len(), 2);
     assert_eq!(
         script.commands[0].unwrap_run().command,
@@ -111,7 +116,9 @@ block0(v0: u32):
     ret v0
 }
 ";
-    let script = TestScript::parse_str(SCRIPT)?;
+    let source_manager = DefaultSourceManager::default();
+    let source = source_manager.load(Default::default(), FileName::Stdin, SCRIPT.to_string());
+    let script = TestScript::parse(source)?;
     assert_eq!(script.commands.len(), 3);
     let define = script.commands[1].unwrap_sub();
     assert_eq!(define.key, "%{foo}");
@@ -143,7 +150,9 @@ block0(v0: u32):
     ret v0
 }
 ";
-    let script = TestScript::parse_str(SCRIPT)?;
+    let source_manager = DefaultSourceManager::default();
+    let source = source_manager.load(Default::default(), FileName::Stdin, SCRIPT.to_string());
+    let script = TestScript::parse(source)?;
     assert_eq!(script.commands.len(), 1);
     assert_eq!(script.requires.len(), 1);
     assert_eq!(

@@ -17,7 +17,7 @@ pub use self::test::TestContext;
 pub use self::test::{Test, TestResult};
 
 use clap::{builder::ValueParser, ArgAction, Args, ColorChoice, ValueEnum};
-use litcheck::diagnostics::{DiagResult, Report};
+use litcheck::diagnostics::{DefaultSourceManager, DiagResult, Report, SourceManager};
 use std::sync::Arc;
 
 #[doc(hidden)]
@@ -32,10 +32,13 @@ pub(crate) mod common {
     };
 
     pub use either::Either::{self, Left, Right};
+    #[cfg(test)]
+    pub use litcheck::reporting;
     pub use litcheck::{
         diagnostics::{
-            ArcSource, Diag, DiagResult, Diagnostic, Label, NamedSourceFile, Report, Source,
-            SourceFile, SourceSpan, Span, Spanned,
+            Diag, DiagResult, Diagnostic, FileName, Label, Report, SourceFile, SourceId,
+            SourceLanguage, SourceManager, SourceManagerError, SourceManagerExt, SourceSpan, Span,
+            Spanned,
         },
         range::{self, Range},
         text::{self, Newline},
@@ -69,8 +72,51 @@ pub const DEFAULT_COMMENT_PREFIXES: &[&str] = &["COM", "RUN"];
 
 /// FileCheck reads two files, one from standard input, and one specified on
 /// the command line; and uses one to verify the other.
-#[derive(Debug, Args)]
 pub struct Config {
+    pub source_manager: Arc<dyn SourceManager>,
+    pub options: Options,
+}
+
+impl Config {
+    #[inline(always)]
+    pub fn source_manager(&self) -> &dyn SourceManager {
+        &self.source_manager
+    }
+
+    /// Returns true if the user has passed -v, requesting diagnostic remarks be output for matches
+    pub const fn remarks_enabled(&self) -> bool {
+        self.options.verbose > 0
+    }
+
+    /// Returns true if the user has passed -vv, requesting verbose diagnostics be output
+    ///
+    /// NOTE: This is different than the tracing enabled via LITCHECK_TRACE which is tailored for
+    /// diagnosing litcheck internals. Instead, the tracing referred to here is end user-oriented,
+    /// and meant to provide helpful information to understand why a test is failing
+    pub const fn tracing_enabled(&self) -> bool {
+        self.options.verbose > 1
+    }
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            source_manager: Arc::from(DefaultSourceManager::default()),
+            options: Options::default(),
+        }
+    }
+}
+
+impl core::fmt::Debug for Config {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        core::fmt::Debug::fmt(&self.options, f)
+    }
+}
+
+/// FileCheck reads two files, one from standard input, and one specified on
+/// the command line; and uses one to verify the other.
+#[derive(Debug, Args)]
+pub struct Options {
     /// Allow checking empty input. By default, empty input is rejected.
     #[arg(
         long,
@@ -149,7 +195,7 @@ pub struct Config {
     /// option FileCheck will verify that input does not contain warnings not covered by any
     /// `CHECK:` patterns.
     #[arg(long, value_name = "CHECK", help_heading = "Matching")]
-    pub implicit_check_not: Vec<String>,
+    pub implicit_check_not: Vec<Arc<str>>,
     /// Dump input to stderr, adding annotations representing currently enabled diagnostics.
     #[arg(long, value_enum, value_name = "TYPE", default_value_t = Dump::Fail, help_heading = "Output")]
     pub dump_input: Dump,
@@ -205,7 +251,7 @@ pub struct Config {
     pub color: ColorChoice,
 }
 
-impl Default for Config {
+impl Default for Options {
     fn default() -> Self {
         Self {
             allow_empty: false,
@@ -229,21 +275,7 @@ impl Default for Config {
     }
 }
 
-impl Config {
-    /// Returns true if the user has passed -v, requesting diagnostic remarks be output for matches
-    pub const fn remarks_enabled(&self) -> bool {
-        self.verbose > 0
-    }
-
-    /// Returns true if the user has passed -vv, requesting verbose diagnostics be output
-    ///
-    /// NOTE: This is different than the tracing enabled via LITCHECK_TRACE which is tailored for
-    /// diagnosing litcheck internals. Instead, the tracing referred to here is end user-oriented,
-    /// and meant to provide helpful information to understand why a test is failing
-    pub const fn tracing_enabled(&self) -> bool {
-        self.verbose > 1
-    }
-
+impl Options {
     pub fn validate(&self) -> DiagResult<()> {
         // Validate that we do not have overlapping check and comment prefixes
         if self
@@ -349,13 +381,16 @@ fn prefix_value_parser() -> ValueParser {
 ///
 /// ```rust
 /// #![expect(unstable_name_collisions)]
-/// use litcheck_filecheck::{filecheck, Config};
+/// use litcheck_filecheck::{filecheck, Config, Options};
 /// use itertools::Itertools;
 ///
 /// let original = "abbc";
 /// let modified = original.chars().intersperse('\n').collect::<String>();
 /// let config = Config {
-///     match_full_lines: true,
+///     options: Options {
+///         match_full_lines: true,
+///         ..Options::default()
+///     },
 ///     ..Config::default()
 /// };
 ///
@@ -377,12 +412,12 @@ macro_rules! filecheck {
 
     ($input:expr, $checks:expr, $config:expr) => {{
         let config = $config;
-        let input = $input.to_string();
-        let checks = $checks.to_string();
+        let input = $crate::source_file!(config, $input.to_string());
+        let checks = $crate::source_file!(config, $checks.to_string());
         let mut test = $crate::Test::new(checks, &config);
         match test.verify(input) {
             Err(err) => {
-                let printer = $crate::litcheck::diagnostics::reporting::PrintDiagnostic::new(err);
+                let printer = $crate::litcheck::reporting::PrintDiagnostic::new(err);
                 panic!("{printer}");
             }
             Ok(matches) => matches,

@@ -99,11 +99,6 @@ pub struct TestSuiteKey {
     #[serde(skip, default)]
     pub path: Option<Arc<Path>>,
 }
-impl litcheck::diagnostics::Spanned for TestSuiteKey {
-    fn span(&self) -> litcheck::diagnostics::SourceSpan {
-        litcheck::diagnostics::SourceSpan::from(self.name.span())
-    }
-}
 impl TestSuiteKey {
     pub fn new(name: toml::Spanned<Arc<str>>, path: Option<Arc<Path>>) -> Self {
         Self { name, path }
@@ -118,6 +113,10 @@ impl TestSuiteKey {
     /// The path to the configuration file for the suite to which this key is associated
     pub fn path(&self) -> &Path {
         self.path.as_deref().unwrap_or(Path::new(""))
+    }
+
+    pub fn span(&self) -> core::ops::Range<usize> {
+        self.name.span()
     }
 }
 impl fmt::Display for TestSuiteKey {

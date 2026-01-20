@@ -7,7 +7,7 @@ pub mod suite;
 pub mod test;
 pub(crate) mod utils;
 
-pub use self::config::Config;
+pub use self::config::{Config, Options};
 pub use self::format::TestFormat;
 pub use self::suite::{
     DefaultTestSuiteRegistry, TestSuite, TestSuiteError, TestSuiteRegistry, TestSuiteRegistryExt,

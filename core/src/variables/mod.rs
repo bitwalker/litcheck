@@ -4,7 +4,14 @@ use std::{
     fmt,
 };
 
-use crate::diagnostics::{self, DiagResult, Diagnostic, Label, Report, SourceSpan, Span, Spanned};
+use miette::Context;
+
+use crate::{
+    diagnostics::{
+        self, DiagResult, Diagnostic, Label, Report, SourceId, SourceSpan, Span, Spanned,
+    },
+    range::Range,
+};
 
 pub trait ValueParser {
     type Value<'a>;
@@ -59,7 +66,7 @@ pub trait TypedVariable: Clone + Sized {
     type Key<'a>;
     type Value<'a>;
 
-    fn try_parse(input: Span<&str>) -> Result<Self, VariableError>;
+    fn try_parse(input: Span<&str>) -> Result<Self, Report>;
 }
 
 #[derive(Diagnostic, Debug)]
@@ -68,46 +75,23 @@ pub enum VariableError {
     Empty(#[label] SourceSpan),
     #[diagnostic()]
     EmptyName(#[label] SourceSpan),
-    #[diagnostic(transparent)]
-    Name(Report),
-    #[diagnostic(transparent)]
-    Value(Report),
     #[diagnostic()]
     MissingEquals(#[label] SourceSpan),
-    #[diagnostic(transparent)]
-    Format(Report),
 }
 impl VariableError {
     pub fn into_report(self) -> Report {
-        match self {
-            Self::Name(report) | Self::Value(report) | Self::Format(report) => report,
-            _ => Report::from(self),
-        }
+        Report::from(self)
     }
 }
-impl std::error::Error for VariableError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        use std::error::Error;
-
-        match self {
-            Self::Name(ref report) | Self::Value(ref report) | Self::Format(ref report) => {
-                AsRef::<dyn Error>::as_ref(report).source()
-            }
-            _ => None,
-        }
-    }
-}
+impl std::error::Error for VariableError {}
 impl fmt::Display for VariableError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Empty(_) => f.write_str("invalid variable definition: expected expression of the form `NAME(=VALUE)?`"),
             Self::EmptyName(_) => f.write_str("invalid variable definition: name cannot be empty"),
-            Self::Name(_) => f.write_str("invalid variable name"),
-            Self::Value(_) => f.write_str("invalid variable value"),
             Self::MissingEquals(_) => f.write_str(
                 "invalid variable definition: expected 'NAME=VALUE', but no '=' was found in the input",
             ),
-            Self::Format(_) => f.write_str("invalid variable definition"),
         }
     }
 }
@@ -128,7 +112,6 @@ where
 
     fn try_parse(input: Span<&str>) -> DiagResult<Self::Value<'_>> {
         let (span, s) = input.into_parts();
-        let len = s.len();
         let (prefix, unprefixed) = if let Some(name) = s.strip_prefix('$') {
             (Some('$'), name)
         } else if let Some(name) = s.strip_prefix('@') {
@@ -137,9 +120,13 @@ where
             (None, s)
         };
         if !is_valid_variable_name(unprefixed) {
-            let offset = prefix.is_some() as usize;
+            let offset = prefix.is_some() as u32;
+            let span = SourceSpan::new(
+                span.source_id(),
+                Range::new(span.start() + offset, span.end()),
+            );
             return Err(miette::miette!(
-                labels = vec![Label::at(offset..len).into()],
+                labels = vec![Label::at(span).into()],
                 help = "must be non-empty, and match the pattern `[A-Za-z_][A-Za-z0-9_]*`",
                 "invalid variable name"
             ));
@@ -176,14 +163,14 @@ impl<S> VariableName<S> {
 impl VariableName<String> {
     pub fn as_string(&self) -> &String {
         match self {
-            Self::Pseudo(ref s) | Self::Global(ref s) | Self::User(ref s) => s,
+            Self::Pseudo(s) | Self::Global(s) | Self::User(s) => s,
         }
     }
 }
 impl<S: AsRef<str>> VariableName<S> {
     pub fn as_str(&self) -> &str {
         match self {
-            Self::Pseudo(ref s) | Self::Global(ref s) | Self::User(ref s) => (**s).as_ref(),
+            Self::Pseudo(s) | Self::Global(s) | Self::User(s) => (**s).as_ref(),
         }
     }
 }
@@ -204,14 +191,14 @@ impl<S> VariableName<S> {
 impl<T: Borrow<str>, S: Borrow<T>> Borrow<T> for VariableName<S> {
     fn borrow(&self) -> &T {
         match self {
-            Self::Pseudo(ref s) | Self::Global(ref s) | Self::User(ref s) => s.borrow(),
+            Self::Pseudo(s) | Self::Global(s) | Self::User(s) => s.inner().borrow(),
         }
     }
 }
 impl<T: ?Sized, S: AsRef<T>> AsRef<T> for VariableName<S> {
     fn as_ref(&self) -> &T {
         match self {
-            Self::Pseudo(ref s) | Self::Global(ref s) | Self::User(ref s) => (**s).as_ref(),
+            Self::Pseudo(s) | Self::Global(s) | Self::User(s) => (**s).as_ref(),
         }
     }
 }
@@ -267,32 +254,41 @@ where
     type Key<'a> = K;
     type Value<'a> = V;
 
-    fn try_parse(input: Span<&str>) -> Result<Self, VariableError> {
+    fn try_parse(input: Span<&str>) -> Result<Self, Report> {
         let (span, s) = input.into_parts();
         let len = s.len();
         if s.is_empty() {
-            Err(VariableError::Empty(span))
+            Err(VariableError::Empty(span)
+                .into_report()
+                .with_source_code(s.to_string()))
         } else if let Some((k, v)) = s.split_once('=') {
             if k.is_empty() {
-                return Err(VariableError::EmptyName(span));
+                return Err(VariableError::EmptyName(span)
+                    .into_report()
+                    .with_source_code(s.to_string()));
             }
-            let key_len = k.len();
-            let key_span = SourceSpan::from(0..key_len);
+            let key_len = k.len() as u32;
+            let key_span = SourceSpan::new(span.source_id(), Range::new(0, key_len));
             if !is_valid_variable_name(k) {
-                return Err(VariableError::Name(miette::miette!(
+                return Err(miette::miette!(
                     labels = vec![Label::at(key_span).into()],
                     help = "variable names must match the pattern `[A-Za-z_][A-Za-z0-9_]*`",
                     "name contains invalid characters",
-                )));
+                )
+                .with_source_code(s.to_string()));
             }
             let k = <VariableName<K> as ValueParser>::try_parse(Span::new(key_span, k))
-                .map_err(VariableError::Name)?;
-            let value_span = SourceSpan::from((key_len + 1)..len);
+                .map_err(|err| err.with_source_code(k.to_string()))
+                .wrap_err("invalid variable name")?;
+            let value_span = SourceSpan::new(span.source_id(), Range::new(key_len + 1, len as u32));
             let v = <V as ValueParser>::try_parse(Span::new(value_span, v))
-                .map_err(VariableError::Value)?;
+                .map_err(|err| err.with_source_code(v.to_string()))
+                .wrap_err("invalid variable value")?;
             Ok(Self::new(k, v))
         } else {
-            Err(VariableError::MissingEquals(span))
+            Err(VariableError::MissingEquals(span)
+                .into_report()
+                .with_source_code(s.to_string()))
         }
     }
 }
@@ -345,10 +341,14 @@ where
             .to_str()
             .ok_or_else(|| Error::new(ErrorKind::InvalidUtf8))?;
 
-        let span = SourceSpan::from(0..raw.len());
+        let span = SourceSpan::new(SourceId::UNKNOWN, Range::new(0, raw.len() as u32));
         <T as TypedVariable>::try_parse(Span::new(span, raw)).map_err(|err| {
-            let err = err.into_report().with_source_code(raw.to_string());
-            let diag = diagnostics::reporting::PrintDiagnostic::new(err);
+            let err = if err.source_code().is_none() {
+                err.with_source_code(raw.to_string())
+            } else {
+                err
+            };
+            let diag = crate::reporting::PrintDiagnostic::new(err);
             Error::raw(ErrorKind::InvalidValue, format!("{diag}"))
         })
     }

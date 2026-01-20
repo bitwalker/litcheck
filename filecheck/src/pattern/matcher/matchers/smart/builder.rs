@@ -110,7 +110,7 @@ impl<'a, 'config> SmartMatcherBuilder<'a, 'config> {
             .syntax(
                 regex_automata::util::syntax::Config::new()
                     .multi_line(true)
-                    .case_insensitive(self.config.ignore_case),
+                    .case_insensitive(self.config.options.ignore_case),
             )
             .build(source.as_ref())
             .map_err(|error| regex::build_error_to_diagnostic(error, 1, |_| source.span()))?;
@@ -210,10 +210,10 @@ impl<'a, 'config> SmartMatcherBuilder<'a, 'config> {
             .syntax(
                 regex_automata::util::syntax::Config::new()
                     .multi_line(true)
-                    .case_insensitive(self.config.ignore_case),
+                    .case_insensitive(self.config.options.ignore_case),
             )
             .build(&source)
-            .map_err(|error| regex::build_error_to_diagnostic(error, 1, |_| source.span()))?;
+            .map_err(|error| regex::build_error_to_diagnostic(error, 1, |_| span))?;
         let groups = pattern.group_info();
         let pattern_id = self.register_pattern_group(groups);
 

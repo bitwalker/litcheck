@@ -50,15 +50,18 @@ pub struct Lexer<'input> {
 impl<'input> Lexer<'input> {
     /// Produces an instance of the lexer with the lexical analysis to be performed on the `input`
     /// string. Note that no lexical analysis occurs until the lexer has been iterated over.
-    pub fn new<S>(source: &'input S, config: &Config) -> Self
+    pub fn new<S>(source_id: SourceId, source: &'input S, config: &Config) -> Self
     where
-        S: SourceFile + ?Sized + 'input,
+        S: ?Sized + AsRef<str> + 'input,
     {
-        let buffer = source.source().as_bytes();
-        let input = Input::new(buffer, false);
+        let source = source.as_ref();
+        let buffer = source.as_bytes();
+        let input = Input::new(source_id, buffer, false);
         let mut patterns =
-            Pattern::generate_check_patterns(&config.check_prefixes).collect::<Vec<_>>();
-        patterns.extend(Pattern::generate_comment_patterns(&config.comment_prefixes));
+            Pattern::generate_check_patterns(&config.options.check_prefixes).collect::<Vec<_>>();
+        patterns.extend(Pattern::generate_comment_patterns(
+            &config.options.comment_prefixes,
+        ));
         let regex =
             Regex::new_many(&patterns).expect("expected valid prefix searcher configuration");
         let searcher = RegexSearcher::new(input.into());
@@ -79,8 +82,8 @@ impl<'input> Lexer<'input> {
         Lexer {
             input,
             patterns,
-            check_prefixes: config.check_prefixes.to_vec(),
-            seen_prefixes: vec![false; config.check_prefixes.len()],
+            check_prefixes: config.options.check_prefixes.to_vec(),
+            seen_prefixes: vec![false; config.options.check_prefixes.len()],
             regex,
             searcher,
             cache,
@@ -90,7 +93,7 @@ impl<'input> Lexer<'input> {
             buffer: VecDeque::with_capacity(128),
             eof,
             leading_lf: true,
-            strict_whitespace: config.strict_whitespace,
+            strict_whitespace: config.options.strict_whitespace,
         }
     }
 
@@ -103,8 +106,12 @@ impl<'input> Lexer<'input> {
     }
 
     pub fn current_offset(&self) -> SourceSpan {
-        let at = self.input.start();
-        SourceSpan::from(at..at)
+        SourceSpan::at(self.input.source_id(), self.input.start() as u32)
+    }
+
+    #[inline(always)]
+    pub fn source_id(&self) -> SourceId {
+        self.input.source_id()
     }
 
     pub fn peek(&mut self) -> Option<&Token<'input>> {
@@ -173,6 +180,8 @@ impl<'input> Lexer<'input> {
         if let Some(matched) = search_result {
             let pid = matched.pattern();
             let range = Range::from(matched.range());
+            let span =
+                SourceSpan::from_range_unchecked(self.input.source_id(), range.start..range.end);
             let pattern = &self.patterns[pid.as_usize()];
             let pattern_ty = pattern.ty;
             if let Check::Comment = pattern_ty {
@@ -198,15 +207,18 @@ impl<'input> Lexer<'input> {
                 }
                 ty => {
                     self.buffer.push_back(Ok((
-                        range.start,
+                        span.start().to_usize(),
                         Token::Check(ty.try_into().unwrap()),
-                        range.end,
+                        span.end().to_usize(),
                     )));
                 }
             }
             let literal = self.tokenize_optional_modifiers();
-            self.buffer
-                .push_back(Ok((range.end - 1, Token::Colon, range.end)));
+            self.buffer.push_back(Ok((
+                span.end().to_usize() - 1,
+                Token::Colon,
+                span.end().to_usize(),
+            )));
             self.input.set_start(range.end);
             self.tokenize_check_pattern(literal);
             self.captures.set_pattern(None);
@@ -262,7 +274,10 @@ impl<'input> Lexer<'input> {
             }
             Err(error) => {
                 let token = Token::Error(LexerError::BadCount {
-                    span: SourceSpan::from(count_span.start..count_span.end),
+                    span: SourceSpan::from_range_unchecked(
+                        self.input.source_id(),
+                        count_span.start..count_span.end,
+                    ),
                     error,
                 });
                 self.buffer
@@ -321,7 +336,13 @@ impl<'input> Lexer<'input> {
                 delim @ (Delimiter::MatchStart | Delimiter::NumericMatchStart)
                     if in_match.is_none() && in_regex.is_none() =>
                 {
-                    in_match = Some(Span::new(delim_range, delim));
+                    in_match = Some(Span::new(
+                        SourceSpan::from_range_unchecked(
+                            self.input.source_id(),
+                            delim_range.start..delim_range.end,
+                        ),
+                        delim,
+                    ));
                     if delim_range.start > last_delimiter_end {
                         let raw = &self.input.buffer()[last_delimiter_end..delim_range.start];
                         if !raw.iter().all(u8::is_ascii_whitespace) {
@@ -359,7 +380,13 @@ impl<'input> Lexer<'input> {
                     is_first = false;
                 }
                 Delimiter::RegexStart if in_match.is_none() && in_regex.is_none() => {
-                    in_regex = Some(Span::new(delim_range, Delimiter::RegexStart));
+                    in_regex = Some(Span::new(
+                        SourceSpan::from_range_unchecked(
+                            self.input.source_id(),
+                            delim_range.start..delim_range.end,
+                        ),
+                        Delimiter::RegexStart,
+                    ));
                     if delim_range.start > last_delimiter_end {
                         let raw = &self.input.buffer()[last_delimiter_end..delim_range.start];
                         if !raw.iter().all(u8::is_ascii_whitespace) {
@@ -388,12 +415,12 @@ impl<'input> Lexer<'input> {
                     let match_start = in_match.take().unwrap();
                     if matches!(match_start.into_inner(), Delimiter::NumericMatchStart) {
                         self.tokenize_capture_or_match_numeric(Range::new(
-                            match_start.end(),
+                            match_start.span().end().to_usize(),
                             delim_range.start,
                         ));
                     } else {
                         self.tokenize_capture_or_match(Range::new(
-                            match_start.end(),
+                            match_start.span().end().to_usize(),
                             delim_range.start,
                         ));
                     }
@@ -408,7 +435,7 @@ impl<'input> Lexer<'input> {
                 Delimiter::RegexEnd if in_regex.is_some() => {
                     last_delimiter_end = delim_range.end;
                     let regex_start = in_regex.take().unwrap();
-                    let pattern_start = regex_start.end();
+                    let pattern_start = regex_start.span().end().to_usize();
                     let raw = self.input.as_str(pattern_start..delim_range.start).trim();
                     self.buffer
                         .push_back(Ok((pattern_start, Token::Raw(raw), delim_range.start)));
@@ -424,7 +451,10 @@ impl<'input> Lexer<'input> {
                     if in_match.is_none() && in_regex.is_none() =>
                 {
                     self.buffer.push_back(Err(ParserError::UnrecognizedToken {
-                        span: delim_range.into(),
+                        span: SourceSpan::from_range_unchecked(
+                            self.source_id(),
+                            delim_range.into_range(),
+                        ),
                         token: AsRef::<str>::as_ref(&delim).to_string(),
                         expected: vec![
                             "literal".to_string(),
@@ -499,13 +529,16 @@ impl<'input> Lexer<'input> {
                                 self.buffer.push_back(Ok((
                                     start,
                                     Token::Error(LexerError::InvalidIdentifier {
-                                        span: SourceSpan::from(start..(end + 1)),
+                                        span: SourceSpan::from_range_unchecked(
+                                            self.input.source_id(),
+                                            start..end,
+                                        ),
                                     }),
-                                    end + 1,
+                                    end,
                                 )));
                                 self.buffer.push_back(Ok((
-                                    end + 1,
-                                    Token::Raw(self.input.as_str((end + 1)..range.end)),
+                                    end,
+                                    Token::Raw(self.input.as_str(end..range.end)),
                                     range.end,
                                 )));
                                 return;
@@ -538,7 +571,10 @@ impl<'input> Lexer<'input> {
                     self.buffer.push_back(Ok((
                         offset,
                         Token::Error(LexerError::UnexpectedCharacter {
-                            span: SourceSpan::from(offset..next_offset),
+                            span: SourceSpan::from_range_unchecked(
+                                self.input.source_id(),
+                                offset..next_offset,
+                            ),
                             unexpected,
                         }),
                         next_offset,
@@ -664,7 +700,10 @@ impl<'input> Lexer<'input> {
                             self.buffer.push_back(Ok((
                                 offset,
                                 Token::Error(LexerError::InvalidNumber {
-                                    span: SourceSpan::from(offset..end),
+                                    span: SourceSpan::from_range_unchecked(
+                                        self.input.source_id(),
+                                        offset..end,
+                                    ),
                                     error: err,
                                 }),
                                 end,
@@ -680,7 +719,10 @@ impl<'input> Lexer<'input> {
                     self.buffer.push_back(Ok((
                         offset,
                         Token::Error(LexerError::UnexpectedCharacter {
-                            span: SourceSpan::from(offset..next_offset),
+                            span: SourceSpan::from_range_unchecked(
+                                self.input.source_id(),
+                                offset..next_offset,
+                            ),
                             unexpected,
                         }),
                         next_offset,

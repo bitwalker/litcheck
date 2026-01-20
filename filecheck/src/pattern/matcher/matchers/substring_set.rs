@@ -32,12 +32,14 @@ impl<'a> SubstringSetMatcher<'a> {
         let patterns = patterns
             .into_iter()
             .map(|p| {
-                p.map(|p| text::canonicalize_horizontal_whitespace(p, config.strict_whitespace))
+                p.map(|p| {
+                    text::canonicalize_horizontal_whitespace(p, config.options.strict_whitespace)
+                })
             })
             .collect();
 
         let mut builder = SubstringSetBuilder::new_with_patterns(patterns);
-        builder.case_insensitive(config.ignore_case);
+        builder.case_insensitive(config.options.ignore_case);
         builder.build()
     }
 
@@ -57,7 +59,7 @@ impl<'a> SubstringSetMatcher<'a> {
             .iter()
             .enumerate()
             .map(|(i, p)| Span::new(p.span(), i))
-            .min_by_key(|span| span.start())
+            .min_by_key(|span| span.span().start())
             .unwrap()
     }
 
@@ -76,7 +78,7 @@ impl<'a> SubstringSetMatcher<'a> {
         for matched in self.searcher.find_iter(input) {
             let pattern_id = matched.pattern().as_usize();
             let pattern_span = self.patterns[pattern_id].span();
-            let span = SourceSpan::from(matched.range());
+            let span = SourceSpan::from_range_unchecked(input.source_id(), matched.range());
             matches.push(MatchInfo::new_with_pattern(span, pattern_span, pattern_id))
         }
         matches
@@ -88,7 +90,7 @@ impl<'a> SubstringSetMatcher<'a> {
         for matched in self.searcher.find_overlapping_iter(input) {
             let pattern_id = matched.pattern().as_usize();
             let pattern_span = self.patterns[pattern_id].span();
-            let span = SourceSpan::from(matched.range());
+            let span = SourceSpan::from_range_unchecked(input.source_id(), matched.range());
             matches.push(MatchInfo::new_with_pattern(span, pattern_span, pattern_id))
         }
         matches
@@ -96,9 +98,22 @@ impl<'a> SubstringSetMatcher<'a> {
 }
 impl<'a> Spanned for SubstringSetMatcher<'a> {
     fn span(&self) -> SourceSpan {
-        let start = self.patterns.iter().map(|p| p.start()).min().unwrap();
-        let end = self.patterns.iter().map(|p| p.end()).max().unwrap();
-        SourceSpan::from(start..end)
+        let start = self
+            .patterns
+            .iter()
+            .map(|p| p.span())
+            .min_by_key(|span| span.start())
+            .unwrap();
+        let end = self
+            .patterns
+            .iter()
+            .map(|p| p.span())
+            .max_by_key(|span| span.end())
+            .unwrap();
+        SourceSpan::from_range_unchecked(
+            start.source_id(),
+            start.start().to_usize()..end.end().to_usize(),
+        )
     }
 }
 impl<'a> MatcherMut for SubstringSetMatcher<'a> {
@@ -125,8 +140,9 @@ impl<'a> Matcher for SubstringSetMatcher<'a> {
         if let Some(matched) = self.searcher.find(input) {
             let pattern_id = matched.pattern().as_usize();
             let pattern_span = self.patterns[pattern_id].span();
+            let span = SourceSpan::from_range_unchecked(input.source_id(), matched.range());
             Ok(MatchResult::ok(MatchInfo::new_with_pattern(
-                matched.range(),
+                span,
                 pattern_span,
                 pattern_id,
             )))
@@ -286,6 +302,8 @@ impl<'a> SubstringSetBuilder<'a> {
 
 #[cfg(test)]
 mod tests {
+    use crate::{source_file, span};
+
     use super::*;
 
     #[test]
@@ -304,24 +322,33 @@ entry:
 }
 ";
         let mut context = TestContext::new();
-        context
-            .with_checks(
-                "
+        let match_file = source_file!(
+            context.config,
+            "
 CHECK-DAG: tail call i64
 CHECK-DAG: tail call i32
-",
-            )
-            .with_input(INPUT);
+"
+        );
+        let input_file = source_file!(context.config, INPUT);
+        context
+            .with_checks(match_file)
+            .with_input(input_file.clone());
 
-        let pattern1 = Span::new(12..24, Cow::Borrowed("tail call i64"));
-        let pattern2 = Span::new(25..41, Cow::Borrowed("tail call i32"));
+        let pattern1 = Span::new(
+            span!(input_file.id(), 12, 24),
+            Cow::Borrowed("tail call i64"),
+        );
+        let pattern2 = Span::new(
+            span!(input_file.id(), 25, 41),
+            Cow::Borrowed("tail call i32"),
+        );
         let matcher = SubstringSetMatcher::new(vec![pattern1, pattern2], &context.config)
             .expect("expected pattern to be valid");
         let mctx = context.match_context();
         let input = mctx.search();
         let result = matcher.try_match(input, &mctx)?;
         let info = result.info.expect("expected match");
-        assert_eq!(info.span.offset(), 58);
+        assert_eq!(info.span.start().to_u32(), 58);
         assert_eq!(info.span.len(), 13);
         assert_eq!(input.as_str(info.matched_range()), "tail call i32");
         Ok(())
@@ -343,24 +370,30 @@ entry:
 }
 ";
         let mut context = TestContext::new();
-        context
-            .with_checks(
-                "
+        let match_file = source_file!(
+            context.config,
+            "
 CHECK-DAG: tail call i32
 CHECK-DAG: tail call
-",
-            )
-            .with_input(INPUT);
+"
+        );
+        let input_file = source_file!(context.config, INPUT);
+        context
+            .with_checks(match_file)
+            .with_input(input_file.clone());
 
-        let pattern1 = Span::new(12..24, Cow::Borrowed("tail call i32"));
-        let pattern2 = Span::new(25..37, Cow::Borrowed("tail call"));
+        let pattern1 = Span::new(
+            span!(input_file.id(), 12, 24),
+            Cow::Borrowed("tail call i32"),
+        );
+        let pattern2 = Span::new(span!(input_file.id(), 25, 37), Cow::Borrowed("tail call"));
         let matcher = SubstringSetMatcher::new(vec![pattern1, pattern2], &context.config)
             .expect("expected pattern to be valid");
         let mctx = context.match_context();
         let input = mctx.search();
         let result = matcher.try_match(input, &mctx)?;
         let info = result.info.expect("expected match");
-        assert_eq!(info.span.offset(), 58);
+        assert_eq!(info.span.start().to_u32(), 58);
         assert_eq!(info.span.len(), 13);
         assert_eq!(input.as_str(info.matched_range()), "tail call i32");
         Ok(())
@@ -382,24 +415,27 @@ entry:
 }
 ";
         let mut context = TestContext::new();
-        context
-            .with_checks(
-                "
+        let match_file = source_file!(
+            context.config,
+            "
 CHECK-DAG: inc4
 CHECK-DAG: sub1
-",
-            )
-            .with_input(INPUT);
+"
+        );
+        let input_file = source_file!(context.config, INPUT);
+        context
+            .with_checks(match_file)
+            .with_input(input_file.clone());
 
-        let pattern1 = Span::new(12..17, Cow::Borrowed("inc4"));
-        let pattern2 = Span::new(19..35, Cow::Borrowed("sub1"));
+        let pattern1 = Span::new(span!(input_file.id(), 12, 17), Cow::Borrowed("inc4"));
+        let pattern2 = Span::new(span!(input_file.id(), 19, 35), Cow::Borrowed("sub1"));
         let matcher = SubstringSetMatcher::new(vec![pattern1, pattern2], &context.config)
             .expect("expected pattern to be valid");
         let mctx = context.match_context();
         let input = mctx.search();
         let result = matcher.try_match(input, &mctx)?;
         let info = result.info.expect("expected match");
-        assert_eq!(info.span.offset(), 14);
+        assert_eq!(info.span.start().to_u32(), 14);
         assert_eq!(info.span.len(), 4);
         assert_eq!(input.as_str(info.matched_range()), "sub1");
         Ok(())
@@ -421,17 +457,18 @@ entry:
 }
 ";
         let mut context = TestContext::new();
-        context
-            .with_checks(
-                "
+        let match_file = source_file!(
+            context.config,
+            "
 CHECK-DAG: @inc4
 CHECK-DAG: @sub1
-",
-            )
-            .with_input(INPUT);
+"
+        );
+        let input_file = source_file!(context.config, INPUT);
+        context.with_checks(match_file).with_input(input_file);
 
-        let pattern1 = Span::new(0..0, Cow::Borrowed("@inc4"));
-        let pattern2 = Span::new(0..0, Cow::Borrowed("@sub1"));
+        let pattern1 = Span::new(SourceSpan::UNKNOWN, Cow::Borrowed("@inc4"));
+        let pattern2 = Span::new(SourceSpan::UNKNOWN, Cow::Borrowed("@sub1"));
         let mut builder = SubstringSetMatcher::build();
         builder
             .with_patterns([pattern1, pattern2])
@@ -441,7 +478,7 @@ CHECK-DAG: @sub1
         let input = mctx.search_range(13..).anchored(true);
         let result = matcher.try_match(input, &mctx)?;
         let info = result.info.expect("expected match");
-        assert_eq!(info.span.offset(), 13);
+        assert_eq!(info.span.start().to_u32(), 13);
         assert_eq!(info.span.len(), 5);
         assert_eq!(input.as_str(info.matched_range()), "@sub1");
 

@@ -1,5 +1,7 @@
 mod program;
 
+use std::path::Path;
+
 pub use self::program::{CheckGroup, CheckProgram, CheckSection, CheckTree};
 
 use crate::{common::*, pattern::matcher::MatchAny};
@@ -8,14 +10,14 @@ pub struct Checker<'a> {
     config: &'a Config,
     interner: &'a mut StringInterner,
     program: CheckProgram<'a>,
-    match_file: ArcSource,
+    match_file: Arc<SourceFile>,
 }
 impl<'a> Checker<'a> {
     pub fn new(
         config: &'a Config,
         interner: &'a mut StringInterner,
         program: CheckProgram<'a>,
-        match_file: ArcSource,
+        match_file: Arc<SourceFile>,
     ) -> Self {
         Self {
             config,
@@ -26,26 +28,24 @@ impl<'a> Checker<'a> {
     }
 
     /// Check `source` against the rules in this [Checker]
-    pub fn check<S>(&mut self, source: &S) -> TestResult
-    where
-        S: NamedSourceFile + ?Sized,
-    {
-        let source = ArcSource::new(Source::new(source.name(), source.source().to_string()));
-        self.check_input(source)
+    pub fn check(&mut self, source: impl AsRef<Path>) -> Result<TestResult, SourceManagerError> {
+        let source = self.config.source_manager.load_file(source.as_ref())?;
+        Ok(self.check_input(source))
     }
 
     /// Check `input` against the rules in this [Checker]
-    pub fn check_str<S>(&mut self, input: &S) -> TestResult
-    where
-        S: AsRef<str>,
-    {
-        let source = ArcSource::new(Source::from(input.as_ref().to_string()));
+    pub fn check_str(&mut self, name: FileName, input: impl AsRef<str>) -> TestResult {
+        let source = self.config.source_manager.load(
+            SourceLanguage::Unknown,
+            name,
+            input.as_ref().to_string(),
+        );
         self.check_input(source)
     }
 
     /// Check `source` against the rules in this [Checker]
-    pub fn check_input(&mut self, source: ArcSource) -> TestResult {
-        let buffer = source.source_bytes();
+    pub fn check_input(&mut self, source: Arc<SourceFile>) -> TestResult {
+        let buffer = source.as_bytes();
         let mut context = MatchContext::new(
             self.config,
             self.interner,
@@ -54,7 +54,7 @@ impl<'a> Checker<'a> {
             buffer,
         );
 
-        if !self.config.allow_empty && buffer.is_empty() {
+        if !self.config.options.allow_empty && buffer.is_empty() {
             return TestResult::from_error(TestFailed::new(
                 vec![CheckFailedError::EmptyInput],
                 &context,
@@ -116,8 +116,8 @@ pub fn discover_blocks<'input, 'context: 'input>(
                     match result.info {
                         Some(info) => {
                             if context.config.remarks_enabled() {
-                                if let Some(loc) =
-                                    context.match_file.location_from_span(info.pattern_span)
+                                if let Ok(loc) =
+                                    context.source_manager().file_line_col(info.pattern_span)
                                 {
                                     eprintln!("{loc}: remark: CHECK-LABEL: expected string found in input");
                                 }
@@ -125,7 +125,7 @@ pub fn discover_blocks<'input, 'context: 'input>(
                             // We must compute the indices for the end of the previous block,
                             // and the start of the current block, by looking forwards/backwards
                             // for the nearest newlines in those directions.
-                            let match_start = info.span.offset();
+                            let match_start = info.span.start().to_usize();
                             let cursor = context.cursor_mut();
                             let eol = cursor.next_newline_from(match_start).unwrap_or(eof);
                             let prev_block_end = cursor.prev_newline_from(match_start).unwrap_or(0);
@@ -315,7 +315,7 @@ pub fn check_group<'section, 'input, 'a: 'input>(
             match check_not(pattern, input, context) {
                 Ok(Ok(num_patterns)) => {
                     if context.config.remarks_enabled() {
-                        if let Some(loc) = context.match_file.location_from_span(pattern.span()) {
+                        if let Ok(loc) = context.source_manager().file_line_col(pattern.span()) {
                             eprintln!("{loc}: remark: CHECK-NOT: none of the expected strings were found in the input");
                         }
                     }
@@ -348,7 +348,7 @@ pub fn check_group<'section, 'input, 'a: 'input>(
                 match rule.apply(context) {
                     Ok(matches) => {
                         if context.config.remarks_enabled() {
-                            if let Some(loc) = context.match_file.location_from_span(rule.span()) {
+                            if let Ok(loc) = context.source_manager().file_line_col(rule.span()) {
                                 eprintln!(
                                     "{loc}: remark: {}: expected string found in input",
                                     DynRule::kind(rule)
@@ -378,7 +378,7 @@ pub fn check_group<'section, 'input, 'a: 'input>(
                 match rule.apply(context) {
                     Ok(matches) => {
                         if context.config.remarks_enabled() {
-                            if let Some(loc) = context.match_file.location_from_span(rule.span()) {
+                            if let Ok(loc) = context.source_manager().file_line_col(rule.span()) {
                                 eprintln!(
                                     "{loc}: remark: {}: expected string found in input",
                                     DynRule::kind(rule)
@@ -446,9 +446,11 @@ pub fn check_group<'section, 'input, 'a: 'input>(
                                                 info: Some(ref mut info),
                                                 ty,
                                             } if ty.is_ok() => {
-                                                let left_range = info.span.range();
-                                                if left_range.start >= right_range.start
-                                                    || left_range.end >= right_range.start
+                                                let left_range = info.span;
+                                                if left_range.start().to_usize()
+                                                    >= right_range.start
+                                                    || left_range.end().to_usize()
+                                                        >= right_range.start
                                                 {
                                                     let span = info.span;
                                                     let pattern_span = info.pattern_span;
@@ -458,7 +460,7 @@ pub fn check_group<'section, 'input, 'a: 'input>(
                                                         labels: vec![
                                                             RelatedLabel::error(Label::new(pattern_span, "matched by this pattern"), context.match_file()),
                                                             RelatedLabel::warn(Label::new(right_pattern_span, "because it cannot be reordered past this pattern"), context.match_file()),
-                                                            RelatedLabel::note(Label::point(right_range.start, "which begins here"), context.input_file()),
+                                                            RelatedLabel::note(Label::point(context.input_file.id(), right_range.start as u32, "which begins here"), context.input_file()),
                                                         ],
                                                         note: None,
                                                     });
@@ -475,14 +477,14 @@ pub fn check_group<'section, 'input, 'a: 'input>(
                                                     | CheckFailedError::MatchFoundErrorNote { .. }
                                                     | CheckFailedError::MatchFoundConstraintFailed { .. }
                                                     | CheckFailedError::MatchFoundButDiscarded { .. } => {
-                                                        if span.start() >= right_range.start || span.end() >= right_range.start {
+                                                        if span.start().to_usize() >= right_range.start || span.end().to_usize() >= right_range.start {
                                                             *mr = MatchResult::failed(CheckFailedError::MatchFoundButDiscarded {
                                                                 span,
                                                                 input_file: context.input_file(),
                                                                 labels: vec![
                                                                     RelatedLabel::error(Label::new(pattern_span, "matched by this pattern"), context.match_file()),
                                                                     RelatedLabel::warn(Label::new(right_pattern_span, "because it cannot be reordered past this pattern"), context.match_file()),
-                                                                    RelatedLabel::note(Label::point(right_range.start, "which begins here"), context.input_file()),
+                                                                    RelatedLabel::note(Label::point(context.input_file.id(), right_range.start as u32, "which begins here"), context.input_file()),
                                                                 ],
                                                                 note: None,
                                                             });
@@ -622,7 +624,7 @@ fn check_tree<'input, 'a: 'input>(
                                         labels: vec![
                                             RelatedLabel::error(Label::new(info.pattern_span, "excluded by this pattern"), context.match_file()),
                                             RelatedLabel::note(Label::new(right_pattern_span, "exclusion is bounded by this pattern"), context.match_file()),
-                                            RelatedLabel::note(Label::point(right_start, "which corresponds to this location in the input"), context.input_file()),
+                                            RelatedLabel::note(Label::point(context.input_file.id(), right_start as u32, "which corresponds to this location in the input"), context.input_file()),
                                         ],
                                     })]));
                                 }

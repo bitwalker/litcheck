@@ -83,7 +83,7 @@ impl<'check> Rule for CheckDag<'check> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::check::CheckSection;
+    use crate::{check::CheckSection, source_file};
     use litcheck::assert_matches;
     use std::collections::VecDeque;
 
@@ -94,39 +94,41 @@ mod tests {
     #[test]
     fn check_dag_common_prefix_non_overlapping_patterns_test() -> DiagResult<()> {
         let mut context = TestContext::new();
-        context
-            .with_checks(
-                "
+        let match_file = source_file!(
+            context.config,
+            "
 CHECK-DAG: v[[#]] = add v9, v0
 CHECK-DAG: v[[#]] = add v6, v7
-",
-            )
-            .with_input(
-                "
+"
+        );
+        let input_file = source_file!(
+            context.config,
+            "
 function foo(i32) -> i32 {
 block0(v0: i32):
-  v2 = const.i32 0
-  v1 = const.i32 1
-  br block2(v1, v2)
+    v2 = const.i32 0
+    v1 = const.i32 1
+    br block2(v1, v2)
 
 block1(v6: i32, v7: i32):
-  v8 = add v6, v7
-  v9 = const.i32 0
-  v10 = add v9, v0
-  br block3(v8, v10)
+    v8 = add v6, v7
+    v9 = const.i32 0
+    v10 = add v9, v0
+    br block3(v8, v10)
 
 block2(v3: i32, v4: i32):
-  v5 = mul v3, v4
-  br block1
+    v5 = mul v3, v4
+    br block1
 
 block3(v11):
-  ret v11
+    ret v11
 }
-",
-            );
-        let match_file = context.match_file();
-        let match_file_source = match_file.as_ref();
-        let check_file = context.parse(match_file_source)?;
+"
+        );
+        context
+            .with_checks(match_file.clone())
+            .with_input(input_file);
+        let check_file = context.parse(&match_file)?;
 
         let lines = check_file.into_lines();
 
@@ -146,39 +148,41 @@ block3(v11):
     #[test]
     fn check_dag_common_prefix_regex_non_overlapping_patterns_test() -> DiagResult<()> {
         let mut context = TestContext::new();
-        context
-            .with_checks(
-                r"
+        let match_file = source_file!(
+            context.config,
+            r"
 CHECK-DAG: {{v[\d]+}} = add v9, v0
 CHECK-DAG: {{v[\d]+}} = add v6, v7
-",
-            )
-            .with_input(
-                "
+"
+        );
+        let input_file = source_file!(
+            context.config,
+            "
 function foo(i32) -> i32 {
 block0(v0: i32):
-  v2 = const.i32 0
-  v1 = const.i32 1
-  br block2(v1, v2)
+    v2 = const.i32 0
+    v1 = const.i32 1
+    br block2(v1, v2)
 
 block1(v6: i32, v7: i32):
-  v8 = add v6, v7
-  v9 = const.i32 0
-  v10 = add v9, v0
-  br block3(v8, v10)
+    v8 = add v6, v7
+    v9 = const.i32 0
+    v10 = add v9, v0
+    br block3(v8, v10)
 
 block2(v3: i32, v4: i32):
-  v5 = mul v3, v4
-  br block1
+    v5 = mul v3, v4
+    br block1
 
 block3(v11):
-  ret v11
+    ret v11
 }
-",
-            );
-        let match_file = context.match_file();
-        let match_file_source = match_file.as_ref();
-        let check_file = context.parse(match_file_source)?;
+"
+        );
+        context
+            .with_checks(match_file.clone())
+            .with_input(input_file);
+        let check_file = context.parse(&match_file)?;
 
         let lines = check_file.into_lines();
 
@@ -205,42 +209,44 @@ block3(v11):
     #[test]
     fn check_dag_overlapping_test() -> DiagResult<()> {
         let mut context = TestContext::new();
-        context
-            .with_checks(
-                "
+        let match_file = source_file!(
+            context.config,
+            "
 CHECK-LABEL: block0:
 CHECK-DAG: v[[#]] = {{[a-z]+[.][a-z]+}}
 CHECK-DAG: v[[#]] = const.i32 0
 CHECK-LABEL: block1(
 CHECK: br block2(v[[#]], v[[#]])
-",
-            )
-            .with_input(
-                "
+"
+        );
+        let input_file = source_file!(
+            context.config,
+            "
 function foo(i32) -> i32 {
 block0(v0: i32):
-  v2 = const.i32 0
-  v1 = const.i32 1
-  br block2(v1, v2)
+    v2 = const.i32 0
+    v1 = const.i32 1
+    br block2(v1, v2)
 
 block1(v6: i32, v7: i32):
-  v8 = add v6, v7
-  v9 = const.i32 0
-  v10 = add v9, v0
-  br block3(v8, v10)
+    v8 = add v6, v7
+    v9 = const.i32 0
+    v10 = add v9, v0
+    br block3(v8, v10)
 
 block2(v3: i32, v4: i32):
-  v5 = mul v3, v4
-  br block1
+    v5 = mul v3, v4
+    br block1
 
 block3(v11):
-  ret v11
+    ret v11
 }
-",
-            );
-        let match_file = context.match_file();
-        let match_file_source = match_file.as_ref();
-        let check_file = context.parse(match_file_source)?;
+"
+        );
+        context
+            .with_checks(match_file.clone())
+            .with_input(input_file);
+        let check_file = context.parse(&match_file)?;
 
         let mut lines = VecDeque::from(check_file.into_lines());
         lines.pop_back();
@@ -265,42 +271,44 @@ block3(v11):
     #[test]
     fn check_dag_does_not_search_beyond_check_label_boundaries_test() -> DiagResult<()> {
         let mut context = TestContext::new();
-        context
-            .with_checks(
-                "
+        let match_file = source_file!(
+            context.config,
+            "
 CHECK-LABEL: block0(
 CHECK-DAG: v1 = const.i32 1
 CHECK-DAG: v8 = add v6, v7
 CHECK-LABEL: block1(
 CHECK-DAG: v8 = add v6, v7
-",
-            )
-            .with_input(
-                "
+"
+        );
+        let input_file = source_file!(
+            context.config,
+            "
 function foo(i32) -> i32 {
 block0(v0: i32):
-  v2 = const.i32 0
-  v1 = const.i32 1
-  br block2(v1, v2)
+    v2 = const.i32 0
+    v1 = const.i32 1
+    br block2(v1, v2)
 
 block1(v6: i32, v7: i32):
-  v8 = add v6, v7
-  v9 = const.i32 0
-  v10 = add v9, v0
-  br block3(v8, v10)
+    v8 = add v6, v7
+    v9 = const.i32 0
+    v10 = add v9, v0
+    br block3(v8, v10)
 
 block2(v3: i32, v4: i32):
-  v5 = mul v3, v4
-  br block1
+    v5 = mul v3, v4
+    br block1
 
 block3(v11):
-  ret v11
+    ret v11
 }
-",
-            );
-        let match_file = context.match_file();
-        let match_file_source = match_file.as_ref();
-        let check_file = context.parse(match_file_source)?;
+"
+        );
+        context
+            .with_checks(match_file.clone())
+            .with_input(input_file);
+        let check_file = context.parse(&match_file)?;
         let mut program = context.compile(check_file)?;
 
         let mut mctx = context.match_context();
@@ -331,42 +339,44 @@ block3(v11):
     #[test]
     fn check_dag_check_label_boundaries_test() -> DiagResult<()> {
         let mut context = TestContext::new();
-        context
-            .with_checks(
-                "
+        let match_file = source_file!(
+            context.config,
+            "
 CHECK-LABEL: block0(
 CHECK-DAG: v1 = const.i32 1
 CHECK-DAG: v2 = const.i32 0
 CHECK-LABEL: block1(
 CHECK-DAG: v8 = add v6, v7
-",
-            )
-            .with_input(
-                "
+"
+        );
+        let input_file = source_file!(
+            context.config,
+            "
 function foo(i32) -> i32 {
 block0(v0: i32):
-  v2 = const.i32 0
-  v1 = const.i32 1
-  br block2(v1, v2)
+    v2 = const.i32 0
+    v1 = const.i32 1
+    br block2(v1, v2)
 
 block1(v6: i32, v7: i32):
-  v8 = add v6, v7
-  v9 = const.i32 0
-  v10 = add v9, v0
-  br block3(v8, v10)
+    v8 = add v6, v7
+    v9 = const.i32 0
+    v10 = add v9, v0
+    br block3(v8, v10)
 
 block2(v3: i32, v4: i32):
-  v5 = mul v3, v4
-  br block1
+    v5 = mul v3, v4
+    br block1
 
 block3(v11):
-  ret v11
+    ret v11
 }
-",
-            );
-        let match_file = context.match_file();
-        let match_file_source = match_file.as_ref();
-        let check_file = context.parse(match_file_source)?;
+"
+        );
+        context
+            .with_checks(match_file.clone())
+            .with_input(input_file);
+        let check_file = context.parse(&match_file)?;
         let program = context.compile(check_file)?;
 
         let mut mctx = context.match_context();
@@ -386,23 +396,23 @@ block3(v11):
         let matches = crate::check::check_blocks(blocks, &program, &mut mctx).into_result()?;
 
         assert_eq!(matches.len(), 5);
-        assert!(matches[0].span.end() <= block_ranges[0].start); // CHECK-LABEL
-        assert!(matches[1].span.end() <= block_ranges[0].end);
-        assert!(matches[2].span.end() <= block_ranges[0].end);
+        assert!(matches[0].span.end().to_usize() <= block_ranges[0].start); // CHECK-LABEL
+        assert!(matches[1].span.end().to_usize() <= block_ranges[0].end);
+        assert!(matches[2].span.end().to_usize() <= block_ranges[0].end);
         let match3_span = matches[3].span; // CHECK-LABEL
         assert!(
-            match3_span.start() >= block_ranges[0].end
-                && match3_span.end() <= block_ranges[1].start
+            match3_span.start().to_usize() >= block_ranges[0].end
+                && match3_span.end().to_usize() <= block_ranges[1].start
         );
         let match4_span = matches[4].span;
         assert!(
-            match4_span.start() >= block_ranges[1].start
-                && match4_span.end() <= block_ranges[1].end
+            match4_span.start().to_usize() >= block_ranges[1].start
+                && match4_span.end().to_usize() <= block_ranges[1].end
         );
         let match5_span = matches[4].span;
         assert!(
-            match5_span.start() >= block_ranges[1].start
-                && match5_span.end() <= block_ranges[1].end
+            match5_span.start().to_usize() >= block_ranges[1].start
+                && match5_span.end().to_usize() <= block_ranges[1].end
         );
 
         Ok(())

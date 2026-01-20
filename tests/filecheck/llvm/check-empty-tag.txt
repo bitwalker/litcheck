@@ -29,7 +29,8 @@ CHECK3B: found non-empty check string for empty check with prefix 'CHECK3A:'
 ; RUN: not FileCheck %s --input-file %s --check-prefix=CHECK4A 2>&1 \
 ; RUN: | FileCheck %s --check-prefix=CHECK4B
 CHECK4A-EMPTY:
-CHECK4B: found 'CHECK4A-EMPTY' without previous 'CHECK4A: line
+CHECK4B: CHECK-EMPTY directives are not permitted to be the first directive in a
+CHECK4B-NEXT: file
 
 ; CHECK-EMPTY-NOT and CHECK-NOT-EMPTY rejected
 ; RUN: %ProtectFileCheckOutput \
@@ -40,18 +41,17 @@ CHECK4B: found 'CHECK4A-EMPTY' without previous 'CHECK4A: line
 ; RUN: | FileCheck %s --check-prefix=CHECK5C
 CHECK5A-EMPTY-NOT:
 CHECK5B-NOT-EMPTY:
-CHECK5C: unsupported -NOT combo on prefix 'CHECK5{{A|B}}'
+CHECK5C: no check strings found with prefix(es) 'CHECK5{{A|B}}'
 
 ; whitespace does not count as empty
 ; RUN: %ProtectFileCheckOutput \
 ; RUN: not FileCheck %s --input-file %s --check-prefix=CHECK6A --match-full-lines \
 ; RUN: 2>&1 | FileCheck %s --check-prefix=CHECK6B
 CHECK6A: the next line has spaces
-CHECK6A-EMPTY:
+CHECK6A-EMPTY:   
 CHECK6B: expected string not found in input
 
 ; ***don't add any further blank lines after this point***
 ; CHECK-EMPTY, like CHECK-NEXT, will report an error if the first matching
 ; line is not the line immediately following the previous check.
 the next line has spaces
-  

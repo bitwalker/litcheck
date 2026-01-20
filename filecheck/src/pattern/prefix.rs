@@ -44,7 +44,9 @@ impl<'a> PatternPrefix<'a> {
 
     pub fn as_str(&self) -> Option<&str> {
         match self {
-            Self::Literal { prefix, .. } | Self::Substring { prefix, .. } => Some(prefix.as_ref()),
+            Self::Literal { prefix, .. } | Self::Substring { prefix, .. } => {
+                Some(prefix.inner().as_ref())
+            }
             Self::Regex { prefix, .. } => Some(prefix.as_ref()),
             Self::Dynamic { .. } => None,
         }

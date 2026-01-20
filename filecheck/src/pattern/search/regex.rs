@@ -26,6 +26,9 @@ impl Match for regex_automata::Match {
 }
 
 impl<'input> Input for regex_automata::Input<'input> {
+    fn source_id(&self) -> litcheck::diagnostics::SourceId {
+        litcheck::diagnostics::SourceId::UNKNOWN
+    }
     fn buffer(&self) -> &[u8] {
         self.haystack()
     }
