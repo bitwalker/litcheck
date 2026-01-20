@@ -991,6 +991,14 @@ pub enum Constraint {
     Eq,
 }
 
+impl fmt::Display for Constraint {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Eq => f.write_str("=="),
+        }
+    }
+}
+
 #[derive(Default)]
 enum CheckPatternVarIter<'a, 'iter> {
     #[default]

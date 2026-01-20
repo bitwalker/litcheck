@@ -71,12 +71,32 @@ Comma<T>: Vec<T> = {
 /// MATCH
 
 pub Match: Match<'input> = {
+    <l:@L> "[[" <name:LineVar> <expr:CaptureExprRest> "]]" <r:@R> => {
+        match expr {
+            Some(BinaryOpAndOperand { op, operand: rhs }) => {
+                let span = span!(source_id, l, r);
+                Match::Numeric {
+                    span,
+                    format: None,
+                    capture: None,
+                    constraint: Constraint::Eq,
+                    expr: Some(Expr::Binary {
+                        span,
+                        op,
+                        lhs: Box::new(Expr::Var(name)),
+                        rhs,
+                    }),
+                }
+            }
+            None => Match::Substitution { span: span!(source_id, l, r), name, pattern: None },
+        }
+    },
+
     <l:@L> "[[" <name:PatternVar> "]]" <r:@R> => Match::Substitution { span: span!(source_id, l, r), name, pattern: None },
 
     <l:@L> "[[" <name:MaybeGlobalVar> ":" <pattern:String>  "]]" <r:@R> => Match::Substitution { span: span!(source_id, l, r), name, pattern: Some(pattern.map(Cow::Borrowed)) },
 
     <l:@L> "[[" "#" <format:(<NumberFormat> ",")?> <capture:CaptureNumericOrExpr?> "]]" <r:@R> => {
-        let format = format.unwrap_or_default();
         let span = span!(source_id, l, r);
         match capture {
             None => Match::Numeric {
@@ -89,42 +109,7 @@ pub Match: Match<'input> = {
             Some(CaptureNumericOrExpr::Capture(CaptureNumeric { name, constraint, expr })) => Match::Numeric {
                 span,
                 format,
-                capture: Some(name),
-                constraint,
-                expr,
-            },
-            Some(CaptureNumericOrExpr::Expr(expr)) => Match::Numeric {
-                span,
-                format,
-                capture: None,
-                constraint: Constraint::Eq,
-                expr: Some(expr),
-            },
-        }
-    },
-}
-
-#[inline]
-MatchPatternInner: Match<'input> = {
-    <name:PatternVar> => Match::Substitution { span: name.span(), name, pattern: None },
-
-    <l:@L> <name:Var> ":" <pattern:String>  <r:@R> => Match::Substitution { span: span!(source_id, l, r), name, pattern: Some(pattern.map(Cow::Borrowed)) },
-
-    <l:@L> "#" <format:(<NumberFormat> ",")?> <capture:CaptureNumericOrExpr?> <r:@R> => {
-        let format = format.unwrap_or_default();
-        let span = span!(source_id, l, r);
-        match capture {
-            None => Match::Numeric {
-                span,
-                format,
-                capture: None,
-                constraint: Constraint::Eq,
-                expr: None,
-            },
-            Some(CaptureNumericOrExpr::Capture(CaptureNumeric { name, constraint, expr })) => Match::Numeric {
-                span,
-                format,
-                capture: Some(name),
+                capture: name,
                 constraint,
                 expr,
             },
@@ -140,26 +125,68 @@ MatchPatternInner: Match<'input> = {
 }
 
 CaptureNumericOrExpr: CaptureNumericOrExpr = {
-    <l:@L> <var:PatternVar> <ty:EitherCaptureOrExpr> => {
+    <l:@L> <var:PatternOrLineVar> <ty:EitherCaptureOrExpr> => {
         match ty {
-            Left(None) => CaptureNumericOrExpr::Capture(CaptureNumeric { name: var, constraint: Constraint::Eq, expr: None }),
-            Left(Some(constraint)) => CaptureNumericOrExpr::Capture(CaptureNumeric { name: var, constraint: constraint.constraint, expr: Some(constraint.expr) }),
+            Left(None) => CaptureNumericOrExpr::Capture(CaptureNumeric {
+                name: Some(var),
+                constraint: Constraint::Eq,
+                expr: None
+            }),
+            Left(Some(constraint)) => CaptureNumericOrExpr::Capture(CaptureNumeric {
+                name: Some(var),
+                constraint: constraint.constraint,
+                expr: Some(constraint.expr)
+            }),
             Right(None) => CaptureNumericOrExpr::Expr(Expr::Var(var)),
             Right(Some(BinaryOpAndOperand { op, operand: rhs })) => {
                 let rhs_span = rhs.span();
                 let end = rhs_span.end().to_usize();
-                CaptureNumericOrExpr::Expr(Expr::Binary { span: span!(source_id, l, end), op, lhs: Box::new(Expr::Var(var)), rhs })
+                CaptureNumericOrExpr::Expr(Expr::Binary {
+                    span: span!(source_id, l, end),
+                    op,
+                    lhs: Box::new(Expr::Var(var)),
+                    rhs,
+                })
             }
         }
     },
+
+    "==" <expr:Expr> => {
+        CaptureNumericOrExpr::Capture(CaptureNumeric {
+            name: None,
+            constraint: Constraint::Eq,
+            expr: Some(expr)
+        })
+    },
+
     Builtin => CaptureNumericOrExpr::Expr(<>),
+
+    <l:@L> "(" <lhs:Expr> ")" <rhs:CaptureExprRest> <r:@R> => {
+        match rhs {
+            None => CaptureNumericOrExpr::Expr(lhs),
+            Some(BinaryOpAndOperand { op, operand }) => {
+                CaptureNumericOrExpr::Expr(
+                    Expr::Binary {
+                        span: span!(source_id, l, r),
+                        op,
+                        lhs: Box::new(lhs),
+                        rhs: operand,
+                    }
+                )
+            }
+        }
+    }
+}
+
+CaptureExprRest: Option<BinaryOpAndOperand> = {
+    "+" <expr:Expr> => Some(BinaryOpAndOperand { op: BinaryOp::Add, operand: Box::new(expr) }),
+    "-" <expr:Expr> => Some(BinaryOpAndOperand { op: BinaryOp::Sub, operand: Box::new(expr) }),
+    => None,
 }
 
 EitherCaptureOrExpr: Either<Option<ConstraintExpr>, Option<BinaryOpAndOperand>> = {
     ":" <constraint:Constraint?> => Left(constraint),
-    "+" <expr:Expr> => Right(Some(BinaryOpAndOperand { op: BinaryOp::Add, operand: Box::new(expr) })),
-    "-" <expr:Expr> => Right(Some(BinaryOpAndOperand { op: BinaryOp::Sub, operand: Box::new(expr) })),
-    => Either::Right(None),
+    <CaptureExprRest> => Right(<>),
 }
 
 Constraint: ConstraintExpr = {
@@ -217,7 +244,7 @@ Call: Expr = {
 
 Term: Expr = {
     Num,
-    <PatternVar> => Expr::Var(<>),
+    <PatternOrLineVar> => Expr::Var(<>),
     "(" <Expr> ")" => <>,
 }
 
@@ -239,6 +266,11 @@ PatternVar: VariableName = {
     Var,
 }
 
+PatternOrLineVar: VariableName = {
+    PatternVar,
+    LineVar,
+}
+
 GlobalVar: VariableName = {
     <l:@L> "$" <name:Ident> <r:@R> => VariableName::Global(Span::new(span!(source_id, l, r), name)),
 }
@@ -250,7 +282,10 @@ MaybeGlobalVar: VariableName = {
 
 PseudoVar: VariableName = {
     <l:@L> "@" <name:Ident> <r:@R> => VariableName::Pseudo(Span::new(span!(source_id, l, r), name)),
-    <l:@L> "@" "LINE" <r:@R> => VariableName::Pseudo(Span::new(span!(source_id, l, r), interner.get_or_intern("LINE"))),
+}
+
+LineVar: VariableName = {
+    <l:@L> "@" "LINE" <r:@R> => VariableName::Pseudo(Span::new(span!(source_id, l, r), symbols::Line)),
 }
 
 Var: VariableName = {
@@ -301,7 +336,7 @@ Precision: u8 = {
             error: ParserError::from(ExprError::InvalidNumericPrecision { span: span!(source_id, l, r) })
         })
     },
-    <error:ERROR> =>? Err(ParseError::User { error: error.into() }),
+    <error:ERROR> =>? Err(ParseError::User { error: ParserError::from(error) }),
 }
 
 Ident: Symbol = {
