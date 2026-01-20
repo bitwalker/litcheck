@@ -46,6 +46,8 @@ pub struct Lexer<'input> {
     leading_lf: bool,
     /// Is --strict-whitespace enabled
     strict_whitespace: bool,
+    /// Is --match-full-lines enabled
+    match_full_lines: bool,
 }
 impl<'input> Lexer<'input> {
     /// Produces an instance of the lexer with the lexical analysis to be performed on the `input`
@@ -94,6 +96,7 @@ impl<'input> Lexer<'input> {
             eof,
             leading_lf: true,
             strict_whitespace: config.options.strict_whitespace,
+            match_full_lines: config.options.match_full_lines,
         }
     }
 
@@ -233,7 +236,7 @@ impl<'input> Lexer<'input> {
         if let Some(span) = self.captures.get_group_by_name("modifiers") {
             let modifiers = core::str::from_utf8(&self.input.buffer()[span.range()])
                 .expect("expected capture to be valid utf8");
-            let mut has_modifiers = false;
+            let mut literal = false;
             let mut cursor = 0;
             for (i, modifier) in modifiers.split(',').enumerate() {
                 if i > 0 {
@@ -250,7 +253,7 @@ impl<'input> Lexer<'input> {
                             Token::Modifier(CheckModifier::LITERAL),
                             span.start + modifier_start + modifier_len,
                         )));
-                        has_modifiers = true;
+                        literal = true;
                         cursor += modifier.len();
                     }
                     _ => {
@@ -265,7 +268,7 @@ impl<'input> Lexer<'input> {
                     }
                 }
             }
-            has_modifiers
+            literal
         } else {
             false
         }
@@ -329,15 +332,26 @@ impl<'input> Lexer<'input> {
 
         if literal {
             let raw = self.input.as_str(start..eol);
-            if let Some(raw) = raw.strip_prefix(' ') {
-                self.buffer.push_back(Ok((start + 1, Token::Raw(raw), eol)));
+            let stripped = if self.strict_whitespace || self.match_full_lines {
+                raw.strip_prefix(' ').unwrap_or(raw)
             } else {
-                self.buffer.push_back(Ok((start, Token::Raw(raw), eol)));
-            }
+                raw.trim_start()
+            };
+            let shift = raw.len().abs_diff(stripped.len());
+            self.buffer
+                .push_back(Ok((start + shift, Token::Raw(stripped), eol)));
             self.input.set_start(eol);
             return;
-        } else if !self.strict_whitespace {
-            // If --strict-whitespace is not in use, remove leading whitespace
+        } else if self.strict_whitespace || self.match_full_lines {
+            // If --strict-whitespace/--match-full-lines are in use, do not remove excess leading
+            // whitespace
+            let raw = self.input.as_str(start..eol);
+            let stripped = raw.strip_prefix(' ').unwrap_or(raw);
+            let shift = raw.len().abs_diff(stripped.len());
+            start += shift;
+            self.input.set_start(start);
+        } else {
+            // Otherwise, remove all leading space separating prefix and pattern
             let raw = self.input.as_str(start..eol);
             let stripped = raw.trim_ascii_start();
             let shift = raw.len().abs_diff(stripped.len());
@@ -370,7 +384,7 @@ impl<'input> Lexer<'input> {
                     ));
                     if delim_range.start > last_delimiter_end {
                         let raw = &self.input.buffer()[last_delimiter_end..delim_range.start];
-                        if !raw.iter().all(u8::is_ascii_whitespace) {
+                        if !raw.iter().all(u8::is_ascii_whitespace) || !is_first {
                             let content = self.input.as_str(last_delimiter_end..delim_range.start);
                             let content = if is_first {
                                 content.strip_prefix(' ').unwrap_or(content)
@@ -414,7 +428,7 @@ impl<'input> Lexer<'input> {
                     ));
                     if delim_range.start > last_delimiter_end {
                         let raw = &self.input.buffer()[last_delimiter_end..delim_range.start];
-                        if !raw.iter().all(u8::is_ascii_whitespace) {
+                        if !raw.iter().all(u8::is_ascii_whitespace) || !is_first {
                             let content = self.input.as_str(last_delimiter_end..delim_range.start);
                             let content = if is_first {
                                 content.strip_prefix(' ').unwrap_or(content)
@@ -436,19 +450,38 @@ impl<'input> Lexer<'input> {
                     is_first = false;
                 }
                 Delimiter::MatchEnd if in_match.is_some() => {
-                    last_delimiter_end = delim_range.end;
+                    // Check if this closing delimiter might be part of the underlying pattern;
+                    // specifically, regexes may use character classes, e.g. [:digit:] or [0-9], and
+                    // to add even more complexity, the former may be used in negations, e.g.
+                    // [^[:digit:]].
+                    //
+                    // In both cases, the match end delimiter we're looking for is incorrectly
+                    // identified and includes all or part of the character class delimiter. We
+                    // check if this is the case by matching the content after the match start
+                    // delimiter up to and including the current match end delimiter. If the
+                    // following regex matches that content, we ignore this match and shift the
+                    // delimiter searcher back by one character, forcing it to re-attempt the search
+                    // while including part of the false match end delimiter, so that we properly
+                    // handle the case where the delimiter overlapped the false one and the real
+                    // one.
                     let match_start = in_match.take().unwrap();
-                    if matches!(match_start.into_inner(), Delimiter::NumericMatchStart) {
-                        self.tokenize_capture_or_match_numeric(Range::new(
-                            match_start.span().end().to_usize(),
-                            delim_range.start,
-                        ));
-                    } else {
-                        self.tokenize_capture_or_match(Range::new(
-                            match_start.span().end().to_usize(),
-                            delim_range.start,
-                        ));
+                    if FALSE_MATCH_END_PATTERN.is_match(
+                        self.input
+                            .as_str(match_start.span().end().to_usize()..delim_range.end),
+                    ) {
+                        in_match = Some(match_start);
+                        self.delimiter_searcher
+                            .set_range((delim_range.start + 1)..eol);
+                        continue;
                     }
+
+                    last_delimiter_end = delim_range.end;
+
+                    self.tokenize_capture_or_match(
+                        Range::new(match_start.span().end().to_usize(), delim_range.start),
+                        matches!(match_start.into_inner(), Delimiter::NumericMatchStart),
+                    );
+
                     self.buffer.push_back(Ok((
                         delim_range.start,
                         Token::MatchEnd,
