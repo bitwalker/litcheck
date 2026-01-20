@@ -93,7 +93,7 @@ impl<V: Clone + fmt::Debug> Bindings<V> {
     }
 
     pub fn clear(&mut self) {
-        log::trace!(target: "context:bindings", "clearing bindings in the current scope");
+        log::trace!(target: "context:bindings", "clearing all bindings");
         self.bound.clear();
     }
 }
@@ -276,6 +276,7 @@ pub struct Env<'input, 'context> {
     /// The current string interner
     interner: &'context mut StringInterner,
     bindings: Bindings<Value<'input>>,
+    enable_var_scope: bool,
 }
 impl<'input, 'context: 'input> Env<'input, 'context> {
     /// Create a new environment with the given set of predefined global variables
@@ -285,6 +286,7 @@ impl<'input, 'context: 'input> Env<'input, 'context> {
         Self {
             interner,
             bindings: Bindings::new(),
+            enable_var_scope: false,
         }
     }
 
@@ -306,6 +308,7 @@ impl<'input, 'context: 'input> Env<'input, 'context> {
         Env {
             interner,
             bindings: Bindings::new_with_system(system),
+            enable_var_scope: config.options.enable_var_scope,
         }
     }
 
@@ -316,12 +319,15 @@ impl<'input, 'context: 'input> Env<'input, 'context> {
     pub fn protect<'guard, 'this: 'guard>(
         &'this mut self,
     ) -> ScopeGuard<'guard, 'input, Value<'input>> {
-        log::trace!(target: "lexical-scope", "entering new protected scope");
+        if self.enable_var_scope {
+            log::trace!(target: "--enable-var-scope", "entering new scope");
+        }
         let bindings = self.bindings.clone();
         ScopeGuard {
             interner: self.interner,
             parent: &mut self.bindings,
             bindings,
+            enable_var_scope: self.enable_var_scope,
             _marker: core::marker::PhantomData,
         }
     }
@@ -361,7 +367,7 @@ impl<'input, 'context: 'input> LexicalScopeMut for Env<'input, 'context> {
     }
 
     fn insert(&mut self, name: VariableName, value: Self::Value) {
-        log::trace!(target: "lexical-scope", "binding {} to {value:#?}", self.interner.resolve(name.into_inner()));
+        log::trace!(target: "context:bindings", "binding {} to {value:#?}", self.interner.resolve(name.into_inner()));
         self.bindings.insert(name, value);
     }
 
@@ -392,13 +398,16 @@ pub struct ScopeGuard<'a, 'input: 'a, V: Clone + 'input + 'a> {
     interner: &'a mut StringInterner,
     parent: &'a mut Bindings<V>,
     bindings: Bindings<V>,
+    enable_var_scope: bool,
     _marker: core::marker::PhantomData<&'input ()>,
 }
 impl<'a, 'input> ScopeGuard<'a, 'input, Value<'input>> {
     /// Consume this [ScopeGuard] and persist any changes to the
     /// parent [LexicalScope].
     pub fn save(mut self) {
-        log::trace!(target: "scope-guard", "exiting scope, and saving bindings to parent");
+        if self.enable_var_scope {
+            log::trace!(target: "--enable-var-scope", "exiting scope, and saving bindings to parent");
+        }
         let bindings = core::mem::take(&mut self.bindings);
         self.parent.merge(bindings);
     }
@@ -406,12 +415,15 @@ impl<'a, 'input> ScopeGuard<'a, 'input, Value<'input>> {
     pub fn protect<'guard, 'this: 'guard>(
         &'this mut self,
     ) -> ScopeGuard<'guard, 'input, Value<'input>> {
-        log::trace!(target: "scope-guard", "entering new nested scope");
+        if self.enable_var_scope {
+            log::trace!(target: "--enable-var-scope", "entering new scope");
+        }
         let bindings = self.bindings.clone();
         ScopeGuard {
             interner: self.interner,
             parent: &mut self.bindings,
             bindings,
+            enable_var_scope: self.enable_var_scope,
             _marker: core::marker::PhantomData,
         }
     }
@@ -454,7 +466,7 @@ impl<'a, 'input: 'a, V: Clone + fmt::Debug + 'input> LexicalScopeMut for ScopeGu
     }
 
     fn insert(&mut self, name: VariableName, value: Self::Value) {
-        log::trace!(target: "scope-guard", "binding {} to {value:#?}", self.interner.resolve(name.into_inner()));
+        log::trace!(target: "context:bindings", "binding {} to {value:#?}", self.interner.resolve(name.into_inner()));
         self.bindings.insert(name, value);
     }
 
@@ -464,7 +476,9 @@ impl<'a, 'input: 'a, V: Clone + fmt::Debug + 'input> LexicalScopeMut for ScopeGu
     }
 
     fn clear(&mut self) {
-        log::trace!(target: "scope-guard", "clearing all bindings in the current scope");
-        self.bindings.clear();
+        if self.enable_var_scope {
+            log::trace!(target: "--enable-var-scope", "exiting scope");
+            self.bindings.clear();
+        }
     }
 }
