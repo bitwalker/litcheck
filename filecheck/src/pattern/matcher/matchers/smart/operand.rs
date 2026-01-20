@@ -3,6 +3,13 @@ use crate::{common::*, errors::InvalidNumericCastError};
 /// A value on the match context operand stack
 #[derive(Debug)]
 pub struct Operand<'input>(pub CaptureInfo<'input>);
+
+impl fmt::Display for Operand<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(self.as_value(), f)
+    }
+}
+
 impl<'input> Operand<'input> {
     #[inline]
     pub fn into_value(self) -> Value<'input> {
@@ -16,7 +23,7 @@ impl<'input> Operand<'input> {
     pub fn as_numeric(
         &self,
         span: SourceSpan,
-        format: NumberFormat,
+        format: Option<NumberFormat>,
         context: &dyn Context<'input, '_>,
     ) -> Result<Number, InvalidNumericCastError> {
         match self.as_value() {
@@ -27,7 +34,7 @@ impl<'input> Operand<'input> {
                 match_file: context.match_file(),
             }),
             Value::Str(value) => {
-                let value = match format {
+                let value = match format.unwrap_or_default() {
                     NumberFormat::Unsigned { precision } => {
                         parse_number(
                             span,
@@ -49,6 +56,7 @@ impl<'input> Operand<'input> {
                     NumberFormat::Hex {
                         require_prefix,
                         precision,
+                        casing: _,
                     } => {
                         let value = if require_prefix {
                             if let Some(stripped) = value.trim().strip_prefix("0x") {
@@ -77,7 +85,7 @@ impl<'input> Operand<'input> {
                         if trimmed.is_empty() {
                             0
                         } else {
-                            i64::from_str_radix(trimmed, 16).map_err(|err| {
+                            i128::from_str_radix(trimmed, 16).map_err(|err| {
                                 InvalidNumericCastError {
                                     span: Some(span),
                                     kind: *err.kind(),
@@ -106,7 +114,7 @@ fn parse_number(
     precision: u8,
     signed: bool,
     context: &dyn Context<'_, '_>,
-) -> Result<i64, InvalidNumericCastError> {
+) -> Result<i128, InvalidNumericCastError> {
     let precision = precision as usize;
     let value = if precision > 0 {
         if value.len() > precision {
@@ -126,7 +134,7 @@ fn parse_number(
         value
     };
     let value = value
-        .parse::<i64>()
+        .parse::<i128>()
         .map_err(|err| InvalidNumericCastError {
             span: Some(span),
             kind: *err.kind(),

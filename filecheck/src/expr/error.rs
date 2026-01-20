@@ -55,6 +55,12 @@ pub enum ExprError {
         #[label("the precision value here is too large")]
         span: SourceSpan,
     },
+    #[error("invalid format specifier")]
+    #[diagnostic()]
+    InvalidAlternateForm {
+        #[label("alternate form only supported for hex values")]
+        span: SourceSpan,
+    },
     /// This is only used for the default implementation required by logos
     #[default]
     #[error("an unknown error occurred")]
@@ -86,6 +92,7 @@ impl PartialEq for ExprError {
             (Self::Number { .. }, Self::Number { .. }) => true,
             (Self::InvalidFormatSpecifier { .. }, Self::InvalidFormatSpecifier { .. }) => true,
             (Self::InvalidNumericPrecision { .. }, Self::InvalidNumericPrecision { .. }) => true,
+            (Self::InvalidAlternateForm { .. }, Self::InvalidAlternateForm { .. }) => true,
             (Self::Unknown, Self::Unknown) => true,
             _ => false,
         }
@@ -101,7 +108,8 @@ impl Spanned for ExprError {
             | Self::UnrecognizedEof { span, .. }
             | Self::Number { span, .. }
             | Self::InvalidFormatSpecifier { span, .. }
-            | Self::InvalidNumericPrecision { span, .. } => *span,
+            | Self::InvalidNumericPrecision { span, .. }
+            | Self::InvalidAlternateForm { span, .. } => *span,
             Self::Unknown => SourceSpan::UNKNOWN,
         }
     }

@@ -359,10 +359,12 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
     fn match_number<'context>(
         &mut self,
         span: SourceSpan,
-        format: NumberFormat,
+        format: Option<NumberFormat>,
         capture_group: Option<CaptureGroup>,
         context: &ContextGuard<'_, 'input, 'context>,
     ) -> DiagResult<MatchResult<'input>> {
+        log::trace!(target: "smart:searcher", "attempting to match number (format = {})", format.map(|f| Cow::Owned(f.to_string())).unwrap_or(Cow::Borrowed("default")));
+        let format = format.unwrap_or_default();
         if self.cursor.as_slice().is_empty() {
             return Ok(MatchResult::failed(
                 CheckFailedError::MatchNoneButExpected {
@@ -471,9 +473,9 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
     ) -> DiagResult<MatchResult<'input>> {
         assert_eq!(constraint, Constraint::Eq);
         let lhs = self.stack.last().expect("expected operand on stack");
-        let lhs = lhs.as_numeric(span, Default::default(), context)?;
-        match evaluate_expr(span, expr, context)? {
+        match evaluate_expr(span, expr, None, context)? {
             Left(rhs) => {
+                let lhs = lhs.as_numeric(span, rhs.format, context)?;
                 if lhs.value != rhs.value {
                     self.captures.set_pattern(None);
                 }
@@ -512,8 +514,14 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
         let span = expr.span();
         let pattern = match evaluate_expr(span, expr, context)? {
             Left(num) => Cow::Owned(match ty {
-                Some(ValueType::Number(format)) => {
-                    format!("{}", Number { format, ..num })
+                Some(ValueType::Number(Some(format))) => {
+                    format!(
+                        "{}",
+                        &Number {
+                            format: Some(format),
+                            ..num
+                        }
+                    )
                 }
                 _ => format!("{num}"),
             }),
@@ -550,6 +558,7 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
 fn evaluate_expr<'input>(
     span: SourceSpan,
     expr: &Expr,
+    ty: Option<ValueType>,
     context: &ContextGuard<'_, 'input, '_>,
 ) -> DiagResult<Either<Number, Cow<'input, str>>> {
     match expr {
@@ -567,10 +576,17 @@ fn evaluate_expr<'input>(
                             name: name.into_inner(),
                         }
                     })?;
-                    value
-                        .as_number()
-                        .map(Left)
-                        .unwrap_or_else(|| Right(value.unwrap_string()))
+                    match value {
+                        Value::Undef => {
+                            return Err(Report::new(UndefinedVariableError {
+                                span: var_span,
+                                match_file: context.match_file(),
+                                name: name.into_inner(),
+                            }));
+                        }
+                        Value::Num(expr) => return evaluate_expr(span, &expr, ty, context),
+                        Value::Str(value) => Right(value),
+                    }
                 }
                 VariableName::Pseudo(name) => match name.into_inner() {
                     symbols::Line => {
@@ -599,30 +615,65 @@ fn evaluate_expr<'input>(
             rhs,
         } => {
             let op_span = *op_span;
-            let l = evaluate_expr(op_span, lhs, context)?;
-            let r = evaluate_expr(op_span, rhs, context)?;
+            let l = evaluate_expr(op_span, lhs, ty, context)?;
+            let r = evaluate_expr(op_span, rhs, ty, context)?;
+            let explicit_format = match ty {
+                Some(ValueType::Number(format)) => format,
+                _ => None,
+            };
             match (l, r) {
                 (Left(l), Left(r)) => {
-                    let result = match op {
-                        BinaryOp::Add => l.value + r.value,
-                        BinaryOp::Sub => l.value - r.value,
-                        BinaryOp::Mul => l.value * r.value,
-                        BinaryOp::Div => l.value / r.value,
-                        BinaryOp::Min => core::cmp::min(l.value, r.value),
-                        BinaryOp::Max => core::cmp::max(l.value, r.value),
-                        BinaryOp::Eq => {
-                            if l.value == r.value {
-                                1
-                            } else {
-                                0
+                    if let Some(format) = l.infer_expression_format(&r).or(explicit_format) {
+                        let result = match op {
+                            BinaryOp::Add => l.value + r.value,
+                            BinaryOp::Sub => l.value - r.value,
+                            BinaryOp::Mul => l.value * r.value,
+                            BinaryOp::Div => l.value / r.value,
+                            BinaryOp::Min => core::cmp::min(l.value, r.value),
+                            BinaryOp::Max => core::cmp::max(l.value, r.value),
+                            BinaryOp::Eq => {
+                                if l.value == r.value {
+                                    1
+                                } else {
+                                    0
+                                }
                             }
-                        }
-                    };
-                    Ok(Left(Number {
-                        span,
-                        format: l.format,
-                        value: result,
-                    }))
+                        };
+                        let format = if l.format.is_none()
+                            && r.format.is_none()
+                            && explicit_format.is_none()
+                        {
+                            None
+                        } else {
+                            Some(format)
+                        };
+                        Ok(Left(Number {
+                            span,
+                            format,
+                            value: result,
+                        }))
+                    } else {
+                        Err(litcheck::diagnostics::diagnostic!(
+                            labels = vec![
+                                litcheck::diagnostics::LabeledSpan::new_with_span(
+                                    Some(format!(
+                                        "the format of this operand is {}",
+                                        l.format.unwrap_or_default()
+                                    )),
+                                    lhs.span(),
+                                ),
+                                litcheck::diagnostics::LabeledSpan::new_with_span(
+                                    Some(format!(
+                                        "the format of this operand is {}",
+                                        r.format.unwrap_or_default()
+                                    )),
+                                    rhs.span(),
+                                ),
+                            ],
+                            "implicit format conflict, need an explicit format specifier",
+                        )
+                        .into())
+                    }
                 }
                 (Left(_), Right(_)) => Err(Report::new(InvalidNumericCastError {
                     span: Some(op_span),

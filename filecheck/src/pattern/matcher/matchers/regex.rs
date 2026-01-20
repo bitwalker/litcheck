@@ -192,6 +192,7 @@ where
     let value = match capture.value_type() {
         ValueType::String => Value::Str(Cow::Borrowed(captured)),
         ValueType::Number(format) => {
+            let format = format.unwrap_or_default();
             match Number::parse_with_format(Span::new(capture_span, captured), format) {
                 Ok(n) => Value::Num(Expr::Num(n)),
                 Err(error) => {

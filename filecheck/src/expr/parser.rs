@@ -117,7 +117,7 @@ pub enum Token<'input> {
     #[regex(r"[A-Za-z_][A-Za-z0-9_]*", |lex| lex.slice())]
     Ident(&'input str),
     #[regex(r"-?[0-9]+", parse_int)]
-    Num(i64),
+    Num(i128),
 }
 impl<'input> Eq for Token<'input> {}
 impl<'input> PartialEq for Token<'input> {
@@ -158,10 +158,10 @@ impl<'input> fmt::Display for Token<'input> {
     }
 }
 
-fn parse_int<'input>(lexer: &mut Lexer<'input, Token<'input>>) -> Result<i64, ExprError> {
+fn parse_int<'input>(lexer: &mut Lexer<'input, Token<'input>>) -> Result<i128, ExprError> {
     lexer
         .slice()
-        .parse::<i64>()
+        .parse::<i128>()
         .map_err(|error| ExprError::Number {
             span: SourceSpan::try_from_range(lexer.extras, lexer.span()).unwrap(),
             error,

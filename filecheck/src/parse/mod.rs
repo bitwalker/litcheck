@@ -18,6 +18,7 @@ pub enum ParserError {
     #[diagnostic(transparent)]
     Lexer(#[from] LexerError),
     #[error(transparent)]
+    #[diagnostic(transparent)]
     Expr(#[from] crate::expr::ExprError),
     #[error("invalid token")]
     #[diagnostic()]

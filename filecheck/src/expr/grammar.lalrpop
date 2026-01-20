@@ -15,7 +15,7 @@ extern {
 
     enum Token<'input> {
         ident => Token::Ident(<&'input str>),
-        number => Token::Num(<i64>),
+        number => Token::Num(<i128>),
         "(" => Token::LParen,
         ")" => Token::RParen,
         "#" => Token::Hash,
@@ -67,7 +67,7 @@ NumberFormat: NumberFormat = {
         match ty {
             FormatSpecifier::Unsigned => NumberFormat::Unsigned { precision: precision.unwrap_or(0) },
             FormatSpecifier::Signed => NumberFormat::Signed { precision: precision.unwrap_or(0) },
-            FormatSpecifier::Hex => NumberFormat::Hex { require_prefix, precision: precision.unwrap_or(0) },
+            FormatSpecifier::Hex(casing) => NumberFormat::Hex { require_prefix, precision: precision.unwrap_or(0), casing },
         }
     }
 }
@@ -138,7 +138,15 @@ Callee: Span<Symbol> = {
 }
 
 Num: Expr = {
-    <l:@L> <n:number> <r:@R> => Expr::Num(Number::new(span!(source_id, l, r), n)),
+    <l:@L> <negate:Negate> <n:number> <r:@R> => {
+        let n = if negate { -n } else { n };
+        Expr::Num(Number::new(span!(source_id, l, r), n))
+    }
+}
+
+Negate: bool = {
+    "-" => true,
+    => false,
 }
 
 RequirePrefix: bool = {
@@ -149,21 +157,23 @@ RequirePrefix: bool = {
 FormatSpecifier: FormatSpecifier = {
     <l:@L> <value:ident> <r:@R> =>? {
         match value {
-            "a" => Ok(FormatSpecifier::Unsigned),
+            "u" => Ok(FormatSpecifier::Unsigned),
             "d" => Ok(FormatSpecifier::Signed),
-            "x" => Ok(FormatSpecifier::Hex),
-            "X" => Ok(FormatSpecifier::Hex),
+            "x" => Ok(FormatSpecifier::Hex(CasingStyle::Any)),
+            "X" => Ok(FormatSpecifier::Hex(CasingStyle::Upper)),
             _ => Err(ParseError::User {
-                error: ExprError::InvalidFormatSpecifier { span: span!(source_id, l, r) }.into()
+                error: ExprError::InvalidFormatSpecifier { span: span!(source_id, l, r) }
             }),
         }
-    }
+    },
+
+    => FormatSpecifier::Unsigned,
 }
 
 Precision: u8 = {
     <l:@L> <n:number> <r:@R> =>? {
         u8::try_from(n).map_err(|_| ParseError::User {
-            error: ExprError::InvalidNumericPrecision { span: span!(source_id, l, r) }.into()
+            error: ExprError::InvalidNumericPrecision { span: span!(source_id, l, r) }
         })
     },
 }

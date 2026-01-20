@@ -649,7 +649,7 @@ impl<'input> Lexer<'input> {
                 '-' => {
                     strip_whitespace = true;
                     self.buffer
-                        .push_back(Ok((offset, Token::Plus, next_offset)));
+                        .push_back(Ok((offset, Token::Minus, next_offset)));
                 }
                 '@' => {
                     strip_whitespace = false;
@@ -707,17 +707,41 @@ impl<'input> Lexer<'input> {
                     continue;
                 }
                 c if c.is_ascii_digit() => {
-                    let mut end = next_offset;
-                    while let Some(&c) = chars.peek() {
-                        match c {
-                            c if c.is_ascii_digit() => {
-                                end += 1;
+                    let mut radix = 10;
+                    let is_valid_digit: fn(&char) -> bool;
+                    if c == '0' {
+                        match chars.peek() {
+                            Some('x') => {
+                                radix = 16;
                                 chars.next();
+                                offset = next_offset + 1;
+                                next_offset += 1;
+                                is_valid_digit = char::is_ascii_hexdigit;
                             }
-                            _ => break,
+                            Some('b') => {
+                                radix = 2;
+                                chars.next();
+                                offset = next_offset + 1;
+                                next_offset += 1;
+                                is_valid_digit = is_valid_binary_digit;
+                            }
+                            _ => {
+                                is_valid_digit = char::is_ascii_digit;
+                            }
                         }
+                    } else {
+                        is_valid_digit = char::is_ascii_digit;
                     }
-                    match self.input.as_str(offset..end).parse::<i64>() {
+
+                    let mut end = next_offset;
+                    while let Some(c) = chars.peek()
+                        && is_valid_digit(c)
+                    {
+                        end += 1;
+                        chars.next();
+                    }
+                    let n = self.input.as_str(offset..end);
+                    match i128::from_str_radix(n, radix) {
                         Ok(value) => {
                             self.buffer.push_back(Ok((offset, Token::Num(value), end)));
                         }
@@ -790,4 +814,9 @@ impl<'input> Iterator for Lexer<'input> {
         }
         res
     }
+}
+
+#[inline(always)]
+const fn is_valid_binary_digit(c: &char) -> bool {
+    matches!(*c, '0' | '1')
 }

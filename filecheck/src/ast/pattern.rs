@@ -286,7 +286,7 @@ impl<'a> CheckPattern<'a> {
                     ..
                 }) => Prefix::Regex(RegexPattern::new(Span::new(
                     *span,
-                    format.pattern_nocapture(),
+                    format.unwrap_or_default().pattern_nocapture(),
                 ))),
                 CheckPatternPart::Match(Match::Numeric {
                     span,
@@ -295,7 +295,7 @@ impl<'a> CheckPattern<'a> {
                     expr: None,
                     ..
                 }) => Prefix::Regex(RegexPattern {
-                    pattern: Span::new(*span, format.pattern(None)),
+                    pattern: Span::new(*span, format.unwrap_or_default().pattern(None)),
                     captures: smallvec![Capture::Implicit(TypedVariable {
                         name: *name,
                         ty: ValueType::Number(*format),
@@ -354,7 +354,7 @@ impl<'a> CheckPattern<'a> {
                         ..
                     }) => Prefix::Regex(RegexPattern::new(Span::new(
                         span,
-                        format.pattern_nocapture(),
+                        format.unwrap_or_default().pattern_nocapture(),
                     ))),
                     CheckPatternPart::Match(Match::Numeric {
                         span,
@@ -363,7 +363,7 @@ impl<'a> CheckPattern<'a> {
                         expr: None,
                         ..
                     }) => Prefix::Regex(RegexPattern {
-                        pattern: Span::new(span, format.pattern_nocapture()),
+                        pattern: Span::new(span, format.unwrap_or_default().pattern_nocapture()),
                         captures: smallvec![Capture::Implicit(TypedVariable {
                             name,
                             ty: ValueType::Number(format),
@@ -497,7 +497,7 @@ impl<'a> CheckPattern<'a> {
                             ..
                         }) => {
                             pattern_end = span.end();
-                            let format_pattern = format.pattern_nocapture();
+                            let format_pattern = format.unwrap_or_default().pattern_nocapture();
                             if is_literal_mode {
                                 is_literal_mode = false;
                                 convert_to_regex(&mut pattern, format_pattern.len());
@@ -803,7 +803,7 @@ pub enum Match<'a> {
         /// If not specified, it is implied by the format
         /// of any numeric operands in `expr`, otherwise it
         /// defaults to an unsigned integer with no leading zeros.
-        format: NumberFormat,
+        format: Option<NumberFormat>,
         /// If set, contains the name of the variable to bind to
         /// the matched value if the match succeeds.
         capture: Option<VariableName>,
@@ -866,8 +866,9 @@ impl<'a> Ord for Match<'a> {
                     ..
                 },
             ) => af
+                .unwrap_or_default()
                 .pattern(None)
-                .cmp(&bf.pattern(None))
+                .cmp(&bf.unwrap_or_default().pattern(None))
                 .then_with(|| aexpr.cmp(bexpr)),
             (
                 Self::Numeric { capture: None, .. },
@@ -895,8 +896,9 @@ impl<'a> Ord for Match<'a> {
                     ..
                 },
             ) => af
+                .unwrap_or_default()
                 .pattern(None)
-                .cmp(&bf.pattern(None))
+                .cmp(&bf.unwrap_or_default().pattern(None))
                 .then_with(|| acap.cmp(bcap))
                 .then_with(|| aexpr.cmp(bexpr)),
             (
@@ -912,7 +914,7 @@ impl<'a> Ord for Match<'a> {
                     ..
                 },
             ) => AsRef::<str>::as_ref(pattern)
-                .cmp(format.pattern(None).as_ref())
+                .cmp(format.unwrap_or_default().pattern(None).as_ref())
                 .then_with(|| Some(*name).cmp(capture))
                 .then(Ordering::Less),
             (
@@ -928,6 +930,7 @@ impl<'a> Ord for Match<'a> {
                     ..
                 },
             ) => format
+                .unwrap_or_default()
                 .pattern(None)
                 .as_ref()
                 .cmp(pattern.inner().as_ref())

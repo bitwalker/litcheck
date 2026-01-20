@@ -34,8 +34,19 @@ impl FromStr for Value<'_> {
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum ValueType {
     String,
-    Number(NumberFormat),
+    Number(Option<NumberFormat>),
 }
+
+impl fmt::Display for ValueType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::String => f.write_str("string"),
+            Self::Number(None) => f.write_str("any number"),
+            Self::Number(Some(format)) => f.write_str(&format.describe()),
+        }
+    }
+}
+
 impl PartialOrd for ValueType {
     fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
         Some(self.cmp(other))
@@ -50,6 +61,8 @@ impl Ord for ValueType {
             (Self::String, _) => Ordering::Less,
             (_, Self::String) => Ordering::Greater,
             (Self::Number(a), Self::Number(b)) => {
+                let a = a.unwrap_or_default();
+                let b = b.unwrap_or_default();
                 if a == b {
                     Ordering::Equal
                 } else {

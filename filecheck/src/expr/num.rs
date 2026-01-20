@@ -31,28 +31,109 @@ pub enum ParseNumberError {
         span: SourceSpan,
         reason: core::num::IntErrorKind,
     },
+    #[error("input string has incorrect numeric format: invalid casing style, expected {expected}")]
+    #[diagnostic()]
+    InvalidCasing {
+        #[label("occurs here")]
+        span: SourceSpan,
+        expected: CasingStyle,
+    },
 }
 
 #[derive(Debug, Clone)]
 pub struct Number {
     pub span: SourceSpan,
-    pub format: NumberFormat,
-    pub value: i64,
+    pub format: Option<NumberFormat>,
+    pub value: i128,
 }
 impl Number {
-    pub fn new(span: SourceSpan, value: i64) -> Self {
+    pub fn new(span: SourceSpan, value: i128) -> Self {
         Self {
             span,
-            format: NumberFormat::default(),
+            format: None,
             value,
         }
     }
 
-    pub fn new_with_format(span: SourceSpan, value: i64, format: NumberFormat) -> Self {
+    pub fn new_with_format(span: SourceSpan, value: i128, format: NumberFormat) -> Self {
         Self {
             span,
-            format,
+            format: Some(format),
             value,
+        }
+    }
+
+    /// Returns the format that should be applied to an expression involving `self` and `other`.
+    ///
+    /// Returns `None` if there is an implicit format conflict. Otherwise this returns the format
+    /// to apply to the expression result.
+    ///
+    /// Two numbers are format-compatible if they:
+    ///
+    /// * Have the same format specifier (i.e. hex, signed, unsigned), or one of the operands
+    ///   has no specified format (i.e. it is inferred from the other operand).
+    /// * Have the same precision, if specified, or one of the operands is arbitrary precision
+    /// * If hex, both require a prefix, or neither do
+    /// * If hex, the casing style is compatible, i.e. they don't have conflicting casing
+    ///   requirements
+    ///
+    /// The format returned from this function will take the most precise information from the
+    /// given input formats, e.g. if the two numbers are both unsigned integers, but one has a
+    /// precision of 6, and the other is arbitrary precision, then the output format will specify
+    /// a precision of 6.
+    pub fn infer_expression_format(&self, other: &Self) -> Option<NumberFormat> {
+        match (self.format, other.format) {
+            (format @ Some(_), None) | (None, format @ Some(_)) => format,
+            (None, None) => Some(NumberFormat::default()),
+            (
+                Some(NumberFormat::Hex {
+                    require_prefix: lprefixed,
+                    casing: lcasing,
+                    precision: lprecision,
+                }),
+                Some(NumberFormat::Hex {
+                    require_prefix: rprefixed,
+                    casing: rcasing,
+                    precision: rprecision,
+                }),
+            ) if lprefixed == rprefixed
+                && (lprecision == rprecision || lprecision == 0 || rprecision == 0)
+                && (lcasing == rcasing
+                    || lcasing == CasingStyle::Any
+                    || rcasing == CasingStyle::Any) =>
+            {
+                let precision = core::cmp::max(lprecision, rprecision);
+                Some(NumberFormat::Hex {
+                    precision,
+                    require_prefix: lprefixed,
+                    casing: lcasing,
+                })
+            }
+            (
+                Some(NumberFormat::Signed {
+                    precision: lprecision,
+                }),
+                Some(NumberFormat::Signed {
+                    precision: rprecision,
+                }),
+            ) if lprecision == rprecision || lprecision == 0 || rprecision == 0 => {
+                Some(NumberFormat::Signed {
+                    precision: core::cmp::max(lprecision, rprecision),
+                })
+            }
+            (
+                Some(NumberFormat::Unsigned {
+                    precision: lprecision,
+                }),
+                Some(NumberFormat::Unsigned {
+                    precision: rprecision,
+                }),
+            ) if lprecision == rprecision || lprecision == 0 || rprecision == 0 => {
+                Some(NumberFormat::Unsigned {
+                    precision: core::cmp::max(lprecision, rprecision),
+                })
+            }
+            _ => None,
         }
     }
 
@@ -68,10 +149,10 @@ impl Number {
                     return Err(ParseNumberError::UnexpectedSign { span });
                 }
                 let value = input
-                    .parse::<i64>()
+                    .parse::<i128>()
                     .map(|value| Self {
                         span,
-                        format,
+                        format: Some(format),
                         value,
                     })
                     .map_err(|error| ParseNumberError::InvalidFormat {
@@ -81,7 +162,7 @@ impl Number {
                 if precision == 0 {
                     return Ok(value);
                 }
-                if input.len() != precision as usize {
+                if input.len() < precision as usize {
                     Err(ParseNumberError::PrecisionMismatch {
                         span,
                         precision,
@@ -93,10 +174,10 @@ impl Number {
             }
             NumberFormat::Signed { precision } => {
                 let value = input
-                    .parse::<i64>()
+                    .parse::<i128>()
                     .map(|value| Self {
                         span,
-                        format,
+                        format: Some(format),
                         value,
                     })
                     .map_err(|error| ParseNumberError::InvalidFormat {
@@ -111,7 +192,7 @@ impl Number {
                 } else {
                     input.len()
                 };
-                if actual != precision as usize {
+                if actual < precision as usize {
                     Err(ParseNumberError::PrecisionMismatch {
                         span,
                         precision,
@@ -124,23 +205,34 @@ impl Number {
             NumberFormat::Hex {
                 require_prefix,
                 precision,
+                casing,
             } => {
                 let input = match input.strip_prefix("0x") {
                     None if require_prefix => return Err(ParseNumberError::MissingPrefix { span }),
                     None => input,
                     Some(input) => input,
                 };
-                let value = i64::from_str_radix(input, 16)
+                let is_valid_casing = match casing {
+                    CasingStyle::Any => true,
+                    CasingStyle::Lower => input.chars().all(|c| matches!(c, 'a'..='f' | '0'..='9')),
+                    CasingStyle::Upper => input.chars().all(|c| matches!(c, 'A'..='F' | '0'..='9')),
+                };
+                let value = i128::from_str_radix(input, 16)
                     .map(|value| Self {
                         span,
-                        format,
+                        format: Some(format),
                         value,
                     })
                     .map_err(|error| ParseNumberError::InvalidFormat {
                         span,
                         reason: *error.kind(),
                     })?;
-                if input.len() != precision as usize {
+                if !is_valid_casing {
+                    Err(ParseNumberError::InvalidCasing {
+                        span,
+                        expected: casing,
+                    })
+                } else if precision > 0 && input.len() < precision as usize {
                     Err(ParseNumberError::PrecisionMismatch {
                         span,
                         precision,
@@ -177,29 +269,78 @@ impl Spanned for Number {
 impl fmt::Display for Number {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let value = self.value;
-        match self.format {
+        let mut padding = 0;
+        let format = self.format.unwrap_or_default();
+        match format {
+            NumberFormat::Unsigned { precision } => {
+                if precision > 0 {
+                    padding += precision as usize;
+                }
+            }
+            NumberFormat::Signed { precision } => {
+                padding += value.is_negative() as usize;
+                if precision > 0 {
+                    padding += precision as usize;
+                }
+            }
+            NumberFormat::Hex {
+                precision,
+                require_prefix,
+                ..
+            } => {
+                padding += (require_prefix as usize) * 2;
+                if precision > 0 {
+                    padding += precision as usize;
+                }
+            }
+        }
+        match format {
             NumberFormat::Unsigned { precision: 0 } => write!(f, "{}", value as u64),
-            NumberFormat::Unsigned { precision: n } => {
-                write!(f, "{:0n$}", value as u64, n = n as usize)
+            NumberFormat::Unsigned { .. } => {
+                write!(f, "{:0padding$}", value as u64)
             }
             NumberFormat::Signed { precision: 0 } => write!(f, "{value}"),
-            NumberFormat::Signed { precision: n } => write!(f, "{value:0n$}", n = n as usize),
+            NumberFormat::Signed { .. } => write!(f, "{value:0padding$}"),
             NumberFormat::Hex {
                 require_prefix: true,
                 precision: 0,
+                casing: CasingStyle::Any | CasingStyle::Lower,
             } => write!(f, "{value:#x?}"),
             NumberFormat::Hex {
+                require_prefix: true,
+                precision: 0,
+                casing: CasingStyle::Upper,
+            } => write!(f, "{value:#X?}"),
+            NumberFormat::Hex {
                 require_prefix: false,
                 precision: 0,
+                casing: CasingStyle::Any | CasingStyle::Lower,
             } => write!(f, "{value:x?}"),
             NumberFormat::Hex {
+                require_prefix: false,
+                precision: 0,
+                casing: CasingStyle::Upper,
+            } => write!(f, "{value:X?}"),
+            NumberFormat::Hex {
                 require_prefix: true,
-                precision: n,
-            } => write!(f, "{value:#0n$x?}", n = n as usize),
+                casing: CasingStyle::Any | CasingStyle::Lower,
+                ..
+            } => write!(f, "{value:#0padding$x?}"),
+            NumberFormat::Hex {
+                require_prefix: true,
+                casing: CasingStyle::Upper,
+                ..
+            } => write!(f, "{value:#0padding$X?}"),
             NumberFormat::Hex {
                 require_prefix: false,
-                precision: n,
-            } => write!(f, "{value:0n$x?}", n = n as usize),
+                casing: CasingStyle::Any | CasingStyle::Lower,
+                ..
+            } => write!(f, "{value:0padding$x?}"),
+            NumberFormat::Hex {
+                require_prefix: false,
+                casing: CasingStyle::Upper,
+                ..
+            } => write!(f, "{value:0padding$X?}"),
         }
     }
 }
@@ -207,9 +348,17 @@ impl fmt::Display for Number {
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[repr(u8)]
 pub enum NumberFormat {
-    Unsigned { precision: u8 },
-    Signed { precision: u8 },
-    Hex { precision: u8, require_prefix: bool },
+    Unsigned {
+        precision: u8,
+    },
+    Signed {
+        precision: u8,
+    },
+    Hex {
+        precision: u8,
+        require_prefix: bool,
+        casing: CasingStyle,
+    },
 }
 
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
@@ -242,31 +391,38 @@ impl fmt::Display for CasingStyle {
 impl NumberFormat {
     pub fn describe(&self) -> Cow<'static, str> {
         match self {
-            Self::Unsigned { precision: 0 } => Cow::Borrowed("any unsigned 64-bit integer"),
+            Self::Unsigned { precision: 0 } => Cow::Borrowed("any unsigned 128-bit integer"),
             Self::Unsigned { precision } => {
-                Cow::Owned(format!("an unsigned {precision}-digit 64-bit integer"))
+                Cow::Owned(format!("an unsigned {precision}-digit 128-bit integer"))
             }
-            Self::Signed { precision: 0 } => Cow::Borrowed("any signed 64-bit integer"),
+            Self::Signed { precision: 0 } => Cow::Borrowed("any signed 128-bit integer"),
             Self::Signed { precision } => {
-                Cow::Owned(format!("a signed {precision}-digit 64-bit integer"))
+                Cow::Owned(format!("a signed {precision}-digit 128-bit integer"))
             }
             Self::Hex {
                 require_prefix: true,
                 precision: 0,
-            } => Cow::Borrowed("any 64-bit integer in hex format, prefixed with 0x"),
+                casing,
+            } => Cow::Owned(format!(
+                "any 128-bit integer in {casing} hex format, prefixed with 0x"
+            )),
             Self::Hex {
                 require_prefix: false,
                 precision: 0,
-            } => Cow::Borrowed("any 64-bit integer in hex format"),
+                casing,
+            } => Cow::Owned(format!("any 128-bit integer in {casing} hex format")),
             Self::Hex {
                 require_prefix: true,
                 precision,
+                casing,
             } => Cow::Owned(format!(
-                "a {precision}-digit 64-bit integer in hex format, prefixed with 0x"
+                "a {precision}-digit 12864-bit integer in {casing} hex format, prefixed with 0x"
             )),
-            Self::Hex { precision, .. } => {
-                Cow::Owned(format!("a {precision}-digit 64-bit integer in hex format"))
-            }
+            Self::Hex {
+                precision, casing, ..
+            } => Cow::Owned(format!(
+                "a {precision}-digit 128-bit integer in {casing} hex format"
+            )),
         }
     }
 
@@ -294,86 +450,150 @@ impl NumberFormat {
     }
 
     pub fn pattern_nocapture(&self) -> Cow<'static, str> {
-        // NOTE: The patterns below with precision 0 have their
-        // range capped at 19, which is the maximum number of digits
-        // in i64::MAX, or the largest possible number that could
-        // be represented in decimal form
+        // NOTE: The patterns below with precision 0 have their range capped at 39, which is the
+        // maximum number of digits in i128::MAX, or the largest possible number that could be
+        // represented in decimal form
         match self {
-            NumberFormat::Signed { precision: 0 } => Cow::Borrowed(r"(?:[-+]?[0-9]{1,19})"),
+            NumberFormat::Signed { precision: 0 } => Cow::Borrowed(r"(?:[-+]?[0-9]{1,39})"),
             NumberFormat::Signed { precision } => {
-                Cow::Owned(format!("(?:[-+]?[0-9]{{{precision}}})"))
+                Cow::Owned(format!("(?:[-+]?[0-9]{{{precision},39}})"))
             }
-            NumberFormat::Unsigned { precision: 0 } => Cow::Borrowed(r"(?:[0-9]{1,19})"),
-            NumberFormat::Unsigned { precision } => Cow::Owned(format!("(?:[0-9]{{{precision}}})")),
-            // The hex value for i64::MAX is 7fffffffffffffff,
-            // or 16 digits
+            NumberFormat::Unsigned { precision: 0 } => Cow::Borrowed(r"(?:[0-9]{1,39})"),
+            NumberFormat::Unsigned { precision } => {
+                Cow::Owned(format!("(?:[0-9]{{{precision},39}})"))
+            }
+            // The hex value for i128::MAX is 7fffffffffffffffffffffffffffffff or 32 digits
             NumberFormat::Hex {
                 require_prefix: true,
                 precision: 0,
-            } => Cow::Borrowed(r"(?:0x[A-Fa-f0-9]{1,16})"),
+                casing,
+            } => Cow::Owned(format!("(?:0x{}{{1,32}})", casing.as_hex_class())),
             NumberFormat::Hex {
                 require_prefix: true,
                 precision,
-            } => Cow::Owned(format!("(?:0x[A-Fa-f0-9]{{{precision}}})")),
+                casing,
+            } => Cow::Owned(format!("(?:0x{}{{{precision},32}})", casing.as_hex_class())),
             NumberFormat::Hex {
                 require_prefix: false,
                 precision: 0,
-            } => Cow::Borrowed(r"(?:[A-Fa-f0-9]{1,16})"),
+                casing,
+            } => Cow::Owned(format!(r"(?:{}{{1,32}})", casing.as_hex_class())),
             NumberFormat::Hex {
                 require_prefix: false,
                 precision,
-            } => Cow::Owned(format!("(?:[A-Fa-f0-9]{{{precision}}})")),
+                casing,
+            } => Cow::Owned(format!("(?:{}{{{precision},32}})", casing.as_hex_class())),
         }
     }
 
     pub fn pattern(&self, group_name_override: Option<&str>) -> Cow<'static, str> {
-        // NOTE: The patterns below with precision 0 have their
-        // range capped at 19, which is the maximum number of digits
-        // in i64::MAX, or the largest possible number that could
-        // be represented in decimal form
+        // NOTE: The patterns below with precision 0 have their range capped at 39, which is the
+        // maximum number of digits in i128::MAX, or the largest possible number that could be
+        // represented in decimal form
         let group_name = group_name_override.unwrap_or("digits");
         match self {
             NumberFormat::Signed { precision: 0 } => match group_name_override {
-                None => Cow::Borrowed(r"(?P<digits>[-+]?[0-9]{1,19})"),
-                Some(group_name) => Cow::Owned(format!("(?P<{group_name}>[-+]?[0-9]{{1,19}})")),
+                None => Cow::Borrowed(r"(?P<digits>[-+]?[0-9]{1,39})"),
+                Some(group_name) => Cow::Owned(format!("(?P<{group_name}>[-+]?[0-9]{{1,39}})")),
             },
             NumberFormat::Signed { precision } => {
-                Cow::Owned(format!("(?P<{group_name}>[-+]?[0-9]{{{precision}}})"))
+                Cow::Owned(format!("(?P<{group_name}>[-+]?[0-9]{{{precision},39}})"))
             }
             NumberFormat::Unsigned { precision: 0 } => match group_name_override {
-                None => Cow::Borrowed(r"(?P<digits>[0-9]{1,19})"),
-                Some(group_name) => Cow::Owned(format!("(?P<{group_name}>[0-9]{{1,19}})")),
+                None => Cow::Borrowed(r"(?P<digits>[0-9]{1,39})"),
+                Some(group_name) => Cow::Owned(format!("(?P<{group_name}>[0-9]{{1,39}})")),
             },
             NumberFormat::Unsigned { precision } => {
-                Cow::Owned(format!("(?P<{group_name}>[0-9]{{{precision}}})"))
+                Cow::Owned(format!("(?P<{group_name}>[0-9]{{{precision},39}})"))
             }
-            // The hex value for i64::MAX is 7fffffffffffffff,
-            // or 16 digits
+            // The hex value for i128::MAX is 7fffffffffffffffffffffffffffffff or 32 digits
             NumberFormat::Hex {
                 require_prefix: true,
                 precision: 0,
-            } => match group_name_override {
-                None => Cow::Borrowed(r"(?P<digits>0x[A-Fa-f0-9]{1,16})"),
-                Some(group_name) => Cow::Owned(format!("(?P<{group_name}>0x[A-Fa-f0-9]{{1,16}})")),
-            },
+                casing,
+            } => Cow::Owned(format!(
+                "(?P<{group_name}>0x{}{{1,32}})",
+                casing.as_hex_class()
+            )),
             NumberFormat::Hex {
                 require_prefix: true,
                 precision,
-            } => Cow::Owned(format!("(?P<{group_name}>0x[A-Fa-f0-9]{{{precision}}})")),
+                casing,
+            } => Cow::Owned(format!(
+                "(?P<{group_name}>0x{}{{{precision},32}})",
+                casing.as_hex_class()
+            )),
             NumberFormat::Hex {
                 require_prefix: false,
                 precision: 0,
-            } => match group_name_override {
-                None => Cow::Borrowed(r"(?P<digits>[A-Fa-f0-9]{1,16})"),
-                Some(group_name) => Cow::Owned(format!("(?P<{group_name}>[A-Fa-f0-9]{{1,16}})")),
-            },
+                casing,
+            } => Cow::Owned(format!(
+                "(?P<{group_name}>{}{{1,32}})",
+                casing.as_hex_class()
+            )),
             NumberFormat::Hex {
                 require_prefix: false,
                 precision,
-            } => Cow::Owned(format!("(?P<{group_name}>[A-Fa-f0-9]{{{precision}}})")),
+                casing,
+            } => Cow::Owned(format!(
+                "(?P<{group_name}>{}{{{precision},32}})",
+                casing.as_hex_class()
+            )),
         }
     }
 }
+
+impl fmt::Display for NumberFormat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unsigned { precision: 0 } => f.write_str("%u"),
+            Self::Unsigned { precision } => write!(f, "%.{precision}u"),
+            Self::Signed { precision: 0 } => f.write_str("d"),
+            Self::Signed { precision } => write!(f, "%.{precision}d"),
+            Self::Hex {
+                precision: 0,
+                require_prefix: false,
+                casing: CasingStyle::Any | CasingStyle::Lower,
+            } => write!(f, "%x"),
+            Self::Hex {
+                precision: 0,
+                require_prefix: false,
+                casing: CasingStyle::Upper,
+            } => write!(f, "%X"),
+            Self::Hex {
+                precision: 0,
+                require_prefix: true,
+                casing: CasingStyle::Any | CasingStyle::Lower,
+            } => write!(f, "%#x"),
+            Self::Hex {
+                precision: 0,
+                require_prefix: true,
+                casing: CasingStyle::Upper,
+            } => write!(f, "%#X"),
+            Self::Hex {
+                precision,
+                require_prefix: false,
+                casing: CasingStyle::Any | CasingStyle::Lower,
+            } => write!(f, "%.{precision}x"),
+            Self::Hex {
+                precision,
+                require_prefix: false,
+                casing: CasingStyle::Upper,
+            } => write!(f, "%.{precision}X"),
+            Self::Hex {
+                precision,
+                require_prefix: true,
+                casing: CasingStyle::Any | CasingStyle::Lower,
+            } => write!(f, "%#.{precision}x"),
+            Self::Hex {
+                precision,
+                require_prefix: true,
+                casing: CasingStyle::Upper,
+            } => write!(f, "%#.{precision}X"),
+        }
+    }
+}
+
 impl Default for NumberFormat {
     fn default() -> Self {
         Self::Unsigned { precision: 0 }
@@ -385,5 +605,5 @@ pub enum FormatSpecifier {
     #[default]
     Unsigned,
     Signed,
-    Hex,
+    Hex(CasingStyle),
 }

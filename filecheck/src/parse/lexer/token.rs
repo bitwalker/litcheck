@@ -15,7 +15,7 @@ pub enum Token<'input> {
     Comment(Cow<'input, str>),
     Raw(&'input str),
     Ident(&'input str),
-    Num(i64),
+    Num(i128),
     // '[['
     MatchStart,
     // ']]'

@@ -391,7 +391,7 @@ fn main() -> i64 { foo(); }
                 literal_part!("i"),
                 CheckPatternPart::Match(Match::Numeric {
                     span: SourceSpan::UNKNOWN,
-                    format: NumberFormat::Unsigned { precision: 0 },
+                    format: None,
                     capture: Some(VariableName::User(Span::new(SourceSpan::UNKNOWN, bits))),
                     constraint: Constraint::Eq,
                     expr: None,
@@ -414,7 +414,7 @@ fn main() -> i64 { foo(); }
                     literal_part!("i"),
                     CheckPatternPart::Match(Match::Numeric {
                         span: SourceSpan::UNKNOWN,
-                        format: NumberFormat::Unsigned { precision: 0 },
+                        format: None,
                         capture: None,
                         constraint: Constraint::Eq,
                         expr: Some(Expr::Binary {
@@ -484,8 +484,8 @@ fn check_numeric_capture_and_substitution_with_formatting_parser_test() {
 fn foo() -> i32 { return 0; }
 fn main() -> i64 { foo(); }
 
-// CHECK: i[[#%.2a,BITS:]]
-// CHECK-NEXT: i[[#%.2a,mul(BITS, 2)]]
+// CHECK: i[[#%.2u,BITS:]]
+// CHECK-NEXT: i[[#%.2u,mul(BITS, 2)]]
 "#;
     let mut context = TestContext::new();
 
@@ -506,7 +506,7 @@ fn main() -> i64 { foo(); }
                 literal_part!("i"),
                 CheckPatternPart::Match(Match::Numeric {
                     span: SourceSpan::UNKNOWN,
-                    format: NumberFormat::Unsigned { precision: 2 },
+                    format: Some(NumberFormat::Unsigned { precision: 2 }),
                     capture: Some(VariableName::User(Span::new(SourceSpan::UNKNOWN, bits))),
                     constraint: Constraint::Eq,
                     expr: None,
@@ -529,7 +529,7 @@ fn main() -> i64 { foo(); }
                     literal_part!("i"),
                     CheckPatternPart::Match(Match::Numeric {
                         span: SourceSpan::UNKNOWN,
-                        format: NumberFormat::Unsigned { precision: 2 },
+                        format: Some(NumberFormat::Unsigned { precision: 2 }),
                         capture: None,
                         constraint: Constraint::Eq,
                         expr: Some(Expr::Binary {

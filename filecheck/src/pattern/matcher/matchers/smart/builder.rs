@@ -144,7 +144,7 @@ impl<'a, 'config> SmartMatcherBuilder<'a, 'config> {
         Ok(self)
     }
 
-    pub fn numeric(&mut self, span: SourceSpan, format: NumberFormat) -> &mut Self {
+    pub fn numeric(&mut self, span: SourceSpan, format: Option<NumberFormat>) -> &mut Self {
         self.register_empty_pattern_group();
         self.parts.push(MatchOp::Numeric {
             span,
@@ -157,7 +157,7 @@ impl<'a, 'config> SmartMatcherBuilder<'a, 'config> {
     pub fn numeric_with_constraint(
         &mut self,
         span: SourceSpan,
-        format: NumberFormat,
+        format: Option<NumberFormat>,
         constraint: Constraint,
         expr: Expr,
     ) -> &mut Self {
@@ -237,7 +237,7 @@ impl<'a, 'config> SmartMatcherBuilder<'a, 'config> {
         &mut self,
         span: SourceSpan,
         name: VariableName,
-        format: NumberFormat,
+        format: Option<NumberFormat>,
     ) -> &mut Self {
         let pattern_id = self.register_empty_pattern_group();
         let group = self.register_named_group(
@@ -263,7 +263,7 @@ impl<'a, 'config> SmartMatcherBuilder<'a, 'config> {
         &mut self,
         span: SourceSpan,
         name: VariableName,
-        format: NumberFormat,
+        format: Option<NumberFormat>,
         constraint: Constraint,
         expr: Expr,
     ) -> &mut Self {

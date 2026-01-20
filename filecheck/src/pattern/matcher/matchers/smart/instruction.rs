@@ -30,7 +30,7 @@ pub enum MatchOp<'a> {
         /// The span of the pattern
         span: SourceSpan,
         /// The format of the number to match
-        format: NumberFormat,
+        format: Option<NumberFormat>,
         /// If set, this is the capture group data corresponding to
         /// the `captures` set in [SmartMatcher]. This will be used to
         /// collect the captured value and push it on the operand
@@ -104,7 +104,7 @@ impl<'a> fmt::Debug for MatchOp<'a> {
                 .finish(),
             Self::Bind { name, ty, .. } => f
                 .debug_struct("Bind")
-                .field("name", name)
+                .field("name", &format!("{name}"))
                 .field("ty", ty)
                 .finish(),
             Self::Drop => f.write_str("Drop"),
@@ -113,11 +113,11 @@ impl<'a> fmt::Debug for MatchOp<'a> {
             } => f
                 .debug_struct("Constraint")
                 .field("constraint", constraint)
-                .field("expr", expr)
+                .field("expr", &format!("{expr}"))
                 .finish(),
             Self::Substitution { expr, ty, .. } => f
                 .debug_struct("Substitution")
-                .field("expr", expr)
+                .field("expr", &format!("{expr}"))
                 .field("ty", ty)
                 .finish(),
         }
