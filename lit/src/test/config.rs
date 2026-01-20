@@ -43,6 +43,15 @@ pub struct TestConfig {
     /// valid tests, unless they are prefixed with `.`, e.g. `.gitignore`.
     #[serde(default)]
     pub patterns: PatternSet,
+    /// Like `patterns`, but the given globs are used to reject potential test files matched by
+    /// `patterns` which should not be treated as tests.
+    ///
+    /// You should prefer to exclude subdirectories of a suite by using explicit search paths, and
+    /// excluding the directories that you don't want to search (so as to avoid traversing them in
+    /// the first place) - but in those cases where it is more convenient to use exclusion patterns,
+    /// this option is here to help.
+    #[serde(default)]
+    pub exclude: PatternSet,
     /// Environment variables to set when executing tests
     #[serde(default)]
     pub env: BTreeMap<StaticCow<str>, StaticCow<str>>,
@@ -85,6 +94,10 @@ impl TestConfig {
 
         if self.patterns.is_empty() {
             self.patterns = parent.patterns.clone();
+        }
+
+        if self.exclude.is_empty() {
+            self.exclude = parent.exclude.clone();
         }
 
         if !parent.env.is_empty() {

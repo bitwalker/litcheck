@@ -161,8 +161,15 @@ fn is_file_based_test(path: &Path, suite: &TestSuite, config: &TestConfig) -> bo
     }
 
     let path_in_suite = path.strip_prefix(suite.source_dir()).unwrap_or(path);
-    config
+    let is_match = config
         .patterns
         .iter()
-        .any(|p| p.matches_path(path_in_suite))
+        .any(|p| p.matches_path(path_in_suite));
+
+    if is_match && !config.exclude.is_empty() {
+        // If we have exclusion patterns configured, reject paths that match any of them
+        !config.exclude.iter().any(|p| p.matches_path(path_in_suite))
+    } else {
+        is_match
+    }
 }

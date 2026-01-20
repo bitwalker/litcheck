@@ -1,5 +1,6 @@
 name = "filecheck-llvm"
 patterns = ["*.txt"]
+exclude = ["Inputs/*.txt"]
 
 [substitutions]
 # %ProtectFileCheckOutput should precede a FileCheck call if and only if the
