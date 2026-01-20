@@ -21,6 +21,32 @@ pub type Lexed<'input> = Result<(usize, Token<'input>, usize), ParserError>;
 use self::delimiter::Delimiter;
 use self::patterns::{Check, Pattern};
 
+/// Used to recognize false MatchEnd delimiters (i.e. ']]') that occur when searching for the end
+/// of a match pattern that may contain brackets.
+static FALSE_MATCH_END_PATTERN: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+    // This pattern matches false ends due to character classes in capture patterns, e.g.:
+    //
+    // [[REG:r[[:digit:]]]]
+    // ^- match start  ^ ^- match end
+    //                 `- false end
+    //
+    // [[REG:r[0-9]]]
+    // ^- match start
+    //            ^^- match end
+    //            `- false end
+    //
+    // The haystack for the search starts immediately after the opening `[[` and includes all
+    // content up to (and including) the closing `]]` we're looking at.
+    //
+    // 1. From the start of the haystack
+    // 2. Match any char until we hit an opening `[`, which must be a nested character class
+    // 3. Either:
+    //   * Expect a named ASCII character class, e.g. `:space:`
+    //   * Expect any character other than an unescaped `]`
+    // 4. Repeat 2-3 until we reach a closing `]` at the end of the haystack
+    Regex::new(r"\A.*\[(\[:[a-z]+:\]|([^\]\\]|\\.)+\])\]\z").unwrap()
+});
+
 /// The lexer that is used to tokenize a check file
 pub struct Lexer<'input> {
     input: Input<'input>,
@@ -375,6 +401,18 @@ impl<'input> Lexer<'input> {
                 delim @ (Delimiter::MatchStart | Delimiter::NumericMatchStart)
                     if in_match.is_none() && in_regex.is_none() =>
                 {
+                    // Detect false starts where a `[[` appears within brackets that are part of the
+                    // overall pattern being matched, e.g. `[[[REG]]]`. Since match patterns can
+                    // never start with a `[`, we can safely ignore these false starts by moving
+                    // the search cursor back one character and trying again
+                    if matches!(delim, Delimiter::MatchStart)
+                        && let Some(b'[') = self.input.buffer().get(delim_range.end)
+                    {
+                        self.delimiter_searcher
+                            .set_range((delim_range.start + 1)..eol);
+                        continue;
+                    }
+
                     in_match = Some(Span::new(
                         SourceSpan::from_range_unchecked(
                             self.input.source_id(),
@@ -505,22 +543,7 @@ impl<'input> Lexer<'input> {
                     self.input.set_start(delim_range.end);
                     self.searcher.set_last_match_end(delim_range.end);
                 }
-                delim @ (Delimiter::RegexEnd | Delimiter::MatchEnd)
-                    if in_match.is_none() && in_regex.is_none() =>
-                {
-                    self.buffer.push_back(Err(ParserError::UnrecognizedToken {
-                        span: SourceSpan::from_range_unchecked(
-                            self.source_id(),
-                            delim_range.into_range(),
-                        ),
-                        token: AsRef::<str>::as_ref(&delim).to_string(),
-                        expected: vec![
-                            "literal".to_string(),
-                            Token::MatchStart.to_string(),
-                            Token::RegexStart.to_string(),
-                        ],
-                    }));
-                }
+                // Treat the unmatched delimiter as part of a literal pattern
                 _ => continue,
             }
         }
@@ -560,96 +583,7 @@ impl<'input> Lexer<'input> {
         }
     }
 
-    fn tokenize_capture_or_match(&mut self, range: Range<usize>) {
-        let mut chars = self.input.as_str(range).chars().peekable();
-        let mut offset = range.start;
-        while let Some(c) = chars.next() {
-            let next_offset = offset + c.len_utf8();
-            match c {
-                c if c.is_ascii_alphabetic() || c == '_' => {
-                    let start = offset;
-                    let mut end = next_offset;
-
-                    while let Some(&c) = chars.peek() {
-                        match c {
-                            c if c.is_ascii_alphanumeric() => {
-                                end += c.len_utf8();
-                                chars.next();
-                            }
-                            '_' => {
-                                end += '_'.len_utf8();
-                                chars.next();
-                            }
-                            c if c.is_whitespace() || c == ':' => {
-                                break;
-                            }
-                            _ => {
-                                self.buffer.push_back(Ok((
-                                    start,
-                                    Token::Error(LexerError::InvalidIdentifier {
-                                        span: SourceSpan::from_range_unchecked(
-                                            self.input.source_id(),
-                                            start..end,
-                                        ),
-                                    }),
-                                    end,
-                                )));
-                                self.buffer.push_back(Ok((
-                                    end,
-                                    Token::Raw(self.input.as_str(end..range.end)),
-                                    range.end,
-                                )));
-                                return;
-                            }
-                        }
-                    }
-                    self.buffer.push_back(Ok((
-                        start,
-                        Token::from_keyword_or_ident(self.input.as_str(start..end)),
-                        end,
-                    )));
-                    offset = end;
-                    continue;
-                }
-                '@' => self.buffer.push_back(Ok((offset, Token::At, next_offset))),
-                '$' => self
-                    .buffer
-                    .push_back(Ok((offset, Token::Dollar, next_offset))),
-                ':' => {
-                    self.buffer
-                        .push_back(Ok((offset, Token::Colon, next_offset)));
-                    // The remainder of the match block is raw
-                    let raw = self.input.as_str(next_offset..range.end);
-                    self.buffer
-                        .push_back(Ok((offset + 1, Token::Raw(raw), range.end)));
-                    return;
-                }
-                c if c.is_whitespace() => (),
-                unexpected => {
-                    self.buffer.push_back(Ok((
-                        offset,
-                        Token::Error(LexerError::UnexpectedCharacter {
-                            span: SourceSpan::from_range_unchecked(
-                                self.input.source_id(),
-                                offset..next_offset,
-                            ),
-                            unexpected,
-                        }),
-                        next_offset,
-                    )));
-                    self.buffer.push_back(Ok((
-                        next_offset,
-                        Token::Raw(self.input.as_str(next_offset..range.end)),
-                        range.end,
-                    )));
-                    return;
-                }
-            }
-            offset = next_offset;
-        }
-    }
-
-    fn tokenize_capture_or_match_numeric(&mut self, range: Range<usize>) {
+    fn tokenize_capture_or_match(&mut self, range: Range<usize>, is_numeric: bool) {
         let mut chars = self.input.as_str(range).chars().peekable();
         let mut offset = range.start;
         let mut strip_whitespace = true;
@@ -710,10 +644,20 @@ impl<'input> Lexer<'input> {
                     self.buffer
                         .push_back(Ok((offset, Token::RParen, next_offset)));
                 }
-                ':' => {
+                ':' if is_numeric => {
                     strip_whitespace = true;
                     self.buffer
                         .push_back(Ok((offset, Token::Colon, next_offset)));
+                }
+                ':' => {
+                    strip_whitespace = false;
+                    self.buffer
+                        .push_back(Ok((offset, Token::Colon, next_offset)));
+                    // The remainder of the match block is raw
+                    let raw = self.input.as_str(next_offset..range.end);
+                    self.buffer
+                        .push_back(Ok((offset + 1, Token::Raw(raw), range.end)));
+                    return;
                 }
                 c if c.is_ascii_alphabetic() || c == '_' => {
                     let mut end = next_offset;
