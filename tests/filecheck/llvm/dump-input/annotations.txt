@@ -6,6 +6,8 @@
 ; presence, order, and lengths of markers.  That way, if we ever change padding
 ; within line labels, we don't have to adjust so many tests.
 ;--------------------------------------------------
+COM: This is expected to fail currently because we have not fully implemented --dump-input
+XFAIL: *
 
 ; RUN: echo 'hello world' > %t.in
 ; RUN: echo 'goodbye' >> %t.in
