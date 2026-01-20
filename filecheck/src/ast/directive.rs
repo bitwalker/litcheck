@@ -149,10 +149,6 @@ impl CheckType {
     pub fn is_literal_match(&self) -> bool {
         self.modifiers.contains(CheckModifier::LITERAL)
     }
-
-    pub fn count(&self) -> usize {
-        self.modifiers.count()
-    }
 }
 impl Eq for CheckType {}
 impl PartialEq for CheckType {

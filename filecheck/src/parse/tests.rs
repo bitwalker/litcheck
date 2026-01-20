@@ -797,6 +797,48 @@ CHECK-DAG: v8 = add v6, v7
 }
 
 #[test]
+fn check_count_test() -> DiagResult<()> {
+    let input = r"
+Loop 1
+lOop 2
+loOp 3
+looP 4
+loop 5
+LOOP 6
+BREAK
+
+# CNT-COUNT-6: LOop {{[0-9]}}
+# CNT-NOT: loop
+# CNT-NEXT: break
+";
+    let mut context = TestContext::new();
+    context.config.check_prefixes = vec![Arc::from("CNT".to_string().into_boxed_str())];
+
+    let mut lexer = context.lex(input);
+
+    assert_eq!(lexer.next()?, Some(Token::Check(Check::Count(6))));
+    assert_eq!(lexer.next()?, Some(Token::Colon));
+    assert_eq!(lexer.next()?, Some(Token::Raw("LOop ")));
+    assert_eq!(lexer.next()?, Some(Token::RegexStart));
+    assert_eq!(lexer.next()?, Some(Token::Raw("[0-9]")));
+    assert_eq!(lexer.next()?, Some(Token::RegexEnd));
+    assert_eq!(lexer.next()?, Some(Token::Lf));
+
+    assert_eq!(lexer.next()?, Some(Token::Check(Check::Not)));
+    assert_eq!(lexer.next()?, Some(Token::Colon));
+    assert_eq!(lexer.next()?, Some(Token::Raw("loop")));
+    assert_eq!(lexer.next()?, Some(Token::Lf));
+
+    assert_eq!(lexer.next()?, Some(Token::Check(Check::Next)));
+    assert_eq!(lexer.next()?, Some(Token::Colon));
+    assert_eq!(lexer.next()?, Some(Token::Raw("break")));
+    assert_eq!(lexer.next()?, Some(Token::Lf));
+
+    assert_eq!(lexer.next()?, None);
+    Ok(())
+}
+
+#[test]
 fn check_incomplete_match_block_lexer_test() -> DiagResult<()> {
     let input = r#"
 fn main() -> i32 { std::process::exit(); }

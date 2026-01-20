@@ -255,12 +255,7 @@ impl<'input> Lexer<'input> {
             Ok(count) => {
                 self.buffer.push_back(Ok((
                     prefix_range.start,
-                    Token::Check(ast::Check::Plain),
-                    count_span.end,
-                )));
-                self.buffer.push_back(Ok((
-                    prefix_range.start,
-                    Token::Modifier(CheckModifier::from_count(count)),
+                    Token::Check(ast::Check::Count(count as usize)),
                     count_span.end,
                 )));
                 true
