@@ -15,9 +15,9 @@ use crate::{
 #[derive(Debug)]
 pub enum CheckTree<'a> {
     /// The leaf node of this tree is a set of patterns to match as a group
-    Leaf(CheckGroup<'a>),
+    MatchAll(CheckGroup<'a>),
     /// A two-way branch of the tree, rooted at a CHECK-NOT directive
-    Both {
+    MatchAround {
         /// Non-leaf nodes of the tree are rooted at a CHECK-NOT directive
         root: MatchAny<'a>,
         /// The patterns which must match before `root`
@@ -26,14 +26,14 @@ pub enum CheckTree<'a> {
         right: Box<CheckTree<'a>>,
     },
     /// A single-branch node, rooted at a CHECK-NOT directive
-    Left {
+    MatchBefore {
         /// Non-leaf nodes of the tree are rooted at a CHECK-NOT directive
         root: MatchAny<'a>,
         /// The patterns which must match before `root`
         left: Box<CheckTree<'a>>,
     },
     /// A single-branch node, rooted at a CHECK-NOT directive
-    Right {
+    MatchAfter {
         /// Non-leaf nodes of the tree are rooted at a CHECK-NOT directive
         root: MatchAny<'a>,
         /// The patterns which must match after `root`
@@ -41,19 +41,27 @@ pub enum CheckTree<'a> {
     },
 }
 impl<'a> CheckTree<'a> {
-    pub fn leftmost(&self) -> Either<&CheckGroup<'a>, &MatchAny<'a>> {
+    /// Get the next check group or pattern to evaluate in this tree
+    ///
+    /// This corresponds to the first node in the tree to be reached by a depth-first search that
+    /// always takes the path to patterns which must be matched before other patterns.
+    pub fn first(&self) -> Either<&CheckGroup<'a>, &MatchAny<'a>> {
         match self {
-            Self::Leaf(ref group) => Left(group),
-            Self::Both { ref left, .. } | Self::Left { ref left, .. } => left.leftmost(),
-            Self::Right { ref root, .. } => Right(root),
+            Self::MatchAll(group) => Left(group),
+            Self::MatchAround { left, .. } | Self::MatchBefore { left, .. } => left.first(),
+            Self::MatchAfter { root, .. } => Right(root),
         }
     }
 
-    pub fn rightmost(&self) -> Either<&CheckGroup<'a>, &MatchAny<'a>> {
+    /// Get the last check group or pattern to evaluate in this tree
+    ///
+    /// This corresponds to the last node in the tree to be reached by a depth-first search that
+    /// always takes the path to patterns which must be matched after other patterns.
+    pub fn last(&self) -> Either<&CheckGroup<'a>, &MatchAny<'a>> {
         match self {
-            Self::Leaf(ref group) => Left(group),
-            Self::Both { ref right, .. } | Self::Right { ref right, .. } => right.rightmost(),
-            Self::Left { ref root, .. } => Right(root),
+            Self::MatchAll(group) => Left(group),
+            Self::MatchAround { right, .. } | Self::MatchAfter { right, .. } => right.last(),
+            Self::MatchBefore { root, .. } => Right(root),
         }
     }
 }
@@ -107,7 +115,7 @@ impl<'a> CheckGroup<'a> {
                 .min_by_key(|span| span.start())
                 .unwrap(),
             Self::Repeated { rule, .. } => rule.span(),
-            Self::Tree(tree) => match tree.leftmost() {
+            Self::Tree(tree) => match tree.first() {
                 Left(group) => group.first_pattern_span(),
                 Right(match_any) => match_any.first_pattern_span(),
             },
@@ -130,12 +138,12 @@ impl<'a> CheckGroup<'a> {
                 SourceSpan::new(start_span.source_id(), Range::new(start, end))
             }
             Self::Repeated { rule, .. } => rule.span(),
-            Self::Tree(ref tree) => {
-                let leftmost_start_span = match tree.leftmost() {
+            Self::Tree(tree) => {
+                let leftmost_start_span = match tree.first() {
                     Left(left) => left.span(),
                     Right(left) => left.span(),
                 };
-                let rightmost_end = match tree.rightmost() {
+                let rightmost_end = match tree.last() {
                     Left(right) => right.span().end(),
                     Right(right) => right.span().end(),
                 };
@@ -178,18 +186,14 @@ pub struct CheckProgram<'a> {
     pub sections: Vec<CheckSection<'a>>,
 }
 impl<'a> CheckProgram<'a> {
-    pub fn compile(
-        check_file: CheckFile<'a>,
-        config: &Config,
-        interner: &mut StringInterner,
-    ) -> DiagResult<Self> {
+    pub fn compile(check_file: CheckFile<'a>, config: &Config) -> DiagResult<Self> {
         let lines = check_file.into_lines();
         if lines.is_empty() {
             return Err(Report::from(InvalidCheckFileError::Empty));
         }
 
         let mut program = Self::default();
-        program.compile_lines(lines, config, interner)?;
+        program.compile_lines(lines, config)?;
 
         log::trace!(target: "filecheck", "compiled program: {program:#?}");
 
@@ -197,12 +201,7 @@ impl<'a> CheckProgram<'a> {
     }
 
     /// Preprocess lines into blocks/groups
-    fn compile_lines(
-        &mut self,
-        lines: Vec<CheckLine<'a>>,
-        config: &Config,
-        interner: &mut StringInterner,
-    ) -> DiagResult<()> {
+    fn compile_lines(&mut self, lines: Vec<CheckLine<'a>>, config: &Config) -> DiagResult<()> {
         // Divide up input lines into blocks
         let mut iter = lines.into_iter().peekable();
         let mut label = None;
@@ -249,7 +248,7 @@ impl<'a> CheckProgram<'a> {
             blocks.push_back((label.take(), block));
         }
 
-        self.compile_blocks(&mut blocks, config, interner)
+        self.compile_blocks(&mut blocks, config)
     }
 
     /// Categorize and process blocks
@@ -257,7 +256,6 @@ impl<'a> CheckProgram<'a> {
         &mut self,
         blocks: &mut VecDeque<(Option<CheckLine<'a>>, Vec<CheckLine<'a>>)>,
         config: &Config,
-        interner: &mut StringInterner,
     ) -> DiagResult<()> {
         let mut groups = vec![];
         let mut pending_tree = None;
@@ -277,21 +275,21 @@ impl<'a> CheckProgram<'a> {
                                 break;
                             }
                         }
-                        let matcher = MatchAny::from(MatchAll::compile(nots, config, interner)?);
+                        let matcher = MatchAny::from(MatchAll::compile(nots, config)?);
                         if body.is_empty() {
                             match groups.pop() {
-                                Some(CheckGroup::Tree(left)) => {
-                                    groups.push(CheckGroup::Tree(Box::new(CheckTree::Left {
+                                Some(CheckGroup::Tree(left)) => groups.push(CheckGroup::Tree(
+                                    Box::new(CheckTree::MatchBefore {
                                         root: matcher,
                                         left,
-                                    })))
-                                }
-                                Some(left @ CheckGroup::Unordered(_)) => {
-                                    groups.push(CheckGroup::Tree(Box::new(CheckTree::Left {
+                                    }),
+                                )),
+                                Some(left @ CheckGroup::Unordered(_)) => groups.push(
+                                    CheckGroup::Tree(Box::new(CheckTree::MatchBefore {
                                         root: matcher,
-                                        left: Box::new(CheckTree::Leaf(left)),
-                                    })))
-                                }
+                                        left: Box::new(CheckTree::MatchAll(left)),
+                                    })),
+                                ),
                                 Some(group) => {
                                     groups.push(group);
                                     groups.push(CheckGroup::Never(Box::new(matcher)));
@@ -304,7 +302,7 @@ impl<'a> CheckProgram<'a> {
                                     pending_tree = Some((Some(left), matcher));
                                 }
                                 Some(left @ CheckGroup::Unordered(_)) => {
-                                    let left = Box::new(CheckTree::Leaf(left));
+                                    let left = Box::new(CheckTree::MatchAll(left));
                                     pending_tree = Some((Some(left), matcher));
                                 }
                                 Some(group) => {
@@ -327,8 +325,7 @@ impl<'a> CheckProgram<'a> {
                                 break;
                             }
                         }
-                        let check_dag =
-                            Box::new(CheckDag::new(MatchAll::compile(dags, config, interner)?));
+                        let check_dag = Box::new(CheckDag::new(MatchAll::compile(dags, config)?));
 
                         let group = if matches!(
                             body.front().map(|line| line.kind()),
@@ -340,15 +337,9 @@ impl<'a> CheckProgram<'a> {
                                     line.ty,
                                     line.pattern,
                                     config,
-                                    interner,
                                 )?]),
                                 Check::Count(count) => CheckGroup::Repeated {
-                                    rule: self.compile_rule(
-                                        line.ty,
-                                        line.pattern,
-                                        config,
-                                        interner,
-                                    )?,
+                                    rule: self.compile_rule(line.ty, line.pattern, config)?,
                                     count,
                                 },
                                 _ => unsafe { std::hint::unreachable_unchecked() },
@@ -363,17 +354,21 @@ impl<'a> CheckProgram<'a> {
                         if let Some((maybe_left, root)) = pending_tree.take() {
                             match maybe_left {
                                 Some(left) => {
-                                    groups.push(CheckGroup::Tree(Box::new(CheckTree::Both {
-                                        root,
-                                        left,
-                                        right: Box::new(CheckTree::Leaf(group)),
-                                    })));
+                                    groups.push(CheckGroup::Tree(Box::new(
+                                        CheckTree::MatchAround {
+                                            root,
+                                            left,
+                                            right: Box::new(CheckTree::MatchAll(group)),
+                                        },
+                                    )));
                                 }
                                 None => {
-                                    groups.push(CheckGroup::Tree(Box::new(CheckTree::Right {
-                                        root,
-                                        right: Box::new(CheckTree::Leaf(group)),
-                                    })));
+                                    groups.push(CheckGroup::Tree(Box::new(
+                                        CheckTree::MatchAfter {
+                                            root,
+                                            right: Box::new(CheckTree::MatchAll(group)),
+                                        },
+                                    )));
                                 }
                             }
                         } else {
@@ -382,23 +377,27 @@ impl<'a> CheckProgram<'a> {
                     }
                     Check::Count(count) => {
                         let group = CheckGroup::Repeated {
-                            rule: self.compile_rule(line.ty, line.pattern, config, interner)?,
+                            rule: self.compile_rule(line.ty, line.pattern, config)?,
                             count,
                         };
                         if let Some((maybe_left, root)) = pending_tree.take() {
                             match maybe_left {
                                 Some(left) => {
-                                    groups.push(CheckGroup::Tree(Box::new(CheckTree::Both {
-                                        root,
-                                        left,
-                                        right: Box::new(CheckTree::Leaf(group)),
-                                    })));
+                                    groups.push(CheckGroup::Tree(Box::new(
+                                        CheckTree::MatchAround {
+                                            root,
+                                            left,
+                                            right: Box::new(CheckTree::MatchAll(group)),
+                                        },
+                                    )));
                                 }
                                 None => {
-                                    groups.push(CheckGroup::Tree(Box::new(CheckTree::Right {
-                                        root,
-                                        right: Box::new(CheckTree::Leaf(group)),
-                                    })));
+                                    groups.push(CheckGroup::Tree(Box::new(
+                                        CheckTree::MatchAfter {
+                                            root,
+                                            right: Box::new(CheckTree::MatchAll(group)),
+                                        },
+                                    )));
                                 }
                             }
                         } else {
@@ -418,12 +417,7 @@ impl<'a> CheckProgram<'a> {
                                     rules.push(Box::new(CheckEmpty::new(next.span())));
                                 }
                                 _ => {
-                                    rules.push(self.compile_rule(
-                                        next.ty,
-                                        next.pattern,
-                                        config,
-                                        interner,
-                                    )?);
+                                    rules.push(self.compile_rule(next.ty, next.pattern, config)?);
                                 }
                             }
                         }
@@ -431,17 +425,21 @@ impl<'a> CheckProgram<'a> {
                         if let Some((maybe_left, root)) = pending_tree.take() {
                             match maybe_left {
                                 Some(left) => {
-                                    groups.push(CheckGroup::Tree(Box::new(CheckTree::Both {
-                                        root,
-                                        left,
-                                        right: Box::new(CheckTree::Leaf(group)),
-                                    })));
+                                    groups.push(CheckGroup::Tree(Box::new(
+                                        CheckTree::MatchAround {
+                                            root,
+                                            left,
+                                            right: Box::new(CheckTree::MatchAll(group)),
+                                        },
+                                    )));
                                 }
                                 None => {
-                                    groups.push(CheckGroup::Tree(Box::new(CheckTree::Right {
-                                        root,
-                                        right: Box::new(CheckTree::Leaf(group)),
-                                    })));
+                                    groups.push(CheckGroup::Tree(Box::new(
+                                        CheckTree::MatchAfter {
+                                            root,
+                                            right: Box::new(CheckTree::MatchAll(group)),
+                                        },
+                                    )));
                                 }
                             }
                         } else {
@@ -452,7 +450,7 @@ impl<'a> CheckProgram<'a> {
             }
             assert!(pending_tree.is_none());
             if let Some(label) = maybe_label {
-                let label = Pattern::compile_static(label.span, label.pattern, config, interner)?;
+                let label = Pattern::compile_static(label.span, label.pattern, config)?;
                 self.sections.push(CheckSection::Block {
                     label,
                     body: core::mem::take(&mut groups),
@@ -472,12 +470,11 @@ impl<'a> CheckProgram<'a> {
         ty: CheckType,
         pattern: CheckPattern<'a>,
         config: &Config,
-        interner: &mut StringInterner,
     ) -> DiagResult<Box<dyn DynRule + 'a>> {
         let pattern = if ty.is_literal_match() {
             Pattern::compile_literal(pattern, config)?
         } else {
-            Pattern::compile(pattern, config, interner)?
+            Pattern::compile(pattern, config)?
         };
 
         match ty.kind {

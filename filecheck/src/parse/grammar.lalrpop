@@ -3,12 +3,12 @@ use std::borrow::Cow;
 use either::Either;
 use either::Either::*;
 
-use crate::common::{Spanned, Span, Symbol, StringInterner, SourceId};
+use crate::common::{Spanned, Span, Symbol, SourceId, symbols};
 use crate::ast::*;
 use crate::expr::*;
 use crate::parse::{LexerError, Token, ParserError, ParseError};
 
-grammar<'input, 'parser>(source_id: SourceId, _source: &'input str, interner: &'parser mut StringInterner);
+grammar<'input, 'parser>(source_id: SourceId, _source: &'input str);
 
 // LEXER
 // ================================================================================================
@@ -201,7 +201,10 @@ Builtin: Expr = {
 
 Call: Expr = {
     <l:@L> <callee:Callee> "(" <args:Comma<Expr>> ")" <r:@R> =>? {
-        Expr::from_call(interner, span!(source_id, l, r), callee, args).map_err(|err| ParseError::User { error: ExprError::from(err).into() })
+        Expr::from_call(span!(source_id, l, r), callee, args)
+            .map_err(|err| ParseError::User {
+                error: ParserError::from(ExprError::from(err))
+            })
     }
 }
 
@@ -285,7 +288,7 @@ Precision: u8 = {
 }
 
 Ident: Symbol = {
-    ident => interner.get_or_intern(<>),
+    ident => Symbol::intern(<>),
 }
 
 String: Span<&'input str> = {

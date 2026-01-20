@@ -1,6 +1,6 @@
 use regex_automata::{
-    util::{captures::Captures, primitives::NonMaxUsize},
     PatternID,
+    util::{captures::Captures, primitives::NonMaxUsize},
 };
 
 use crate::{
@@ -9,7 +9,7 @@ use crate::{
     errors::{InvalidNumericCastError, UndefinedVariableError},
     expr::ValueType,
     pattern::{
-        matcher::{regex, SubstringMatcher},
+        matcher::{SubstringMatcher, regex},
         search::Input as _,
     },
 };
@@ -98,8 +98,8 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
                 return ControlFlow::Break(Ok(()));
             }
 
-            // Match failed, so let's start over again and look for
-            // another match of the prefix pattern to try from
+            // Match failed, so let's start over again and look for another match of the prefix
+            // pattern to try from
             log::debug!(
                 "match attempt starting at offset {} failed beginning at offset {} with reason: {}",
                 self.match_start,
@@ -378,8 +378,7 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
 
         let group_name = capture_group.as_ref().and_then(|cg| cg.info.group_name());
         let source = if let Some(group_name) = group_name {
-            let group_name = context.resolve(group_name);
-            format.pattern(Some(group_name))
+            format.pattern(Some(group_name.as_str()))
         } else {
             format.pattern_nocapture()
         };
@@ -483,7 +482,7 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
             }
             Right(_) => Ok(MatchResult::failed(
                 CheckFailedError::MatchFoundConstraintFailed {
-                    span: lhs.span(),
+                    span: lhs.0.span(),
                     input_file: context.input_file(),
                     pattern: Some(RelatedCheckError {
                         span,
@@ -555,7 +554,7 @@ fn evaluate_expr<'input>(
 ) -> DiagResult<Either<Number, Cow<'input, str>>> {
     match expr {
         Expr::Num(num) => Ok(Left(num.clone())),
-        Expr::Var(ref var) => {
+        Expr::Var(var) => {
             let var_span = var.span();
             let value = match var {
                 VariableName::User(name) | VariableName::Global(name) => {
@@ -565,7 +564,7 @@ fn evaluate_expr<'input>(
                         UndefinedVariableError {
                             span: var_span,
                             match_file,
-                            name: env.resolve(**name).to_string(),
+                            name: name.into_inner(),
                         }
                     })?;
                     value
@@ -573,8 +572,8 @@ fn evaluate_expr<'input>(
                         .map(Left)
                         .unwrap_or_else(|| Right(value.unwrap_string()))
                 }
-                VariableName::Pseudo(ref name) => match context.env().resolve(**name) {
-                    "LINE" => {
+                VariableName::Pseudo(name) => match name.into_inner() {
+                    symbols::Line => {
                         let line = context.pseudo_line_for_offset(name.span().start().to_usize());
                         Left(Number {
                             span: var_span,
@@ -582,11 +581,11 @@ fn evaluate_expr<'input>(
                             value: line.try_into().unwrap(),
                         })
                     }
-                    other => {
+                    name => {
                         return Err(Report::new(UndefinedVariableError {
                             span: var_span,
                             match_file: context.match_file(),
-                            name: other.to_string(),
+                            name,
                         }));
                     }
                 },

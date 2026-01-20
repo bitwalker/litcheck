@@ -22,30 +22,22 @@ use std::fmt;
 
 use logos::{Lexer, Logos};
 
-use litcheck::{
-    diagnostics::{Report, SourceId, SourceSpan, Span},
-    StringInterner,
-};
+use litcheck::diagnostics::{Report, SourceId, SourceSpan, Span};
 
-use crate::expr::{ExprError, Var};
+use crate::expr::{ExprError, Variable};
 
 pub type ParseError<'a> = lalrpop_util::ParseError<usize, Token<'a>, ExprError>;
 
-pub struct NumericVarParser<'config> {
-    interner: &'config mut StringInterner,
-}
-impl<'config> NumericVarParser<'config> {
-    pub fn new(interner: &'config mut StringInterner) -> Self {
-        Self { interner }
-    }
+pub struct NumericVarParser;
 
-    pub fn parse<'a>(&mut self, source: Span<&'a str>) -> Result<Var<'a>, Report> {
+impl NumericVarParser {
+    pub fn parse<'a>(&mut self, source: Span<&'a str>) -> Result<Variable<'a>, Report> {
         let (span, source) = source.into_parts();
         let lexer = Token::lexer(source)
             .spanned()
             .map(|(t, span)| t.map(|t| (span.start, t, span.end)));
         grammar::NumericVarParser::new()
-            .parse(span.source_id(), source, self.interner, lexer)
+            .parse(span.source_id(), source, lexer)
             .map_err(|err| handle_parse_error(span.source_id(), err))
             .map_err(|err| Report::from(err).with_source_code(source.to_string()))
     }

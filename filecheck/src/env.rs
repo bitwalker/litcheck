@@ -49,8 +49,14 @@ impl<V: Clone + fmt::Debug> Bindings<V> {
 
     pub fn get(&self, name: &VariableName) -> Option<&V> {
         match name {
-            VariableName::User(sym) => self.bound.get(name).or_else(|| self.system.get(sym)),
-            VariableName::Global(sym) => self.global.get(sym).or_else(|| self.system.get(sym)),
+            VariableName::User(sym) => self
+                .bound
+                .get(name)
+                .or_else(|| self.system.get(sym.inner())),
+            VariableName::Global(sym) => self
+                .global
+                .get(sym.inner())
+                .or_else(|| self.system.get(sym.inner())),
             VariableName::Pseudo(_) => {
                 panic!("expected pseudo-variable to have been expanded by caller")
             }
@@ -136,9 +142,6 @@ pub trait LexicalScope {
     fn get_global(&self, symbol: &Symbol) -> Option<&Self::Value> {
         self.bindings().get_global(*symbol)
     }
-
-    /// Resolve an interned [Symbol] to its string value
-    fn resolve(&self, symbol: Symbol) -> &str;
 }
 impl<S> LexicalScope for &S
 where
@@ -164,11 +167,6 @@ where
     #[inline(always)]
     fn get_global(&self, symbol: &Symbol) -> Option<&Self::Value> {
         (**self).get_global(symbol)
-    }
-
-    #[inline(always)]
-    fn resolve(&self, symbol: Symbol) -> &str {
-        (**self).resolve(symbol)
     }
 }
 impl<S> LexicalScope for &mut S
@@ -196,18 +194,10 @@ where
     fn get_global(&self, symbol: &Symbol) -> Option<&Self::Value> {
         (**self).get_global(symbol)
     }
-
-    #[inline(always)]
-    fn resolve(&self, symbol: Symbol) -> &str {
-        (**self).resolve(symbol)
-    }
 }
 
 /// This trait provides the mutable operations of a [LexicalScope]
 pub trait LexicalScopeMut: LexicalScope {
-    /// Get the underling [StringInterner] used by this scope
-    fn interner(&mut self) -> &mut StringInterner;
-
     /// Get a [Symbol] representing the interned string `value`
     fn symbolize(&mut self, value: &str) -> Symbol;
 
@@ -224,11 +214,6 @@ impl<S> LexicalScopeMut for &mut S
 where
     S: LexicalScopeMut + ?Sized,
 {
-    #[inline(always)]
-    fn interner(&mut self) -> &mut StringInterner {
-        (**self).interner()
-    }
-
     #[inline(always)]
     fn symbolize(&mut self, value: &str) -> Symbol {
         (**self).symbolize(value)
@@ -270,43 +255,32 @@ impl<V: Clone + fmt::Debug> dyn LexicalScopeMut<Value = V> {
 
 /// This struct represents the top-level environment used by expressions
 /// evaluated as part of a CHECK pattern. Currently, this environment
-/// consists solely of local and global variable bindings, along with the
-/// string interner state used for interning variable names.
-pub struct Env<'input, 'context> {
-    /// The current string interner
-    interner: &'context mut StringInterner,
+/// consists solely of local and global variable bindings.
+pub struct Env<'input> {
     bindings: Bindings<Value<'input>>,
     enable_var_scope: bool,
 }
-impl<'input, 'context: 'input> Env<'input, 'context> {
+impl<'input> Env<'input> {
     /// Create a new environment with the given set of predefined global variables
     ///
     /// The local binding set will be empty.
-    pub fn new(interner: &'context mut StringInterner) -> Self {
+    pub fn new() -> Self {
         Self {
-            interner,
             bindings: Bindings::new(),
             enable_var_scope: false,
         }
     }
 
     /// Create a new environment, initialized from the given configuration
-    pub fn from_config<'i, 'ctx: 'i>(
-        config: &'ctx Config,
-        interner: &'ctx mut StringInterner,
-    ) -> Env<'i, 'ctx> {
-        let system = OrdMap::<_, Value<'i>>::from_iter(config.options.variables.iter().map(|v| {
-            (
-                interner.get_or_intern(v.name.as_ref()),
-                match v.value {
-                    Value::Undef => Value::Undef,
-                    Value::Str(ref s) => Value::Str(s.clone()),
-                    Value::Num(ref n) => Value::Num(n.clone()),
-                },
-            )
-        }));
+    pub fn from_config<'i>(config: &Config) -> Env<'i> {
+        let system = OrdMap::<_, Value<'i>>::from_iter(
+            config
+                .options
+                .variables
+                .iter()
+                .map(|v| (v.name().into_inner(), v.value().clone())),
+        );
         Env {
-            interner,
             bindings: Bindings::new_with_system(system),
             enable_var_scope: config.options.enable_var_scope,
         }
@@ -324,7 +298,6 @@ impl<'input, 'context: 'input> Env<'input, 'context> {
         }
         let bindings = self.bindings.clone();
         ScopeGuard {
-            interner: self.interner,
             parent: &mut self.bindings,
             bindings,
             enable_var_scope: self.enable_var_scope,
@@ -332,7 +305,7 @@ impl<'input, 'context: 'input> Env<'input, 'context> {
         }
     }
 }
-impl<'input, 'context: 'input> LexicalScope for Env<'input, 'context> {
+impl<'input> LexicalScope for Env<'input> {
     type Value = Value<'input>;
 
     #[inline(always)]
@@ -351,23 +324,14 @@ impl<'input, 'context: 'input> LexicalScope for Env<'input, 'context> {
     fn get_global(&self, symbol: &Symbol) -> Option<&Self::Value> {
         self.bindings.get_global(*symbol)
     }
-
-    fn resolve(&self, symbol: Symbol) -> &str {
-        self.interner.resolve(symbol)
-    }
 }
-impl<'input, 'context: 'input> LexicalScopeMut for Env<'input, 'context> {
-    #[inline(always)]
-    fn interner(&mut self) -> &mut StringInterner {
-        self.interner
-    }
-
+impl<'input> LexicalScopeMut for Env<'input> {
     fn symbolize(&mut self, value: &str) -> Symbol {
-        self.interner.get_or_intern(value)
+        Symbol::intern(value)
     }
 
     fn insert(&mut self, name: VariableName, value: Self::Value) {
-        log::trace!(target: "context:bindings", "binding {} to {value:#?}", self.interner.resolve(name.into_inner()));
+        log::trace!(target: "context:bindings", "binding '{name}' to '{value}'");
         self.bindings.insert(name, value);
     }
 
@@ -395,7 +359,6 @@ impl<'input, 'context: 'input> LexicalScopeMut for Env<'input, 'context> {
 /// a rule succeeds, the scope can be persisted explicitly to the
 /// outer scope.
 pub struct ScopeGuard<'a, 'input: 'a, V: Clone + 'input + 'a> {
-    interner: &'a mut StringInterner,
     parent: &'a mut Bindings<V>,
     bindings: Bindings<V>,
     enable_var_scope: bool,
@@ -420,7 +383,6 @@ impl<'a, 'input> ScopeGuard<'a, 'input, Value<'input>> {
         }
         let bindings = self.bindings.clone();
         ScopeGuard {
-            interner: self.interner,
             parent: &mut self.bindings,
             bindings,
             enable_var_scope: self.enable_var_scope,
@@ -432,7 +394,9 @@ impl<'a, 'input> ScopeGuard<'a, 'input, Value<'input>> {
         self.bindings.merge(bindings);
     }
 }
-impl<'a, 'input: 'a, V: Clone + fmt::Debug + 'input> LexicalScope for ScopeGuard<'a, 'input, V> {
+impl<'a, 'input: 'a, V: Clone + fmt::Debug + fmt::Display + 'input> LexicalScope
+    for ScopeGuard<'a, 'input, V>
+{
     type Value = V;
 
     #[inline(always)]
@@ -448,25 +412,17 @@ impl<'a, 'input: 'a, V: Clone + fmt::Debug + 'input> LexicalScope for ScopeGuard
     fn get_global(&self, symbol: &Symbol) -> Option<&Self::Value> {
         self.bindings.get_global(*symbol)
     }
-
-    #[inline(always)]
-    fn resolve(&self, symbol: Symbol) -> &str {
-        self.interner.resolve(symbol)
-    }
 }
-impl<'a, 'input: 'a, V: Clone + fmt::Debug + 'input> LexicalScopeMut for ScopeGuard<'a, 'input, V> {
-    #[inline(always)]
-    fn interner(&mut self) -> &mut StringInterner {
-        self.interner
-    }
-
+impl<'a, 'input: 'a, V: Clone + fmt::Debug + fmt::Display + 'input> LexicalScopeMut
+    for ScopeGuard<'a, 'input, V>
+{
     #[inline(always)]
     fn symbolize(&mut self, value: &str) -> Symbol {
-        self.interner.get_or_intern(value)
+        Symbol::intern(value)
     }
 
     fn insert(&mut self, name: VariableName, value: Self::Value) {
-        log::trace!(target: "context:bindings", "binding {} to {value:#?}", self.interner.resolve(name.into_inner()));
+        log::trace!(target: "context:bindings", "binding '{name}' to '{value}'");
         self.bindings.insert(name, value);
     }
 

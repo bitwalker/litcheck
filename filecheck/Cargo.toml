@@ -8,7 +8,7 @@ repository.workspace = true
 homepage.workspace = true
 categories.workspace = true
 keywords.workspace = true
-edition.workspace = true
+edition = "2024"
 license.workspace = true
 
 [features]

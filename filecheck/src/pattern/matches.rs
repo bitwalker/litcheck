@@ -83,17 +83,23 @@ impl<'input> Matches<'input> {
     /// no matches were successful.
     pub fn range(&self) -> Option<Range<usize>> {
         match self.0.as_slice() {
-            [MatchResult {
-                info: Some(info),
-                ty,
-            }] if ty.is_ok() => Some(info.matched_range()),
-            [MatchResult {
-                info: Some(info),
-                ty,
-            }, .., MatchResult {
-                info: Some(info2),
-                ty: ty2,
-            }] if ty.is_ok() && ty2.is_ok() => Some(Range::new(
+            [
+                MatchResult {
+                    info: Some(info),
+                    ty,
+                },
+            ] if ty.is_ok() => Some(info.matched_range()),
+            [
+                MatchResult {
+                    info: Some(info),
+                    ty,
+                },
+                ..,
+                MatchResult {
+                    info: Some(info2),
+                    ty: ty2,
+                },
+            ] if ty.is_ok() && ty2.is_ok() => Some(Range::new(
                 info.span.start().to_usize(),
                 info2.span.end().to_usize(),
             )),

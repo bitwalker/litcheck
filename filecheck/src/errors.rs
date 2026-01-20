@@ -79,7 +79,7 @@ pub struct UndefinedVariableError {
     pub span: SourceSpan,
     #[source_code]
     pub match_file: Arc<SourceFile>,
-    pub name: String,
+    pub name: Symbol,
 }
 
 #[derive(Diagnostic, Debug, thiserror::Error)]

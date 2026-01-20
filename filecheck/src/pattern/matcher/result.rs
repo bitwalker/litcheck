@@ -91,12 +91,12 @@ impl<'input> MatchResult<'input> {
     where
         C: Context<'input, 'context> + ?Sized,
     {
-        if matches!(self.ty, MatchType::MatchFoundAndExpected) {
-            if let Some(info) = self.info.as_ref() {
-                for capture in info.captures.iter() {
-                    if let Some(var) = capture.capture.variable_name() {
-                        context.env_mut().insert(var, capture.value.clone());
-                    }
+        if matches!(self.ty, MatchType::MatchFoundAndExpected)
+            && let Some(info) = self.info.as_ref()
+        {
+            for capture in info.captures.iter() {
+                if let Some(var) = capture.capture.variable_name() {
+                    context.env_mut().insert(var, capture.value.clone());
                 }
             }
         }

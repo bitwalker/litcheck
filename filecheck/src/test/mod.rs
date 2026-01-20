@@ -54,7 +54,6 @@ macro_rules! source_file {
 /// This is the primary entrypoint for running FileCheck tests.
 pub struct Test<'a> {
     config: &'a Config,
-    strings: StringInterner,
     match_file: Arc<SourceFile>,
 }
 impl<'a> Test<'a> {
@@ -62,11 +61,7 @@ impl<'a> Test<'a> {
     ///
     /// This function does not compile the actual test file until verification is requested.
     pub fn new(match_file: Arc<SourceFile>, config: &'a Config) -> Self {
-        Self {
-            config,
-            match_file,
-            strings: StringInterner::new(),
-        }
+        Self { config, match_file }
     }
 
     /// Create a test from a file path containing CHECKs
@@ -100,22 +95,17 @@ impl<'a> Test<'a> {
     /// or fails to match.
     pub fn verify(&mut self, input_file: Arc<SourceFile>) -> DiagResult<Vec<MatchInfo<'static>>> {
         // Parse the check file
-        let mut parser = parse::CheckFileParser::new(self.config, &mut self.strings);
+        let mut parser = parse::CheckFileParser::new(self.config);
 
         let match_file = parser
             .parse(self.match_file.id(), self.match_file.as_str())
             .map_err(|err| Report::new(err).with_source_code(self.match_file.clone()))?;
 
         // Compile the check rules, and raise an error if any are invalid
-        let program = match_file.compile(self.config, &mut self.strings)?;
+        let program = match_file.compile(self.config)?;
 
         // Apply the checks
-        let mut checker = Checker::new(
-            self.config,
-            &mut self.strings,
-            program,
-            self.match_file.clone(),
-        );
+        let mut checker = Checker::new(self.config, program, self.match_file.clone());
         checker
             .check_input(input_file)
             .into_result()

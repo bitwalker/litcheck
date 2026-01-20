@@ -1,9 +1,7 @@
-use std::sync::Arc;
-
-use litcheck::{assert_matches, diagnostics::DiagResult};
+use litcheck::{Symbol, assert_matches, diagnostics::DiagResult};
 use litcheck_filecheck as filecheck;
 
-use filecheck::{source_file, CheckFailedError, Config, Options, Test, TestFailed};
+use filecheck::{CheckFailedError, Config, Options, Test, TestFailed, source_file};
 
 #[test]
 fn integration_test_sanity() -> DiagResult<()> {
@@ -71,7 +69,7 @@ fn integration_test_check_dag_not_dag_not_search_end() -> DiagResult<()> {
     config
         .options
         .check_prefixes
-        .push(Arc::from(String::from("NotSearchEnd").into_boxed_str()));
+        .push(Symbol::intern("NotSearchEnd"));
 
     let match_file = source_file!(config, MATCH_FILE);
     let mut test = Test::new(match_file.clone(), &config);
@@ -93,7 +91,7 @@ fn integration_test_check_dag_not_dag_multi_dag_search_start() -> DiagResult<()>
     config
         .options
         .check_prefixes
-        .push(Arc::from(String::from("Dag2SearchStart").into_boxed_str()));
+        .push(Symbol::intern("Dag2SearchStart"));
 
     let match_file = source_file!(config, MATCH_FILE);
     let mut test = Test::new(match_file.clone(), &config);
@@ -128,10 +126,7 @@ fn integration_test_check_dag_xfail_x1() -> DiagResult<()> {
 
     let mut config = Config::default();
     config.options.check_prefixes.clear();
-    config
-        .options
-        .check_prefixes
-        .push(Arc::from(String::from("X1").into_boxed_str()));
+    config.options.check_prefixes.push(Symbol::intern("X1"));
 
     let match_file = source_file!(config, MATCH_FILE);
     let mut test = Test::new(match_file.clone(), &config);
@@ -155,10 +150,7 @@ fn integration_test_check_dag_xfail_x2() -> DiagResult<()> {
 
     let mut config = Config::default();
     config.options.check_prefixes.clear();
-    config
-        .options
-        .check_prefixes
-        .push(Arc::from(String::from("X2").into_boxed_str()));
+    config.options.check_prefixes.push(Symbol::intern("X2"));
 
     let match_file = source_file!(config, MATCH_FILE);
     let mut test = Test::new(match_file.clone(), &config);
@@ -182,10 +174,7 @@ fn integration_test_check_dag_xfail_x3() -> DiagResult<()> {
 
     let mut config = Config::default();
     config.options.check_prefixes.clear();
-    config
-        .options
-        .check_prefixes
-        .push(Arc::from(String::from("X3").into_boxed_str()));
+    config.options.check_prefixes.push(Symbol::intern("X3"));
 
     let match_file = source_file!(config, MATCH_FILE);
     let mut test = Test::new(match_file.clone(), &config);
@@ -209,10 +198,7 @@ fn integration_test_check_dag_xfail_x4() -> DiagResult<()> {
 
     let mut config = Config::default();
     config.options.check_prefixes.clear();
-    config
-        .options
-        .check_prefixes
-        .push(Arc::from(String::from("X4").into_boxed_str()));
+    config.options.check_prefixes.push(Symbol::intern("X4"));
 
     let match_file = source_file!(config, MATCH_FILE);
     let mut test = Test::new(match_file.clone(), &config);
@@ -255,10 +241,7 @@ fn integration_test_check_dag_xfail_x5() -> DiagResult<()> {
 
     let mut config = Config::default();
     config.options.check_prefixes.clear();
-    config
-        .options
-        .check_prefixes
-        .push(Arc::from(String::from("X5").into_boxed_str()));
+    config.options.check_prefixes.push(Symbol::intern("X5"));
 
     let match_file = source_file!(config, MATCH_FILE);
     let mut test = Test::new(match_file.clone(), &config);
@@ -266,8 +249,10 @@ fn integration_test_check_dag_xfail_x5() -> DiagResult<()> {
     assert_matches!(&result, Err(_));
 
     let error = result.unwrap_err().downcast::<TestFailed>().unwrap();
-    if let [CheckFailedError::MatchFoundButExcluded { .. }, CheckFailedError::MatchFoundButDiscarded { .. }] =
-        error.errors()
+    if let [
+        CheckFailedError::MatchFoundButExcluded { .. },
+        CheckFailedError::MatchFoundButDiscarded { .. },
+    ] = error.errors()
     {
         Ok(())
     } else {
@@ -284,10 +269,7 @@ fn integration_test_check_dag_xfail_x6() -> DiagResult<()> {
 
     let mut config = Config::default();
     config.options.check_prefixes.clear();
-    config
-        .options
-        .check_prefixes
-        .push(Arc::from(String::from("X6").into_boxed_str()));
+    config.options.check_prefixes.push(Symbol::intern("X6"));
 
     let match_file = source_file!(config, MATCH_FILE);
     let mut test = Test::new(match_file.clone(), &config);

@@ -43,11 +43,7 @@ impl<'a> Pattern<'a> {
         }
     }
 
-    pub fn from_prefix(
-        prefix: PatternPrefix<'a>,
-        config: &Config,
-        interner: &mut StringInterner,
-    ) -> DiagResult<Self> {
+    pub fn from_prefix(prefix: PatternPrefix<'a>, config: &Config) -> DiagResult<Self> {
         match prefix {
             PatternPrefix::Literal { prefix, .. } | PatternPrefix::Substring { prefix, .. } => {
                 if prefix.is_empty() {
@@ -74,33 +70,27 @@ impl<'a> Pattern<'a> {
                 Pattern::Regex(RegexMatcher::new_nocapture(prefix.pattern, config)?),
             ),
             PatternPrefix::Regex { prefix, .. } => {
-                Ok(Pattern::Regex(RegexMatcher::new(prefix, config, interner)?))
+                Ok(Pattern::Regex(RegexMatcher::new(prefix, config)?))
             }
             PatternPrefix::Dynamic { prefix, .. } => {
-                let mut builder = SmartMatcher::build(prefix.span(), config, interner);
+                let mut builder = SmartMatcher::build(prefix.span(), config);
                 builder.lower_match(prefix.into_owned())?;
                 Ok(Self::Smart(builder.build()))
             }
         }
     }
 
-    pub fn compile(
-        mut pattern: CheckPattern<'a>,
-        config: &Config,
-        interner: &mut StringInterner,
-    ) -> DiagResult<Self> {
-        pattern.compact(interner);
+    pub fn compile(mut pattern: CheckPattern<'a>, config: &Config) -> DiagResult<Self> {
+        pattern.compact();
         match pattern {
-            CheckPattern::Literal(s) => Self::from_prefix(
-                PatternPrefix::Literal { prefix: s, id: 0 },
-                config,
-                interner,
-            ),
-            CheckPattern::Regex(s) => Ok(Pattern::Regex(RegexMatcher::new(s, config, interner)?)),
+            CheckPattern::Literal(s) => {
+                Self::from_prefix(PatternPrefix::Literal { prefix: s, id: 0 }, config)
+            }
+            CheckPattern::Regex(s) => Ok(Pattern::Regex(RegexMatcher::new(s, config)?)),
             CheckPattern::Match(s) => {
                 // At least one part requires expression evaluation
                 let (span, parts) = s.into_parts();
-                let mut builder = SmartMatcher::build(span, config, interner);
+                let mut builder = SmartMatcher::build(span, config);
                 for part in parts.into_iter() {
                     match part {
                         CheckPatternPart::Literal(s) => {
@@ -127,17 +117,16 @@ impl<'a> Pattern<'a> {
         span: SourceSpan,
         mut pattern: CheckPattern<'a>,
         config: &Config,
-        interner: &mut StringInterner,
     ) -> DiagResult<SimpleMatcher<'a>> {
-        pattern.compact(interner);
+        pattern.compact();
 
         match pattern {
             CheckPattern::Literal(lit) => Ok(SimpleMatcher::Substring(SubstringMatcher::new(
                 lit, config,
             )?)),
-            CheckPattern::Regex(regex) if regex.captures.is_empty() => Ok(SimpleMatcher::Regex(
-                RegexMatcher::new(regex, config, interner)?,
-            )),
+            CheckPattern::Regex(regex) if regex.captures.is_empty() => {
+                Ok(SimpleMatcher::Regex(RegexMatcher::new(regex, config)?))
+            }
             pattern @ (CheckPattern::Regex(_) | CheckPattern::Match(_)) => {
                 let diag = Diag::new("invalid variable usage in pattern")
                     .with_label(Label::new(span, "occurs in this pattern"))
@@ -179,22 +168,22 @@ impl<'a> MatcherMut for Pattern<'a> {
         C: Context<'input, 'context> + ?Sized,
     {
         match self {
-            Self::Substring(ref matcher) => matcher.try_match(input, context),
-            Self::Regex(ref matcher) => matcher.try_match(input, context),
-            Self::Smart(ref matcher) => matcher.try_match_mut(input, context),
-            Self::Whitespace(ref matcher) => matcher.try_match(input, context),
-            Self::Empty(ref matcher) => matcher.try_match(input, context),
+            Self::Substring(matcher) => matcher.try_match(input, context),
+            Self::Regex(matcher) => matcher.try_match(input, context),
+            Self::Smart(matcher) => matcher.try_match_mut(input, context),
+            Self::Whitespace(matcher) => matcher.try_match(input, context),
+            Self::Empty(matcher) => matcher.try_match(input, context),
         }
     }
 }
 impl<'a> Spanned for Pattern<'a> {
     fn span(&self) -> SourceSpan {
         match self {
-            Self::Substring(ref matcher) => matcher.span(),
-            Self::Regex(ref matcher) => matcher.span(),
-            Self::Smart(ref matcher) => matcher.span(),
-            Self::Whitespace(ref matcher) => matcher.span(),
-            Self::Empty(ref matcher) => matcher.span(),
+            Self::Substring(matcher) => matcher.span(),
+            Self::Regex(matcher) => matcher.span(),
+            Self::Smart(matcher) => matcher.span(),
+            Self::Whitespace(matcher) => matcher.span(),
+            Self::Empty(matcher) => matcher.span(),
         }
     }
 }

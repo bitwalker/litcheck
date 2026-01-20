@@ -18,8 +18,10 @@ fancy-diagnostics = ["miette/fancy"]
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+compact_str.workspace = true
 either.workspace = true
 glob = "0.3"
+lock_api = "0.4"
 log.workspace = true
 miette.workspace = true
 memchr.workspace = true
@@ -29,9 +31,14 @@ rustc-hash.workspace = true
 serde.workspace = true
 serde_spanned = "1.0"
 smallvec.workspace = true
-string-interner = "0.19"
 thiserror.workspace = true
 walkdir = "2.4"
 
 [dev-dependencies]
 pretty_assertions.workspace = true
+
+[build-dependencies]
+Inflector = "0.11"
+hashbrown.workspace = true
+rustc-hash.workspace = true
+toml.workspace = true

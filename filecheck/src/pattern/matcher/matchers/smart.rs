@@ -58,7 +58,7 @@ impl<'a> SmartMatcher<'a> {
     fn new(
         span: SourceSpan,
         parts: Vec<MatchOp<'a>>,
-        group_info: Vec<Vec<Option<Cow<'a, str>>>>,
+        group_info: Vec<Vec<Option<Symbol>>>,
     ) -> Self {
         let group_info =
             GroupInfo::new(group_info).expect("expected capturing groups to meet all requirements");
@@ -72,9 +72,8 @@ impl<'a> SmartMatcher<'a> {
     pub fn build<'config>(
         span: SourceSpan,
         config: &'config Config,
-        interner: &'config mut StringInterner,
     ) -> SmartMatcherBuilder<'a, 'config> {
-        SmartMatcherBuilder::new(span, config, interner)
+        SmartMatcherBuilder::new(span, config)
     }
 
     pub fn group_info(&self) -> &GroupInfo {
@@ -129,7 +128,7 @@ where
     for op in patterns {
         match op {
             MatchOp::Regex {
-                ref source,
+                source,
                 captures: group_captures,
                 ..
             } => {
@@ -157,7 +156,7 @@ where
             }
             MatchOp::Numeric {
                 span,
-                capture: Some(ref group),
+                capture: Some(group),
                 ..
             } => {
                 match capture_group_to_capture_info(

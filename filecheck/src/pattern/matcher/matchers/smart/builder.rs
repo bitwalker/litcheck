@@ -1,10 +1,10 @@
-use regex_automata::{util::captures::GroupInfo, PatternID};
+use regex_automata::{PatternID, util::captures::GroupInfo};
 
 use crate::{
     ast::{Capture, RegexPattern},
     common::*,
     expr::{TypedVariable, ValueType},
-    pattern::matcher::{regex, SubstringMatcher},
+    pattern::matcher::{SubstringMatcher, regex},
 };
 
 use super::{CaptureGroup, MatchOp, SmartMatcher};
@@ -12,20 +12,15 @@ use super::{CaptureGroup, MatchOp, SmartMatcher};
 pub struct SmartMatcherBuilder<'a, 'config> {
     span: SourceSpan,
     config: &'config Config,
-    interner: &'config mut StringInterner,
     parts: Vec<MatchOp<'a>>,
-    raw_group_info: Vec<Vec<Option<Cow<'a, str>>>>,
+    raw_group_info: Vec<Vec<Option<Symbol>>>,
 }
+
 impl<'a, 'config> SmartMatcherBuilder<'a, 'config> {
-    pub fn new(
-        span: SourceSpan,
-        config: &'config Config,
-        interner: &'config mut StringInterner,
-    ) -> Self {
+    pub fn new(span: SourceSpan, config: &'config Config) -> Self {
         Self {
             span,
             config,
-            interner,
             parts: vec![],
             raw_group_info: vec![vec![None]],
         }
@@ -123,10 +118,9 @@ impl<'a, 'config> SmartMatcherBuilder<'a, 'config> {
                 continue;
             }
             if let Some(name) = capture.group_name() {
-                let group_name = self.interner.resolve(name);
                 let group_id = groups
-                    .to_index(PatternID::ZERO, group_name)
-                    .unwrap_or_else(|| panic!("expected group for capture of '{group_name}'"));
+                    .to_index(PatternID::ZERO, name.as_str())
+                    .unwrap_or_else(|| panic!("expected group for capture of '{name}'"));
                 captures.push(CaptureGroup {
                     pattern_id,
                     group_id,
@@ -203,7 +197,7 @@ impl<'a, 'config> SmartMatcherBuilder<'a, 'config> {
         source: Span<Cow<'a, str>>,
     ) -> DiagResult<&mut Self> {
         let symbol = name.into_inner();
-        let group_name = self.interner.resolve(symbol);
+        let group_name = symbol.as_str();
         let span = source.span();
         let source = format!("(?P<{group_name}>{source})");
         let pattern = Regex::builder()
@@ -217,7 +211,6 @@ impl<'a, 'config> SmartMatcherBuilder<'a, 'config> {
         let groups = pattern.group_info();
         let pattern_id = self.register_pattern_group(groups);
 
-        let group_name = self.interner.resolve(symbol);
         let group_id = groups
             .to_index(PatternID::ZERO, group_name)
             .unwrap_or_else(|| panic!("expected group for capture of '{group_name}'"));
@@ -315,7 +308,7 @@ impl<'a, 'config> SmartMatcherBuilder<'a, 'config> {
                     groups.push(None);
                 }
                 Some(group_name) => {
-                    groups.push(Some(Cow::Owned(group_name.to_string())));
+                    groups.push(Some(Symbol::intern(group_name)));
                 }
             }
         }
@@ -348,11 +341,10 @@ impl<'a, 'config> SmartMatcherBuilder<'a, 'config> {
 
     fn register_named_group(&mut self, pid: PatternID, capture: Capture) -> CaptureGroup {
         let group_name = capture.group_name().unwrap();
-        let name = self.interner.resolve(group_name);
         let pattern_id = pid.as_usize();
         let pattern_groups = &mut self.raw_group_info[pattern_id];
         let group_id = pattern_groups.len();
-        pattern_groups.push(Some(Cow::Owned(name.to_string())));
+        pattern_groups.push(Some(group_name));
         CaptureGroup {
             pattern_id: pid,
             group_id,

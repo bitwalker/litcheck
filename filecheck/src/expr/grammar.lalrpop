@@ -1,10 +1,10 @@
-use litcheck::{StringInterner, Symbol, diagnostics::Span};
+use litcheck::{Symbol, diagnostics::Span};
 
 use crate::expr::*;
 
 use super::{Token, ParseError};
 
-grammar<'input, 'parser>(source_id: SourceId, _source: &'input str, interner: &'parser mut StringInterner);
+grammar<'input, 'parser>(source_id: SourceId, _source: &'input str);
 
 // LEXER
 // ================================================================================================
@@ -52,9 +52,13 @@ Comma<T>: Vec<T> = {
 /// VARIABLES
 
 
-pub NumericVar: Var<'input> = {
+pub NumericVar: Variable<'input> = {
     "#" <format:NumberFormat> <name:("," <Var>)> <value:("=" <Expr>)> => {
-        Var { name, value: Value::Num(value) }
+        Variable { name, value: Value::Num(value) }
+    },
+
+    "#" <name:Var> <value:("=" <Expr>)> => {
+        Variable { name, value: Value::Num(value) }
     }
 }
 
@@ -89,7 +93,7 @@ Builtin: Expr = {
 
 Call: Expr = {
     <l:@L> <callee:Callee> "(" <args:Comma<Expr>> ")" <r:@R> =>? {
-        Expr::from_call(interner, span!(source_id, l, r), callee, args).map_err(|err| ParseError::User { error: err.into() })
+        Expr::from_call(span!(source_id, l, r), callee, args).map_err(|err| ParseError::User { error: err.into() })
     }
 }
 
@@ -165,5 +169,5 @@ Precision: u8 = {
 }
 
 Ident: Symbol = {
-    ident => interner.get_or_intern(<>),
+    ident => Symbol::intern(<>),
 }

@@ -40,16 +40,16 @@ impl<'a> Matcher for SimpleMatcher<'a> {
         C: Context<'input, 'context> + ?Sized,
     {
         match self {
-            Self::Substring(ref matcher) => matcher.try_match(input, context),
-            Self::Regex(ref matcher) => matcher.try_match(input, context),
+            Self::Substring(matcher) => matcher.try_match(input, context),
+            Self::Regex(matcher) => matcher.try_match(input, context),
         }
     }
 }
 impl<'a> Spanned for SimpleMatcher<'a> {
     fn span(&self) -> SourceSpan {
         match self {
-            Self::Substring(ref matcher) => matcher.span(),
-            Self::Regex(ref matcher) => matcher.span(),
+            Self::Substring(matcher) => matcher.span(),
+            Self::Regex(matcher) => matcher.span(),
         }
     }
 }

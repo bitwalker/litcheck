@@ -1,6 +1,6 @@
 use regex_automata::{
-    util::{captures::Captures, syntax},
     PatternID,
+    util::{captures::Captures, syntax},
 };
 
 use crate::{
@@ -30,11 +30,7 @@ impl<'a> fmt::Debug for RegexMatcher<'a> {
     }
 }
 impl<'a> RegexMatcher<'a> {
-    pub fn new(
-        pattern: RegexPattern<'a>,
-        config: &Config,
-        interner: &StringInterner,
-    ) -> DiagResult<Self> {
+    pub fn new(pattern: RegexPattern<'a>, config: &Config) -> DiagResult<Self> {
         let span = pattern.span();
         let regex = Regex::builder()
             .syntax(
@@ -53,10 +49,9 @@ impl<'a> RegexMatcher<'a> {
             if let Capture::Ignore(_) = capture {
                 continue;
             }
-            if let Some(name) = capture.group_name() {
-                let group_name = interner.resolve(name);
+            if let Some(group_name) = capture.group_name() {
                 let group_id = groups
-                    .to_index(PatternID::ZERO, group_name)
+                    .to_index(PatternID::ZERO, group_name.as_str())
                     .unwrap_or_else(|| panic!("expected group for capture of '{group_name}'"));
                 captures[group_id] = capture;
             } else {
@@ -209,14 +204,22 @@ where
                         }),
                         error: Some(RelatedError::new(Report::new(error))),
                         help: Some(if let Some(name) = name {
-                            let name = context.resolve(name);
-                            format!("expected {}; the constraint was required when parsing the capture group for '{name}'", format.describe())
+                            format!(
+                                "expected {}; the constraint was required when parsing the capture group for '{name}'",
+                                format.describe()
+                            )
                         } else if let Some(group_name) =
                             captures.group_info().to_name(pattern_id, group_id)
                         {
-                            format!("expected {}; the constraint was required when parsing the capture group named '{group_name}'", format.describe())
+                            format!(
+                                "expected {}; the constraint was required when parsing the capture group named '{group_name}'",
+                                format.describe()
+                            )
                         } else {
-                            format!("expected {}; the constraint was required when parsing capture group {group_id}", format.describe())
+                            format!(
+                                "expected {}; the constraint was required when parsing capture group {group_id}",
+                                format.describe()
+                            )
                         }),
                     });
                 }
@@ -337,8 +340,8 @@ Field: 2
             SourceSpan::UNKNOWN,
             Cow::Borrowed("Name: b[[:alpha:]]*"),
         ));
-        let matcher = RegexMatcher::new(pattern, &context.config, &context.interner)
-            .expect("expected pattern to be valid");
+        let matcher =
+            RegexMatcher::new(pattern, &context.config).expect("expected pattern to be valid");
         let mctx = context.match_context();
         let input = mctx.search();
         let result = matcher.try_match(input, &mctx)?;

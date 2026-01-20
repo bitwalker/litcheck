@@ -85,7 +85,7 @@ pub enum ParserError {
     },
     #[error("no check strings found with prefix(es) {}", text::DisplayCommaSeparated(.0.as_slice()))]
     #[diagnostic()]
-    UnusedCheckPrefixes(Vec<Arc<str>>),
+    UnusedCheckPrefixes(Vec<Symbol>),
 }
 
 pub type ParseResult<T> = Result<T, ParserError>;

@@ -23,7 +23,7 @@ pub(crate) struct BinaryOpAndOperand {
 }
 
 pub(crate) struct CaptureNumeric {
-    pub name: VariableName,
+    pub name: Option<VariableName>,
     pub constraint: Constraint,
     pub expr: Option<Expr>,
 }

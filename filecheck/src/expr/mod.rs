@@ -6,21 +6,15 @@ mod value;
 
 pub use self::cli::CliVariable;
 pub use self::error::*;
-pub use self::num::{FormatSpecifier, Number, NumberFormat, ParseNumberError};
+pub use self::num::{CasingStyle, FormatSpecifier, Number, NumberFormat, ParseNumberError};
 pub use self::value::{Value, ValueType};
+pub use litcheck::variables::VariableName;
 
-use litcheck::variables;
+use litcheck::{Symbol, variables};
 
 use crate::common::*;
 
-pub type VariableName = variables::VariableName<Symbol>;
-pub type Variable<'a> = variables::Variable<Symbol, Value<'a>>;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Var<'a> {
-    pub name: VariableName,
-    pub value: Value<'a>,
-}
+pub type Variable<'a> = variables::Variable<Value<'a>>;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TypedVariable {
@@ -50,14 +44,13 @@ impl Spanned for Expr {
 }
 impl Expr {
     pub fn from_call(
-        interner: &mut StringInterner,
         span: SourceSpan,
         callee: Span<Symbol>,
         mut args: Vec<Expr>,
     ) -> Result<Self, InvalidCallExprError> {
         match args.len() {
             2 => {
-                let op = match interner.resolve(callee.into_inner()) {
+                let op = match callee.as_str() {
                     "add" => BinaryOp::Add,
                     "sub" => BinaryOp::Sub,
                     "mul" => BinaryOp::Mul,
@@ -68,14 +61,14 @@ impl Expr {
                         return Err(InvalidCallExprError::Undefined {
                             span,
                             callee: callee.to_string(),
-                        })
+                        });
                     }
                 };
                 let rhs = Box::new(args.pop().unwrap());
                 let lhs = Box::new(args.pop().unwrap());
                 Ok(Self::Binary { span, op, lhs, rhs })
             }
-            arity => match interner.resolve(*callee) {
+            arity => match callee.as_str() {
                 callee @ ("add" | "sub" | "mul" | "div" | "min" | "max") => {
                     Err(InvalidCallExprError::InvalidArity {
                         span,
@@ -152,6 +145,24 @@ impl Ord for Expr {
     }
 }
 
+impl fmt::Display for Expr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Var(variables::VariableName::Global(v)) => write!(f, "${v}"),
+            Self::Var(variables::VariableName::Pseudo(v)) => write!(f, "@{v}"),
+            Self::Var(variables::VariableName::User(v)) => write!(f, "{v}"),
+            Self::Num(n) => write!(f, "{n}"),
+            Self::Binary { op, lhs, rhs, .. } => {
+                if matches!(op, BinaryOp::Min | BinaryOp::Max) {
+                    write!(f, "{op}({lhs}, {rhs})")
+                } else {
+                    write!(f, "{lhs} {op} {rhs}")
+                }
+            }
+        }
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum BinaryOp {
     Eq,
@@ -161,4 +172,18 @@ pub enum BinaryOp {
     Div,
     Min,
     Max,
+}
+
+impl fmt::Display for BinaryOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Eq => f.write_str("=="),
+            Self::Add => f.write_str("+"),
+            Self::Sub => f.write_str("-"),
+            Self::Mul => f.write_str("*"),
+            Self::Div => f.write_str("/"),
+            Self::Min => f.write_str("min"),
+            Self::Max => f.write_str("max"),
+        }
+    }
 }

@@ -1,0 +1,18 @@
+[fundamental]
+false = { id = 0 }
+true = { id = 1 }
+empty = { value = "" }
+
+[keywords]
+line = { value = "LINE" }
+add = {}
+sub = {}
+mul = {}
+div = {}
+min = {}
+max = {}
+
+[checks]
+check = { value = "CHECK" }
+com = { value = "COM" }
+run = { value = "RUN" }

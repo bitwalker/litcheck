@@ -60,7 +60,7 @@ where
         match &result {
             MatchResult {
                 ty,
-                info: Some(ref info),
+                info: Some(info),
             } if ty.is_ok() => {
                 context.cursor_mut().set_start(info.span.end().to_usize());
             }

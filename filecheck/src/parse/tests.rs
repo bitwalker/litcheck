@@ -118,7 +118,7 @@ int main() {
                 op: BinaryOp::Add,
                 lhs: Box::new(Expr::Var(VariableName::Pseudo(Span::new(
                     SourceSpan::UNKNOWN,
-                    context.interner.get_or_intern("LINE"),
+                    symbols::Line,
                 )))),
                 rhs: Box::new(Expr::Num(Number::new(SourceSpan::UNKNOWN, 1))),
             }),
@@ -281,7 +281,7 @@ fn main() -> i32 { foo(); }
     let lines = file.lines();
     assert_eq!(lines.len(), 2);
 
-    let fun = context.interner.get_or_intern("FUN");
+    let fun = Symbol::intern("FUN");
     let capture_line = &lines[0];
     assert_eq!(
         capture_line,
@@ -380,7 +380,7 @@ fn main() -> i64 { foo(); }
     let lines = file.lines();
     assert_eq!(lines.len(), 2);
 
-    let bits = context.interner.get_or_intern("BITS");
+    let bits = Symbol::intern("BITS");
     let capture_line = &lines[0];
     let expected = CheckLine::new(
         SourceSpan::UNKNOWN,
@@ -495,7 +495,7 @@ fn main() -> i64 { foo(); }
     let lines = file.lines();
     assert_eq!(lines.len(), 2);
 
-    let bits = context.interner.get_or_intern("BITS");
+    let bits = Symbol::intern("BITS");
     let capture_line = &lines[0];
     let expected = CheckLine::new(
         SourceSpan::UNKNOWN,
@@ -826,7 +826,7 @@ BREAK
 # CNT-NEXT: break
 ";
     let mut context = TestContext::new();
-    context.config.options.check_prefixes = vec![Arc::from("CNT".to_string().into_boxed_str())];
+    context.config.options.check_prefixes = vec![Symbol::intern("CNT")];
 
     let input = source_file!(context.config, input);
     let mut lexer = context.lex(&input);

@@ -211,6 +211,34 @@ pub enum NumberFormat {
     Signed { precision: u8 },
     Hex { precision: u8, require_prefix: bool },
 }
+
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
+#[repr(u8)]
+pub enum CasingStyle {
+    #[default]
+    Any = 0,
+    Upper,
+    Lower,
+}
+
+impl CasingStyle {
+    const HEX_ALPHABETS: &[&str] = &["[A-Fa-f0-9]", "[A-F0-9]", "[a-f0-9]"];
+
+    pub const fn as_hex_class(self) -> &'static str {
+        Self::HEX_ALPHABETS[self as u8 as usize]
+    }
+}
+
+impl fmt::Display for CasingStyle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Any => f.write_str("either upper or lowercase"),
+            Self::Upper => f.write_str("uppercase"),
+            Self::Lower => f.write_str("lowercase"),
+        }
+    }
+}
+
 impl NumberFormat {
     pub fn describe(&self) -> Cow<'static, str> {
         match self {

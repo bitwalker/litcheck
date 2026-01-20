@@ -8,20 +8,13 @@ use crate::{common::*, pattern::matcher::MatchAny};
 
 pub struct Checker<'a> {
     config: &'a Config,
-    interner: &'a mut StringInterner,
     program: CheckProgram<'a>,
     match_file: Arc<SourceFile>,
 }
 impl<'a> Checker<'a> {
-    pub fn new(
-        config: &'a Config,
-        interner: &'a mut StringInterner,
-        program: CheckProgram<'a>,
-        match_file: Arc<SourceFile>,
-    ) -> Self {
+    pub fn new(config: &'a Config, program: CheckProgram<'a>, match_file: Arc<SourceFile>) -> Self {
         Self {
             config,
-            interner,
             program,
             match_file,
         }
@@ -46,13 +39,8 @@ impl<'a> Checker<'a> {
     /// Check `source` against the rules in this [Checker]
     pub fn check_input(&mut self, source: Arc<SourceFile>) -> TestResult {
         let buffer = source.as_bytes();
-        let mut context = MatchContext::new(
-            self.config,
-            self.interner,
-            self.match_file.clone(),
-            source.clone(),
-            buffer,
-        );
+        let mut context =
+            MatchContext::new(self.config, self.match_file.clone(), source.clone(), buffer);
 
         if !self.config.options.allow_empty && buffer.is_empty() {
             return TestResult::from_error(TestFailed::new(
@@ -105,7 +93,7 @@ pub fn discover_blocks<'input, 'context: 'input>(
     }
 
     for (i, section) in program.sections.iter().enumerate() {
-        if let CheckSection::Block { ref label, .. } = section {
+        if let CheckSection::Block { label, .. } = section {
             // Find the starting index of this pattern
             //
             // If no match is found, record the error,
@@ -115,12 +103,13 @@ pub fn discover_blocks<'input, 'context: 'input>(
                 Ok(result) => {
                     match result.info {
                         Some(info) => {
-                            if context.config.remarks_enabled() {
-                                if let Ok(loc) =
+                            if context.config.remarks_enabled()
+                                && let Ok(loc) =
                                     context.source_manager().file_line_col(info.pattern_span)
-                                {
-                                    eprintln!("{loc}: remark: CHECK-LABEL: expected string found in input");
-                                }
+                            {
+                                eprintln!(
+                                    "{loc}: remark: CHECK-LABEL: expected string found in input"
+                                );
                             }
                             // We must compute the indices for the end of the previous block,
                             // and the start of the current block, by looking forwards/backwards
@@ -244,7 +233,7 @@ where
             );
         } else {
             match &program.sections[section_range.start] {
-                CheckSection::Block { ref body, .. } => {
+                CheckSection::Block { body, .. } => {
                     // CHECK-LABEL
                     check_block_section(body, &mut test_result, context);
                 }
@@ -286,7 +275,7 @@ pub fn check_group_sections<'input, 'a: 'input>(
     context: &mut MatchContext<'input, 'a>,
 ) {
     for section in body.iter() {
-        let CheckSection::Group { body: ref group } = section else {
+        let CheckSection::Group { body: group } = section else {
             unreachable!()
         };
         match check_group(group, test_result, context) {
@@ -308,16 +297,18 @@ pub fn check_group<'section, 'input, 'a: 'input>(
     context: &mut MatchContext<'input, 'a>,
 ) -> Result<Result<Vec<Matches<'input>>, Vec<Matches<'input>>>, CheckFailedError> {
     match group {
-        CheckGroup::Never(ref pattern) => {
+        CheckGroup::Never(pattern) => {
             // The given pattern should not match any of
             // the remaining input in this block
             let input = context.search_block();
             match check_not(pattern, input, context) {
                 Ok(Ok(num_patterns)) => {
-                    if context.config.remarks_enabled() {
-                        if let Ok(loc) = context.source_manager().file_line_col(pattern.span()) {
-                            eprintln!("{loc}: remark: CHECK-NOT: none of the expected strings were found in the input");
-                        }
+                    if context.config.remarks_enabled()
+                        && let Ok(loc) = context.source_manager().file_line_col(pattern.span())
+                    {
+                        eprintln!(
+                            "{loc}: remark: CHECK-NOT: none of the expected strings were found in the input"
+                        );
                     }
                     (0..num_patterns).for_each(|_| test_result.passed());
                     Ok(Ok(vec![]))
@@ -347,8 +338,10 @@ pub fn check_group<'section, 'input, 'a: 'input>(
             for rule in rules.iter() {
                 match rule.apply(context) {
                     Ok(matches) => {
-                        if context.config.remarks_enabled() {
-                            if let Ok(loc) = context.source_manager().file_line_col(rule.span()) {
+                        if matches.is_ok() {
+                            if context.config.remarks_enabled()
+                                && let Ok(loc) = context.source_manager().file_line_col(rule.span())
+                            {
                                 eprintln!(
                                     "{loc}: remark: {}: expected string found in input",
                                     DynRule::kind(rule)
@@ -422,7 +415,7 @@ pub fn check_group<'section, 'input, 'a: 'input>(
         },
         CheckGroup::Bounded {
             left: check_dag,
-            ref right,
+            right,
         } => {
             let initial_result = check_dag.apply(context);
             match check_group(right, test_result, context) {
@@ -432,53 +425,81 @@ pub fn check_group<'section, 'input, 'a: 'input>(
                         .expect("expected at least one match");
                     match initial_result {
                         Ok(mut left_matches) => {
-                            if let Some(left_range) = left_matches.range() {
-                                if left_range.start >= right_range.start
-                                    || left_range.end >= right_range.start
-                                {
-                                    // At least one matching CHECK-DAG overlaps following CHECK,
-                                    // so visit each match result and rewrite overlapping matches
-                                    // to better guide users
-                                    let right_pattern_span = right.first_pattern_span();
-                                    for mr in left_matches.iter_mut() {
-                                        match mr {
-                                            MatchResult {
-                                                info: Some(ref mut info),
-                                                ty,
-                                            } if ty.is_ok() => {
-                                                let left_range = info.span;
-                                                if left_range.start().to_usize()
-                                                    >= right_range.start
-                                                    || left_range.end().to_usize()
-                                                        >= right_range.start
-                                                {
-                                                    let span = info.span;
-                                                    let pattern_span = info.pattern_span;
-                                                    *mr = MatchResult::failed(CheckFailedError::MatchFoundButDiscarded {
+                            if let Some(left_range) = left_matches.range()
+                                && (left_range.start >= right_range.start
+                                    || left_range.end >= right_range.start)
+                            {
+                                // At least one matching CHECK-DAG overlaps following CHECK,
+                                // so visit each match result and rewrite overlapping matches
+                                // to better guide users
+                                let right_pattern_span = right.first_pattern_span();
+                                for mr in left_matches.iter_mut() {
+                                    match mr {
+                                        MatchResult {
+                                            info: Some(info),
+                                            ty,
+                                        } if ty.is_ok() => {
+                                            let left_range = info.span;
+                                            if left_range.start().to_usize() >= right_range.start
+                                                || left_range.end().to_usize() >= right_range.start
+                                            {
+                                                let span = info.span;
+                                                let pattern_span = info.pattern_span;
+                                                *mr = MatchResult::failed(
+                                                    CheckFailedError::MatchFoundButDiscarded {
                                                         span,
                                                         input_file: context.input_file(),
                                                         labels: vec![
-                                                            RelatedLabel::error(Label::new(pattern_span, "matched by this pattern"), context.match_file()),
-                                                            RelatedLabel::warn(Label::new(right_pattern_span, "because it cannot be reordered past this pattern"), context.match_file()),
-                                                            RelatedLabel::note(Label::point(context.input_file.id(), right_range.start as u32, "which begins here"), context.input_file()),
+                                                            RelatedLabel::error(
+                                                                Label::new(
+                                                                    pattern_span,
+                                                                    "matched by this pattern",
+                                                                ),
+                                                                context.match_file(),
+                                                            ),
+                                                            RelatedLabel::warn(
+                                                                Label::new(
+                                                                    right_pattern_span,
+                                                                    "because it cannot be reordered past this pattern",
+                                                                ),
+                                                                context.match_file(),
+                                                            ),
+                                                            RelatedLabel::note(
+                                                                Label::point(
+                                                                    context.input_file.id(),
+                                                                    right_range.start as u32,
+                                                                    "which begins here",
+                                                                ),
+                                                                context.input_file(),
+                                                            ),
                                                         ],
                                                         note: None,
-                                                    });
-                                                }
+                                                    },
+                                                );
                                             }
-                                            MatchResult {
-                                                info: Some(ref mut info),
-                                                ty: MatchType::Failed(ref err),
-                                            } => {
-                                                let span = info.span;
-                                                let pattern_span = info.pattern_span;
-                                                match err {
-                                                    CheckFailedError::MatchError { .. }
-                                                    | CheckFailedError::MatchFoundErrorNote { .. }
-                                                    | CheckFailedError::MatchFoundConstraintFailed { .. }
-                                                    | CheckFailedError::MatchFoundButDiscarded { .. } => {
-                                                        if span.start().to_usize() >= right_range.start || span.end().to_usize() >= right_range.start {
-                                                            *mr = MatchResult::failed(CheckFailedError::MatchFoundButDiscarded {
+                                        }
+                                        MatchResult {
+                                            info: Some(info),
+                                            ty: MatchType::Failed(err),
+                                        } => {
+                                            let span = info.span;
+                                            let pattern_span = info.pattern_span;
+                                            match err {
+                                                CheckFailedError::MatchError { .. }
+                                                | CheckFailedError::MatchFoundErrorNote {
+                                                    ..
+                                                }
+                                                | CheckFailedError::MatchFoundConstraintFailed {
+                                                    ..
+                                                }
+                                                | CheckFailedError::MatchFoundButDiscarded {
+                                                    ..
+                                                } => {
+                                                    if span.start().to_usize() >= right_range.start
+                                                        || span.end().to_usize()
+                                                            >= right_range.start
+                                                    {
+                                                        *mr = MatchResult::failed(CheckFailedError::MatchFoundButDiscarded {
                                                                 span,
                                                                 input_file: context.input_file(),
                                                                 labels: vec![
@@ -488,13 +509,12 @@ pub fn check_group<'section, 'input, 'a: 'input>(
                                                                 ],
                                                                 note: None,
                                                             });
-                                                        }
                                                     }
-                                                    _ => (),
                                                 }
+                                                _ => (),
                                             }
-                                            _ => continue,
                                         }
+                                        _ => continue,
                                     }
                                 }
                             }
@@ -561,7 +581,7 @@ pub fn check_group<'section, 'input, 'a: 'input>(
                 }
             }
         }
-        CheckGroup::Tree(ref tree) => check_tree(tree, test_result, context),
+        CheckGroup::Tree(tree) => check_tree(tree, test_result, context),
     }
 }
 
@@ -571,12 +591,8 @@ fn check_tree<'input, 'a: 'input>(
     context: &mut MatchContext<'input, 'a>,
 ) -> Result<Result<Vec<Matches<'input>>, Vec<Matches<'input>>>, CheckFailedError> {
     match tree {
-        CheckTree::Leaf(ref group) => check_group(group, test_result, context),
-        CheckTree::Both {
-            ref root,
-            ref left,
-            ref right,
-        } => {
+        CheckTree::MatchAll(group) => check_group(group, test_result, context),
+        CheckTree::MatchAround { root, left, right } => {
             let mut matched = vec![];
             match check_tree(left, test_result, context).expect("unexpected check-not error") {
                 // There may be some errors, but at least one pattern matched
@@ -614,7 +630,7 @@ fn check_tree<'input, 'a: 'input>(
                                     (0..num_passed).for_each(|_| test_result.passed());
                                 }
                                 Ok(Err(info)) => {
-                                    let right_pattern_span = match right.leftmost() {
+                                    let right_pattern_span = match right.first() {
                                         Left(group) => group.first_pattern_span(),
                                         Right(patterns) => patterns.first_pattern_span(),
                                     };
@@ -719,7 +735,7 @@ fn check_tree<'input, 'a: 'input>(
                 }
             }
         }
-        CheckTree::Left { root, ref left } => {
+        CheckTree::MatchBefore { root, left } => {
             let left_end = context.cursor().start();
             match check_tree(left, test_result, context).expect("unexpected check-not error") {
                 Ok(mut left_matched) => {
@@ -793,7 +809,7 @@ fn check_tree<'input, 'a: 'input>(
                 }
             }
         }
-        CheckTree::Right { root, ref right } => {
+        CheckTree::MatchAfter { root, right } => {
             let left_end = context.cursor().start();
             match check_tree(right, test_result, context).expect("unexpected check-not error") {
                 Ok(mut right_matched) => {

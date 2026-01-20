@@ -25,7 +25,7 @@ use self::patterns::{Check, Pattern};
 pub struct Lexer<'input> {
     input: Input<'input>,
     patterns: Vec<Pattern>,
-    check_prefixes: Vec<Arc<str>>,
+    check_prefixes: Vec<Symbol>,
     seen_prefixes: Vec<bool>,
     regex: Regex,
     searcher: RegexSearcher<'input>,
@@ -97,11 +97,11 @@ impl<'input> Lexer<'input> {
         }
     }
 
-    pub fn unused_prefixes(&self) -> Vec<Arc<str>> {
+    pub fn unused_prefixes(&self) -> Vec<Symbol> {
         self.check_prefixes
             .iter()
             .zip(self.seen_prefixes.iter().copied())
-            .filter_map(|(prefix, used)| if used { None } else { Some(prefix.clone()) })
+            .filter_map(|(prefix, used)| if used { None } else { Some(*prefix) })
             .collect()
     }
 

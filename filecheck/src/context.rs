@@ -31,9 +31,10 @@ pub trait Context<'input, 'context> {
         self.cursor_mut().reset();
     }
 
-    fn symbolize(&mut self, value: &str) -> Symbol;
-
-    fn resolve(&self, value: Symbol) -> &str;
+    #[inline(always)]
+    fn symbolize(&mut self, value: &str) -> Symbol {
+        Symbol::intern(value)
+    }
 
     /// Compute the value of `@LINE` for a given offset in the match file
     fn pseudo_line_for_offset(&self, offset: usize) -> usize {
@@ -67,9 +68,6 @@ pub trait Context<'input, 'context> {
 }
 
 pub trait ContextExt<'input, 'context>: Context<'input, 'context> {
-    #[allow(unused)]
-    fn get_or_intern<S: AsRef<str>>(&mut self, value: S) -> Symbol;
-
     /// Get an [Input] that can be used to search an arbitrary range of the underlying buffer
     fn search_range<R>(&self, range: R) -> Input<'input>
     where
@@ -79,11 +77,6 @@ pub trait ContextExt<'input, 'context>: Context<'input, 'context> {
     }
 }
 impl<'input, 'context, C: Context<'input, 'context> + ?Sized> ContextExt<'input, 'context> for C {
-    #[inline(always)]
-    fn get_or_intern<S: AsRef<str>>(&mut self, value: S) -> Symbol {
-        <C as Context<'input, 'context>>::symbolize(self, value.as_ref())
-    }
-
     #[inline(always)]
     fn search_range<R>(&self, range: R) -> Input<'input>
     where
@@ -176,22 +169,12 @@ impl<'guard, 'input, 'context> Context<'input, 'context>
     fn cursor_mut(&mut self) -> &mut Cursor<'input> {
         self.cursor.as_mut()
     }
-
-    #[inline]
-    fn symbolize(&mut self, value: &str) -> Symbol {
-        self.scope.symbolize(value)
-    }
-
-    #[inline]
-    fn resolve(&self, value: Symbol) -> &str {
-        self.scope.resolve(value)
-    }
 }
 
 pub struct MatchContext<'input, 'context> {
     /// The current global configuration
     pub config: &'context Config,
-    pub env: Env<'input, 'context>,
+    pub env: Env<'input>,
     pub match_file: Arc<SourceFile>,
     pub input_file: Arc<SourceFile>,
     cursor: Cursor<'input>,
@@ -199,12 +182,11 @@ pub struct MatchContext<'input, 'context> {
 impl<'input, 'context: 'input> MatchContext<'input, 'context> {
     pub fn new(
         config: &'context Config,
-        interner: &'context mut StringInterner,
         match_file: Arc<SourceFile>,
         input_file: Arc<SourceFile>,
         buffer: &'input [u8],
     ) -> Self {
-        let env = Env::<'input, 'context>::from_config(config, interner);
+        let env = Env::<'input>::from_config(config);
         let source_id = input_file.id();
         Self {
             config,
@@ -286,15 +268,5 @@ impl<'input, 'context: 'input> Context<'input, 'context> for MatchContext<'input
     #[inline(always)]
     fn cursor_mut(&mut self) -> &mut Cursor<'input> {
         &mut self.cursor
-    }
-
-    #[inline]
-    fn symbolize(&mut self, value: &str) -> Symbol {
-        self.env.symbolize(value)
-    }
-
-    #[inline]
-    fn resolve(&self, value: Symbol) -> &str {
-        self.env.resolve(value)
     }
 }

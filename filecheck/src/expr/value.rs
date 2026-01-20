@@ -1,6 +1,6 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, convert::Infallible, fmt, str::FromStr};
 
-use crate::expr::{Expr, Number, NumberFormat};
+use crate::expr::{Expr, NumberFormat};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Value<'a> {
@@ -8,20 +8,25 @@ pub enum Value<'a> {
     Str(Cow<'a, str>),
     Num(Expr),
 }
-impl<'a> Value<'a> {
-    pub fn unwrap_string(&self) -> Cow<'a, str> {
+
+impl fmt::Display for Value<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Undef => Cow::Borrowed(""),
-            Self::Str(s) => s.clone(),
-            Self::Num(Expr::Num(n)) => Cow::Owned(format!("{n}")),
-            Self::Num(expr) => panic!("cannot unwrap expression as string: {expr:?}"),
+            Self::Undef => Ok(()),
+            Self::Str(s) => f.write_str(s.as_ref()),
+            Self::Num(expr) => write!(f, "{expr}"),
         }
     }
+}
 
-    pub fn as_number(&self) -> Option<Number> {
-        match self {
-            Value::Num(Expr::Num(num)) => Some(num.clone()),
-            _ => None,
+impl FromStr for Value<'_> {
+    type Err = Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.is_empty() {
+            Ok(Value::Undef)
+        } else {
+            Ok(Value::Str(Cow::Owned(s.to_string())))
         }
     }
 }
@@ -36,6 +41,7 @@ impl PartialOrd for ValueType {
         Some(self.cmp(other))
     }
 }
+
 impl Ord for ValueType {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
         use core::cmp::Ordering;

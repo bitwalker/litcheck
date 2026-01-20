@@ -14,14 +14,11 @@ lalrpop_util::lalrpop_mod!(
     "/parse/grammar.rs"
 );
 
-use litcheck::{
-    diagnostics::{SourceId, SourceSpan, Span, Spanned},
-    StringInterner,
-};
+use litcheck::diagnostics::{SourceId, SourceSpan, Span, Spanned};
 use std::borrow::Cow;
 
 use super::{Lexed, Lexer, ParseError, ParseResult, ParserError, Token};
-use crate::{ast::*, Config};
+use crate::{Config, ast::*};
 
 macro_rules! lex {
     ($lexer:ident) => {
@@ -113,11 +110,10 @@ macro_rules! expect_ignore {
 
 pub struct CheckFileParser<'config> {
     config: &'config Config,
-    pub interner: &'config mut StringInterner,
 }
 impl<'config> CheckFileParser<'config> {
-    pub fn new(config: &'config Config, interner: &'config mut StringInterner) -> Self {
-        Self { config, interner }
+    pub fn new(config: &'config Config) -> Self {
+        Self { config }
     }
 
     pub fn parse<'a, S>(&mut self, source_id: SourceId, code: &'a S) -> ParseResult<CheckFile<'a>>
@@ -150,7 +146,7 @@ impl<'config> CheckFileParser<'config> {
                     return Err(ParserError::ExtraToken {
                         span: SourceSpan::from_range_unchecked(source_id, start..end),
                         token: token.to_string(),
-                    })
+                    });
                 }
             }
         }
@@ -262,8 +258,8 @@ impl<'config> CheckFileParser<'config> {
                             token: token.to_string(),
                             expected: vec![
                                 "literal".to_string(),
-                                "[[".to_string(),
-                                "{{".to_string(),
+                                Token::MatchStart.to_string(),
+                                Token::RegexStart.to_string(),
                                 Token::Lf.to_string(),
                             ],
                         });
@@ -344,7 +340,7 @@ impl<'config> CheckFileParser<'config> {
                     return Err(ParserError::UnrecognizedToken {
                         span: SourceSpan::from_range_unchecked(lexer.source_id(), start..end),
                         token: Token::Lf.to_string(),
-                        expected: vec!["]]".to_string()],
+                        expected: vec![Token::MatchEnd.to_string()],
                     });
                 }
                 Some(token) => {
@@ -353,7 +349,7 @@ impl<'config> CheckFileParser<'config> {
                 None => {
                     return Err(ParserError::UnrecognizedEof {
                         span: lexer.current_offset(),
-                        expected: vec!["]]".to_string()],
+                        expected: vec![Token::MatchEnd.to_string()],
                     });
                 }
             }
@@ -389,7 +385,7 @@ impl<'config> CheckFileParser<'config> {
     ) -> ParseResult<Match<'a>> {
         let lexer = tokens.into_iter();
         grammar::MatchParser::new()
-            .parse(source_id, source, self.interner, lexer)
+            .parse(source_id, source, lexer)
             .map_err(|err| handle_parse_error(source_id, err))
     }
 }

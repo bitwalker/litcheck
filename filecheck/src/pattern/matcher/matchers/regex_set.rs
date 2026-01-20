@@ -1,12 +1,12 @@
 use regex_automata::{
-    dfa::{self, dense, onepass, Automaton, OverlappingState, StartKind},
+    Anchored, MatchKind, PatternID,
+    dfa::{self, Automaton, OverlappingState, StartKind, dense, onepass},
     meta,
     nfa::thompson,
     util::{
         captures::{Captures, GroupInfo},
         syntax,
     },
-    Anchored, MatchKind, PatternID,
 };
 
 use crate::{
@@ -81,7 +81,6 @@ impl<'a, 'input> RegexSetSearcher<'a, 'input> {
         input: Input<'input>,
         patterns: Vec<RegexPattern<'a>>,
         config: &Config,
-        interner: &StringInterner,
     ) -> DiagResult<Self> {
         let start_kind = if input.is_anchored() {
             StartKind::Anchored
@@ -89,7 +88,7 @@ impl<'a, 'input> RegexSetSearcher<'a, 'input> {
             StartKind::Unanchored
         };
         Ok(
-            RegexSetMatcher::new_with_start_kind(start_kind, patterns, config, interner)?
+            RegexSetMatcher::new_with_start_kind(start_kind, patterns, config)?
                 .into_searcher(input),
         )
     }
@@ -171,19 +170,14 @@ pub struct RegexSetMatcher<'a, A = dense::DFA<Vec<u32>>> {
     capture_types: Vec<Vec<Capture>>,
 }
 impl<'a> RegexSetMatcher<'a> {
-    pub fn new(
-        patterns: Vec<RegexPattern<'a>>,
-        config: &Config,
-        interner: &StringInterner,
-    ) -> DiagResult<Self> {
-        Self::new_with_start_kind(StartKind::Both, patterns, config, interner)
+    pub fn new(patterns: Vec<RegexPattern<'a>>, config: &Config) -> DiagResult<Self> {
+        Self::new_with_start_kind(StartKind::Both, patterns, config)
     }
 
     pub fn new_with_start_kind(
         start_kind: StartKind,
         patterns: Vec<RegexPattern<'a>>,
         config: &Config,
-        interner: &StringInterner,
     ) -> DiagResult<Self> {
         let regex = dfa::regex::Regex::builder()
             .dense(
@@ -260,11 +254,12 @@ impl<'a> RegexSetMatcher<'a> {
                 if let Capture::Ignore(_) = capture {
                     continue;
                 }
-                if let Some(name) = capture.group_name() {
-                    let group_name = interner.resolve(name);
-                    let group_id = groups.to_index(pid, group_name).unwrap_or_else(|| {
-                        panic!("expected group for capture of '{group_name}' in pattern {i}")
-                    });
+                if let Some(group_name) = capture.group_name() {
+                    let group_id = groups
+                        .to_index(pid, group_name.as_str())
+                        .unwrap_or_else(|| {
+                            panic!("expected group for capture of '{group_name}' in pattern {i}")
+                        });
                     capture_types[i][group_id] = capture;
                 } else {
                     assert_eq!(

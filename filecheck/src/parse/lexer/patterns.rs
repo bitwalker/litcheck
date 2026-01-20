@@ -1,9 +1,11 @@
-use std::{borrow::Cow, sync::Arc};
+use std::borrow::Cow;
 
 use either::{
     Either,
     Either::{Left, Right},
 };
+
+use crate::common::Symbol;
 
 #[derive(Debug)]
 pub struct Pattern {
@@ -52,11 +54,11 @@ impl Pattern {
         }
     }
 
-    pub fn generate_check_patterns(prefixes: &[Arc<str>]) -> impl Iterator<Item = Pattern> + '_ {
+    pub fn generate_check_patterns(prefixes: &[Symbol]) -> impl Iterator<Item = Pattern> + '_ {
         PatternGen::new(Prefix::Check, prefixes)
     }
 
-    pub fn generate_comment_patterns(prefixes: &[Arc<str>]) -> impl Iterator<Item = Pattern> + '_ {
+    pub fn generate_comment_patterns(prefixes: &[Symbol]) -> impl Iterator<Item = Pattern> + '_ {
         PatternGen::new(Prefix::Comment, prefixes)
     }
 }
@@ -72,7 +74,7 @@ struct PatternGen<'a> {
     checks: &'static [Check],
 }
 impl<'a> PatternGen<'a> {
-    fn new(prefix_ty: Prefix, prefixes: &[Arc<str>]) -> Self {
+    fn new(prefix_ty: Prefix, prefixes: &[Symbol]) -> Self {
         let prefix_alt = if prefixes.is_empty() {
             match prefix_ty {
                 Prefix::Check => Cow::Borrowed("CHECK"),
@@ -84,7 +86,7 @@ impl<'a> PatternGen<'a> {
                 if i > 0 {
                     alt.push('|');
                 }
-                alt.push_str(prefix);
+                alt.push_str(prefix.as_str());
             }
             Cow::Owned(alt)
         };

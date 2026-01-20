@@ -71,6 +71,11 @@ impl Label {
     pub fn label(&self) -> Option<&str> {
         self.label.as_deref()
     }
+
+    #[inline(always)]
+    pub const fn span(&self) -> SourceSpan {
+        self.span
+    }
 }
 
 impl From<Label> for SourceSpan {

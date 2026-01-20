@@ -10,7 +10,6 @@ use crate::{
 
 pub struct TestContext {
     pub config: Config,
-    pub interner: StringInterner,
     input_file: Option<Arc<SourceFile>>,
     match_file: Option<Arc<SourceFile>>,
 }
@@ -26,7 +25,6 @@ impl Default for TestContext {
 
         Self {
             config: Config::default(),
-            interner: StringInterner::new(),
             input_file: None,
             match_file: None,
         }
@@ -97,7 +95,6 @@ impl TestContext {
         let match_file = self.match_file();
         MatchContext::new(
             &self.config,
-            &mut self.interner,
             match_file,
             input_file,
             self.input_file.as_ref().unwrap().as_bytes(),
@@ -128,7 +125,7 @@ impl TestContext {
             FileName::from(test_name),
             source.to_string(),
         );
-        let mut parser = parse::CheckFileParser::new(&self.config, &mut self.interner);
+        let mut parser = parse::CheckFileParser::new(&self.config);
 
         let source = unsafe { &*(source_file.as_ref() as *const SourceFile) };
 
@@ -139,7 +136,7 @@ impl TestContext {
 
     #[track_caller]
     pub fn parse<'a>(&mut self, source: &'a Arc<SourceFile>) -> DiagResult<CheckFile<'a>> {
-        let mut parser = parse::CheckFileParser::new(&self.config, &mut self.interner);
+        let mut parser = parse::CheckFileParser::new(&self.config);
         parser
             .parse(source.id(), source.as_str())
             .map_err(|err| Report::from(err).with_source_code(source.clone()))
@@ -150,13 +147,13 @@ impl TestContext {
         &mut self,
         source: &'a Arc<SourceFile>,
     ) -> Result<CheckFile<'a>, ParserError> {
-        let mut parser = parse::CheckFileParser::new(&self.config, &mut self.interner);
+        let mut parser = parse::CheckFileParser::new(&self.config);
         parser.parse(source.id(), source.as_str())
     }
 
     #[track_caller]
     pub fn compile<'a>(&mut self, file: CheckFile<'a>) -> DiagResult<CheckProgram<'a>> {
-        file.compile(&self.config, &mut self.interner)
+        file.compile(&self.config)
     }
 }
 

@@ -14,7 +14,7 @@ use clap::Args;
 use litcheck::diagnostics::{DefaultSourceManager, SourceManagerSync};
 use regex::Regex;
 
-pub type Variable = litcheck::variables::Variable<String, String>;
+pub type Variable = litcheck::variables::Variable<String>;
 
 pub struct Config {
     pub options: Options,

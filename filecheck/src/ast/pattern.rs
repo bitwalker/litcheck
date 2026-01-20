@@ -261,8 +261,8 @@ impl<'a> CheckPattern<'a> {
     pub fn is_empty(&self) -> bool {
         match self {
             Self::Empty(_) => true,
-            Self::Literal(ref spanned) => spanned.is_empty(),
-            Self::Regex(ref spanned) => spanned.is_empty(),
+            Self::Literal(spanned) => spanned.is_empty(),
+            Self::Regex(spanned) => spanned.is_empty(),
             Self::Match(parts) => parts.is_empty(),
         }
     }
@@ -322,7 +322,7 @@ impl<'a> CheckPattern<'a> {
         use std::collections::VecDeque;
 
         match self {
-            Self::Literal(ref mut literal) => {
+            Self::Literal(literal) => {
                 let span = literal.span();
                 let result = Prefix::Literal(core::mem::replace(
                     literal,
@@ -331,7 +331,7 @@ impl<'a> CheckPattern<'a> {
                 *self = Self::Empty(span);
                 result
             }
-            Self::Regex(ref mut pattern) => {
+            Self::Regex(pattern) => {
                 let span = pattern.span();
                 let result = Prefix::Regex(core::mem::replace(
                     pattern,
@@ -340,7 +340,7 @@ impl<'a> CheckPattern<'a> {
                 *self = Self::Empty(span);
                 result
             }
-            Self::Match(ref mut parts) => {
+            Self::Match(parts) => {
                 let span = parts.span();
                 let mut ps = VecDeque::<CheckPatternPart<'a>>::from(core::mem::take(&mut **parts));
                 let prefix = match ps.pop_front().unwrap() {
@@ -397,7 +397,7 @@ impl<'a> CheckPattern<'a> {
         match self {
             Self::Empty(_) | Self::Literal(_) => true,
             Self::Regex(_) => false,
-            Self::Match(ref parts) => parts
+            Self::Match(parts) => parts
                 .iter()
                 .all(|p| matches!(p, CheckPatternPart::Literal(_))),
         }
@@ -406,12 +406,12 @@ impl<'a> CheckPattern<'a> {
     pub fn is_regex_compatible(&self) -> bool {
         match self {
             Self::Empty(_) | Self::Literal(_) | Self::Regex(_) => true,
-            Self::Match(ref parts) => parts.iter().all(|p| p.is_regex_compatible()),
+            Self::Match(parts) => parts.iter().all(|p| p.is_regex_compatible()),
         }
     }
 
     /// Compacts this pattern into fewer parts where possible
-    pub fn compact(&mut self, interner: &StringInterner) {
+    pub fn compact(&mut self) {
         use std::collections::VecDeque;
 
         fn convert_to_regex(buffer: &mut String, padding: usize) {
@@ -431,11 +431,11 @@ impl<'a> CheckPattern<'a> {
         }
 
         match self {
-            Self::Match(ref empty) if empty.is_empty() => {
+            Self::Match(empty) if empty.is_empty() => {
                 let span = empty.span();
                 *self = Self::Empty(span);
             }
-            Self::Match(ref mut compacted) => {
+            Self::Match(compacted) => {
                 let span = compacted.span();
                 let source_id = span.source_id();
                 let mut pattern_start = span.start();
@@ -474,7 +474,7 @@ impl<'a> CheckPattern<'a> {
                         }) => {
                             pattern_end = span.end();
                             let part = part.into_inner();
-                            let group_name = interner.resolve(name.into_inner());
+                            let group_name = name.as_str();
                             if is_literal_mode {
                                 is_literal_mode = false;
                                 convert_to_regex(&mut pattern, 6 + group_name.len() + part.len());
@@ -512,8 +512,9 @@ impl<'a> CheckPattern<'a> {
                             ..
                         }) => {
                             pattern_end = span.end();
-                            let group_name = interner.resolve(name.into_inner());
-                            let format_pattern = format.pattern(Some(group_name));
+                            let group_name = name.as_str();
+                            let format_pattern =
+                                format.unwrap_or_default().pattern(Some(group_name));
                             if is_literal_mode {
                                 is_literal_mode = false;
                                 convert_to_regex(&mut pattern, format_pattern.len());
@@ -613,11 +614,8 @@ impl<'a> CheckPattern<'a> {
     /// Returns Err with the original pattern (potentially compacted),
     /// if the conversion is not possible. Otherwise, returns Ok
     /// with the built regular expression pattern.
-    pub fn into_regex_pattern(
-        mut self,
-        interner: &StringInterner,
-    ) -> Result<RegexPattern<'a>, Self> {
-        self.compact(interner);
+    pub fn into_regex_pattern(mut self) -> Result<RegexPattern<'a>, Self> {
+        self.compact();
 
         match self {
             Self::Literal(s) => Ok(RegexPattern::new(s)),
@@ -630,9 +628,9 @@ impl<'a> Spanned for CheckPattern<'a> {
     fn span(&self) -> SourceSpan {
         match self {
             Self::Empty(span) => *span,
-            Self::Literal(ref spanned) => spanned.span(),
-            Self::Regex(ref spanned) => spanned.span(),
-            Self::Match(ref spanned) => spanned.span(),
+            Self::Literal(spanned) => spanned.span(),
+            Self::Regex(spanned) => spanned.span(),
+            Self::Match(spanned) => spanned.span(),
         }
     }
 }
@@ -1015,12 +1013,12 @@ impl<'a, 'iter> Iterator for CheckPatternVarIter<'a, 'iter> {
                 Self::Empty => break None,
                 Self::Pattern(pattern) => match pattern {
                     CheckPattern::Empty(_) | CheckPattern::Literal(_) => break None,
-                    CheckPattern::Regex(ref re) => {
+                    CheckPattern::Regex(re) => {
                         let (item, rest) = re.captures.split_first()?;
                         *self = Self::Regex(rest);
                         break Some(item.span());
                     }
-                    CheckPattern::Match(ref parts) => {
+                    CheckPattern::Match(parts) => {
                         *self = Self::Parts(parts);
                         continue;
                     }
@@ -1034,7 +1032,7 @@ impl<'a, 'iter> Iterator for CheckPatternVarIter<'a, 'iter> {
                     while let Some((part, parts)) = parts.split_first() {
                         match part {
                             CheckPatternPart::Literal(_) => break,
-                            CheckPatternPart::Regex(ref re) => match re.captures.split_first() {
+                            CheckPatternPart::Regex(re) => match re.captures.split_first() {
                                 Some((item, vars)) => {
                                     *self = Self::Buffered {
                                         buffer: vars.iter().map(|v| v.span()).collect(),
@@ -1057,7 +1055,7 @@ impl<'a, 'iter> Iterator for CheckPatternVarIter<'a, 'iter> {
                             }
                             CheckPatternPart::Match(Match::Numeric {
                                 capture,
-                                expr: Some(ref expr),
+                                expr: Some(expr),
                                 ..
                             }) => {
                                 *self = Self::Expr { expr, parts };
@@ -1105,9 +1103,7 @@ impl<'a, 'iter> Iterator for CheckPatternVarIter<'a, 'iter> {
                             Some(Expr::Var(name)) => {
                                 buffer.push_back(name.span());
                             }
-                            Some(Expr::Binary {
-                                ref lhs, ref rhs, ..
-                            }) => {
+                            Some(Expr::Binary { lhs, rhs, .. }) => {
                                 worklist.push_back(lhs);
                                 worklist.push_back(rhs);
                             }

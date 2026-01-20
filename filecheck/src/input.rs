@@ -1,4 +1,4 @@
-use std::ops::RangeBounds;
+use std::ops::{Index, RangeBounds};
 
 use litcheck::{
     range::{self, Range},
@@ -238,5 +238,23 @@ impl<'a> From<Input<'a>> for aho_corasick::Input<'a> {
         aho_corasick::Input::new(input.buffer)
             .anchored(anchored)
             .range(input.span)
+    }
+}
+
+impl<'a> Index<usize> for Input<'a> {
+    type Output = u8;
+
+    #[inline(always)]
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.buffer[index]
+    }
+}
+
+impl<'a> Index<Range<usize>> for Input<'a> {
+    type Output = [u8];
+
+    #[inline(always)]
+    fn index(&self, index: Range<usize>) -> &Self::Output {
+        &self.buffer[index.start..index.end]
     }
 }

@@ -16,7 +16,7 @@ pub use self::errors::{CheckFailedError, RelatedCheckError, RelatedError, TestFa
 pub use self::test::TestContext;
 pub use self::test::{Test, TestResult};
 
-use clap::{builder::ValueParser, ArgAction, Args, ColorChoice, ValueEnum};
+use clap::{ArgAction, Args, ColorChoice, ValueEnum, builder::ValueParser};
 use litcheck::diagnostics::{DefaultSourceManager, DiagResult, Report, SourceManager};
 use std::sync::Arc;
 
@@ -35,18 +35,20 @@ pub(crate) mod common {
     #[cfg(test)]
     pub use litcheck::reporting;
     pub use litcheck::{
+        Symbol,
         diagnostics::{
-            Diag, DiagResult, Diagnostic, FileName, Label, Report, SourceFile, SourceId,
-            SourceLanguage, SourceManager, SourceManagerError, SourceManagerExt, SourceSpan, Span,
-            Spanned,
+            Diag, DiagResult, Diagnostic, FileName, Label, LabeledSpan, Report, SourceFile,
+            SourceId, SourceLanguage, SourceManager, SourceManagerError, SourceManagerExt,
+            SourceSpan, Span, Spanned,
         },
         range::{self, Range},
+        symbols,
         text::{self, Newline},
-        StringInterner, Symbol,
     };
     pub use regex_automata::{meta::Regex, util::look::LookMatcher};
-    pub use smallvec::{smallvec, SmallVec};
+    pub use smallvec::{SmallVec, smallvec};
 
+    pub use crate::Config;
     pub use crate::ast::{Check, Constraint};
     pub use crate::context::{Context, ContextExt, ContextGuard, MatchContext};
     pub use crate::cursor::{Cursor, CursorGuard, CursorPosition};
@@ -64,8 +66,9 @@ pub(crate) mod common {
     #[cfg(test)]
     pub(crate) use crate::test::TestContext;
     pub use crate::test::TestResult;
-    pub use crate::Config;
 }
+
+use common::{Symbol, symbols};
 
 pub const DEFAULT_CHECK_PREFIXES: &[&str] = &["CHECK"];
 pub const DEFAULT_COMMENT_PREFIXES: &[&str] = &["COM", "RUN"];
@@ -138,7 +141,7 @@ pub struct Options {
         value_delimiter(','),
         help_heading = "Syntax"
     )]
-    pub check_prefixes: Vec<Arc<str>>,
+    pub check_prefixes: Vec<Symbol>,
     /// Which prefixes to treat as comments.
     ///
     /// All content on a line following a comment directive is ignored,
@@ -153,7 +156,7 @@ pub struct Options {
         value_delimiter(','),
         help_heading = "Syntax"
     )]
-    pub comment_prefixes: Vec<Arc<str>>,
+    pub comment_prefixes: Vec<Symbol>,
     /// If specifying multiple check prefixes, this controls whether or not
     /// to raise an error if one of the prefixes is missing in the test file.
     #[arg(long, default_value_t = false, help_heading = "Syntax")]
@@ -195,7 +198,7 @@ pub struct Options {
     /// option FileCheck will verify that input does not contain warnings not covered by any
     /// `CHECK:` patterns.
     #[arg(long, value_name = "CHECK", help_heading = "Matching")]
-    pub implicit_check_not: Vec<Arc<str>>,
+    pub implicit_check_not: Vec<Symbol>,
     /// Dump input to stderr, adding annotations representing currently enabled diagnostics.
     #[arg(long, value_enum, value_name = "TYPE", default_value_t = Dump::Fail, help_heading = "Output")]
     pub dump_input: Dump,
@@ -277,11 +280,8 @@ impl Default for Options {
     fn default() -> Self {
         Self {
             allow_empty: false,
-            check_prefixes: vec![Arc::from("CHECK".to_string().into_boxed_str())],
-            comment_prefixes: vec![
-                Arc::from("COM".to_string().into_boxed_str()),
-                Arc::from("RUN".to_string().into_boxed_str()),
-            ],
+            check_prefixes: vec![symbols::Check],
+            comment_prefixes: vec![symbols::Com, symbols::Run],
             allow_unused_prefixes: false,
             strict_whitespace: false,
             match_full_lines: false,
@@ -303,21 +303,25 @@ impl Options {
         if self
             .check_prefixes
             .iter()
-            .any(|prefix| prefix.as_ref() != "CHECK")
+            .any(|prefix| *prefix != symbols::Check)
         {
             for check_prefix in self.check_prefixes.iter() {
                 if self.comment_prefixes.contains(check_prefix) {
-                    return Err(Report::msg(format!("supplied check prefix must be unique among check and comment prefixes: '{check_prefix}'")));
+                    return Err(Report::msg(format!(
+                        "supplied check prefix must be unique among check and comment prefixes: '{check_prefix}'"
+                    )));
                 }
             }
         } else if self
             .comment_prefixes
             .iter()
-            .any(|prefix| !matches!(prefix.as_ref(), "COM" | "RUN"))
+            .any(|prefix| !matches!(*prefix, symbols::Com | symbols::Run))
         {
             for comment_prefix in self.comment_prefixes.iter() {
                 if self.check_prefixes.contains(comment_prefix) {
-                    return Err(Report::msg(format!("supplied comment prefix must be unique among check and comment prefixes: '{comment_prefix}'")));
+                    return Err(Report::msg(format!(
+                        "supplied comment prefix must be unique among check and comment prefixes: '{comment_prefix}'"
+                    )));
                 }
             }
         }
@@ -353,9 +357,9 @@ pub enum DumpFilter {
 }
 
 fn prefix_value_parser() -> ValueParser {
-    use clap::{error::ErrorKind, Error};
+    use clap::{Error, error::ErrorKind};
 
-    ValueParser::from(move |s: &str| -> Result<Arc<str>, clap::Error> {
+    ValueParser::from(move |s: &str| -> Result<Symbol, clap::Error> {
         if s.is_empty() {
             return Err(Error::raw(
                 ErrorKind::ValueValidation,
@@ -374,7 +378,7 @@ fn prefix_value_parser() -> ValueParser {
                 "supplied prefix may only contain ASCII alphanumerics, hyphens, or underscores",
             ));
         }
-        Ok(Arc::from(s.to_owned().into_boxed_str()))
+        Ok(Symbol::intern(s))
     })
 }
 

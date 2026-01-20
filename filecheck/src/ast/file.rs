@@ -27,12 +27,8 @@ impl<'a> CheckFile<'a> {
         self.lines
     }
 
-    pub fn compile(
-        self,
-        config: &Config,
-        interner: &mut StringInterner,
-    ) -> DiagResult<CheckProgram<'a>> {
-        CheckProgram::compile(self, config, interner)
+    pub fn compile(self, config: &Config) -> DiagResult<CheckProgram<'a>> {
+        CheckProgram::compile(self, config)
     }
 }
 
