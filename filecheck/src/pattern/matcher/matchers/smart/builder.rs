@@ -135,11 +135,29 @@ impl<'a, 'config> SmartMatcherBuilder<'a, 'config> {
             }
         }
 
+        // Emit binds after the regex that will be evaluated in reverse order of its captures,
+        // as the captures will be pushed on the operand stack in the order they appear.
+        let binds = captures
+            .iter()
+            .rev()
+            .filter_map(|capture| match capture.info {
+                Capture::Ignore(_) | Capture::All(_) => None,
+                Capture::Implicit(tv)
+                | Capture::Mapped { with: tv, .. }
+                | Capture::Explicit(tv) => Some(MatchOp::Bind {
+                    name: tv.name,
+                    ty: Some(tv.ty),
+                }),
+            })
+            .collect::<SmallVec<[_; 2]>>();
+
         self.parts.push(MatchOp::Regex {
             source: source.pattern,
             pattern,
             captures,
         });
+
+        self.parts.extend(binds);
 
         Ok(self)
     }

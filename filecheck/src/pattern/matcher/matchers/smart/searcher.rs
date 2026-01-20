@@ -79,6 +79,8 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
         mut guard: ContextGuard<'_, 'input, 'context>,
     ) -> std::ops::ControlFlow<DiagResult<()>> {
         let anchored = self.cursor.is_anchored();
+        let search_started_at = self.cursor.start();
+        log::debug!(target: "smart:searcher", "attempting to match prefix for search starting at {search_started_at} (anchored = {anchored})");
         let result = match self.match_part(prefix, &guard) {
             Ok(result) => result,
             Err(err) => return ControlFlow::Break(Err(err)),
@@ -93,6 +95,7 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
             };
             self.cursor.set_anchored(anchored);
             if result.is_ok() {
+                log::trace!(target: "smart:searcher", "a full match was found in bytes {}", result.matched_range().unwrap());
                 // Match was successful, we're done!
                 guard.save();
                 return ControlFlow::Break(Ok(()));
@@ -101,13 +104,16 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
             // Match failed, so let's start over again and look for another match of the prefix
             // pattern to try from
             log::debug!(
+                target: "smart:searcher",
                 "match attempt starting at offset {} failed beginning at offset {} with reason: {}",
-                self.match_start,
-                self.cursor.start(),
+                search_started_at,
+                self.match_end,
                 &result.ty
             );
-            // Reset the searcher, but start the next search where the cursor left off
-            self.reset(self.cursor.start());
+            // Reset the searcher, but start the next search where the cursor left off, but ensure
+            // that we advance the cursor at least one byte to avoid looping indefinitely
+            let search_stopped_at = self.match_end;
+            self.reset(core::cmp::max(search_stopped_at, search_started_at + 1));
             if anchored {
                 self.captures.set_pattern(None);
                 return ControlFlow::Break(Ok(()));
@@ -128,6 +134,7 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
     ) -> DiagResult<MatchResult<'input>> {
         for part in parts.iter() {
             if self.cursor.is_empty() {
+                log::trace!(target: "smart:searcher", "no more input to consume: cannot match");
                 // No match possible
                 self.captures.set_pattern(None);
                 return Ok(MatchResult::failed(
@@ -164,10 +171,12 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
                                 err
                             })?,
                     };
+                    log::trace!(target: "smart:searcher", "binding '{name}' (type={}) to '{value}'", ty.unwrap_or(ValueType::String));
                     context.env_mut().insert(*name, value);
                 }
                 MatchOp::Drop => {
-                    self.stack.pop().expect("expected value on operand stack");
+                    let dropped = self.stack.pop().expect("expected value on operand stack");
+                    log::trace!(target: "smart:searcher", "dropped value from operand stack: '{dropped}'");
                 }
                 part => {
                     let result = self.match_part(part, context)?;
@@ -204,33 +213,36 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
         part: &MatchOp<'a>,
         context: &ContextGuard<'_, 'input, 'context>,
     ) -> DiagResult<MatchResult<'input>> {
-        let result = match part {
-            MatchOp::Literal(ref pattern) => self.match_literal(pattern, context),
+        self.match_pattern_id = PatternID::new_unchecked(self.match_pattern_id.one_more());
+        match part {
+            MatchOp::Literal(pattern) => self.match_literal(pattern, context),
             MatchOp::Regex {
                 source,
                 pattern,
                 captures,
                 ..
-            } if captures.is_empty() => self.match_regex(source.span(), pattern, context),
+            } if captures.is_empty() => {
+                self.match_regex(source.span(), pattern, Some(source.inner()), context)
+            }
             MatchOp::Regex {
                 source,
                 pattern,
                 captures,
-            } => {
-                self.match_regex_with_captures(source.span(), pattern, captures.as_slice(), context)
-            }
+            } => self.match_regex_with_captures(
+                source.span(),
+                pattern,
+                Some(source.inner()),
+                captures.as_slice(),
+                context,
+            ),
             MatchOp::Numeric {
                 span,
                 format,
                 capture,
             } => self.match_number(*span, *format, *capture, context),
-            MatchOp::Substitution { ty, expr } => {
-                return self.match_substitution(*ty, expr, context)
-            }
+            MatchOp::Substitution { ty, expr } => self.match_substitution(*ty, expr, context),
             _ => unreachable!("non-pattern parts are handled in search_captures"),
-        };
-        self.match_pattern_id = PatternID::new_unchecked(self.match_pattern_id.one_more());
-        result
+        }
     }
 
     fn match_literal<'context>(
@@ -238,11 +250,13 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
         matcher: &SubstringMatcher<'a>,
         context: &ContextGuard<'_, 'input, 'context>,
     ) -> DiagResult<MatchResult<'input>> {
+        log::trace!(target: "smart:searcher", "attempting to match literal pattern: '{}'", matcher.pattern());
         match matcher.try_match(self.cursor, context) {
             Ok(MatchResult {
                 info: Some(info),
                 ty,
             }) => {
+                log::trace!(target: "smart:searcher", "match found starting at offset {} with len {}", info.span.start(), info.span.len());
                 set_capturing_group_span(
                     self.captures,
                     self.match_pattern_id,
@@ -252,7 +266,10 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
                 );
                 Ok(MatchResult::new(ty, Some(info)))
             }
-            result => result,
+            result => {
+                log::trace!(target: "smart:searcher", "no match found");
+                result
+            }
         }
     }
 
@@ -260,8 +277,15 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
         &mut self,
         span: SourceSpan,
         pattern: &Regex,
+        pattern_source: Option<&str>,
         context: &ContextGuard<'_, 'input, 'context>,
     ) -> DiagResult<MatchResult<'input>> {
+        log::trace!(target: "smart:searcher", "attempting to match regex pattern: {:?}", {
+            pattern_source.unwrap_or_else(|| {
+                core::str::from_utf8(&context.match_file_bytes()[span.into_slice_index()]).unwrap_or("<invalid utf8>")
+            })
+        });
+        log::trace!(target: "smart:searcher", "search starting at offset {}", self.cursor.start());
         if let Some(matched) = pattern.find(self.cursor) {
             let range = matched.range();
             set_capturing_group_span(
@@ -271,11 +295,13 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
                 range.start,
                 range.end,
             );
+            log::trace!(target: "smart:searcher", "match found starting at offset {} with len {}", matched.start(), matched.len());
             Ok(MatchResult::ok(MatchInfo::new(
                 SourceSpan::from_range_unchecked(self.cursor.source_id(), range),
                 span,
             )))
         } else {
+            log::trace!(target: "smart:searcher", "no match found");
             Ok(MatchResult::failed(
                 CheckFailedError::MatchNoneButExpected {
                     span,
@@ -290,23 +316,35 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
         &mut self,
         pattern_span: SourceSpan,
         pattern: &Regex,
+        pattern_source: Option<&str>,
         capture_groups: &[CaptureGroup],
         context: &ContextGuard<'_, 'input, 'context>,
     ) -> DiagResult<MatchResult<'input>> {
+        log::trace!(target: "smart:searcher", "attempting to match capturing regex pattern: {:?}", {
+            pattern_source.unwrap_or_else(|| {
+                core::str::from_utf8(&context.match_file_bytes()[pattern_span.into_slice_index()]).unwrap_or("<invalid utf8>")
+            })
+        });
+        log::trace!(target: "smart:searcher", "search starting at offset {}", self.cursor.start());
         let input = self.cursor.into();
         let mut captures = pattern.create_captures();
         pattern.search_captures(&input, &mut captures);
         if let Some(matched) = captures.get_match() {
-            // Record the overall match
             let range = matched.range();
-            self.part_matched(..range.end);
             // Record local captures of this pattern in the global captures
             let mut captured = Vec::with_capacity(capture_groups.len());
+            set_capturing_group_span(
+                self.captures,
+                self.match_pattern_id,
+                0,
+                matched.start(),
+                matched.end(),
+            );
             for capture_group in capture_groups.iter() {
                 if let Some(capture_span) = captures.get_group(capture_group.group_id) {
                     set_capturing_group_span(
                         self.captures,
-                        capture_group.pattern_id,
+                        self.match_pattern_id,
                         capture_group.group_id,
                         capture_span.start,
                         capture_span.end,
@@ -326,18 +364,22 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
                                 value: Value::Str(Cow::Borrowed(content)),
                                 capture,
                             };
-                            self.stack.push(Operand(captured_info.clone()));
+                            log::trace!(target: "smart:searcher", "pushing capture for '{}' on operand stack: '{content}'", capture_group.info.name().map(|n| n.as_str()).unwrap_or("<anon>"));
+                            if !matches!(capture, Capture::All(_)) {
+                                self.stack.push(Operand(captured_info.clone()));
+                            }
                             captured.push(captured_info);
                         }
                     }
                 } else {
                     unset_capturing_group_span(
                         self.captures,
-                        capture_group.pattern_id,
+                        self.match_pattern_id,
                         capture_group.group_id,
                     );
                 }
             }
+            log::trace!(target: "smart:searcher", "match found starting at offset {} with len {}", matched.start(), matched.len());
             Ok(MatchResult::ok(
                 MatchInfo::new(
                     SourceSpan::from_range_unchecked(input.source_id(), range),
@@ -392,19 +434,28 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
             let mut captures = pattern.create_captures();
             pattern.search_captures(&input, &mut captures);
             if let Some(matched) = captures.get_match() {
+                log::trace!(target: "smart:searcher", "match found starting at offset {} with len {}", matched.start(), matched.len());
                 let range = Range::from(matched.range());
                 let pattern_span = span;
                 let span = SourceSpan::from_range_unchecked(input_source_id, matched.range());
                 let raw = self.cursor.as_str(matched.range());
+                set_capturing_group_span(
+                    self.captures,
+                    self.match_pattern_id,
+                    0,
+                    matched.start(),
+                    matched.end(),
+                );
                 match Number::parse_with_format(Span::new(span, raw), format) {
                     Ok(parsed) => {
                         set_capturing_group_span(
                             self.captures,
                             self.match_pattern_id,
-                            1,
+                            capture_group.group_id,
                             range.start,
                             range.end,
                         );
+                        log::trace!(target: "smart:searcher", "pushing capture for '{}' on operand stack: '{parsed}'", group_name.map(|n| n.as_str()).unwrap_or("<anon>"));
                         let captured = CaptureInfo {
                             span,
                             pattern_span,
@@ -440,6 +491,7 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
                 ))
             }
         } else if let Some(matched) = pattern.find(input) {
+            log::trace!(target: "smart:searcher", "match found starting at offset {} with len {}", matched.start(), matched.len());
             let range = matched.range();
             set_capturing_group_span(
                 self.captures,
@@ -471,6 +523,7 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
         expr: &Expr,
         context: &ContextGuard<'_, 'input, 'context>,
     ) -> DiagResult<MatchResult<'input>> {
+        log::trace!(target: "smart:searcher", "evaluating constraint: '{constraint} {expr}'");
         assert_eq!(constraint, Constraint::Eq);
         let lhs = self.stack.last().expect("expected operand on stack");
         match evaluate_expr(span, expr, None, context)? {
@@ -479,6 +532,8 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
                 if lhs.value != rhs.value {
                     self.captures.set_pattern(None);
                 }
+
+                log::trace!(target: "smart:searcher", "constraint was applied successfully");
 
                 Ok(MatchResult::ok(MatchInfo::new(lhs.span(), span)))
             }
@@ -511,8 +566,9 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
         expr: &Expr,
         context: &ContextGuard<'_, 'input, 'context>,
     ) -> DiagResult<MatchResult<'input>> {
+        log::trace!(target: "smart:searcher", "attempting to match substitution: '{expr}'");
         let span = expr.span();
-        let pattern = match evaluate_expr(span, expr, context)? {
+        let pattern_source = match evaluate_expr(span, expr, ty, context)? {
             Left(num) => Cow::Owned(match ty {
                 Some(ValueType::Number(Some(format))) => {
                     format!(
@@ -527,6 +583,7 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
             }),
             Right(s) => s,
         };
+        log::trace!(target: "smart:searcher", "resolved substitution expression to pattern: '{pattern_source}'");
         let pattern = Regex::builder()
             .syntax(
                 regex_automata::util::syntax::Config::new()
@@ -537,9 +594,9 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
                 regex_automata::meta::Config::new()
                     .match_kind(regex_automata::MatchKind::LeftmostFirst),
             )
-            .build(&pattern)
+            .build(&pattern_source)
             .map_err(|error| regex::build_error_to_diagnostic(error, 1, |_| span))?;
-        self.match_regex(span, &pattern, context)
+        self.match_regex(span, &pattern, Some(pattern_source.as_ref()), context)
     }
 
     #[inline]
@@ -552,6 +609,7 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
         self.match_start = range.start;
         self.match_end = range.end;
         self.cursor.set_start(range.end);
+        log::trace!(target: "smart:searcher", "part matched and cursor advanced to {}", range.end);
     }
 }
 

@@ -63,6 +63,10 @@ impl<'a> SubstringMatcher<'a> {
             searcher,
         })
     }
+
+    pub fn pattern(&self) -> &str {
+        self.pattern.inner().as_ref()
+    }
 }
 impl<'a> MatcherMut for SubstringMatcher<'a> {
     fn try_match_mut<'input, 'context, C>(

@@ -95,7 +95,6 @@ impl<'a> MatcherMut for SmartMatcher<'a> {
         if let Some(matched) = captures.get_match() {
             let matched =
                 extract_captures_from_match(self.span, matched, &captures, &self.parts, context)?;
-            matched.bind_captures_in(context);
             Ok(matched)
         } else {
             Ok(MatchResult::failed(
