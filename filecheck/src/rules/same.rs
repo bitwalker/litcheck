@@ -56,10 +56,12 @@ where
                         ty: MatchType::Failed(CheckFailedError::MatchFoundButWrongLine {
                             span: info.span,
                             input_file: context.input_file(),
-                            pattern: Some(RelatedCheckError {
-                                span: self.pattern.span(),
-                                match_file: context.match_file(),
-                            }),
+                            pattern: context.source_file(self.pattern.span().source_id()).map(
+                                |match_file| RelatedCheckError {
+                                    span: self.pattern.span(),
+                                    match_file,
+                                },
+                            ),
                         }),
                         info: Some(info),
                     }))

@@ -197,7 +197,12 @@ pub struct Options {
     /// messages from tools that don’t have an option similar to `clang -verify`. With this
     /// option FileCheck will verify that input does not contain warnings not covered by any
     /// `CHECK:` patterns.
-    #[arg(long, value_name = "CHECK", help_heading = "Matching")]
+    #[arg(
+        long,
+        value_name = "PATTERN",
+        action(clap::ArgAction::Append),
+        help_heading = "Matching"
+    )]
     pub implicit_check_not: Vec<Symbol>,
     /// Dump input to stderr, adding annotations representing currently enabled diagnostics.
     #[arg(long, value_enum, value_name = "TYPE", default_value_t = Dump::Fail, help_heading = "Output")]

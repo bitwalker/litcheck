@@ -11,6 +11,11 @@ pub trait Context<'input, 'context> {
         &'this mut self,
     ) -> &'env mut dyn LexicalScopeMut<Value = Value<'input>>;
 
+    #[inline]
+    fn source_file(&self, id: SourceId) -> Option<Arc<SourceFile>> {
+        self.source_manager().get(id).ok()
+    }
+
     fn match_file(&self) -> Arc<SourceFile>;
 
     fn match_file_bytes(&self) -> &[u8];

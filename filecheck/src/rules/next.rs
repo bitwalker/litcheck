@@ -42,7 +42,9 @@ where
             return Ok(Matches::from(MatchResult {
                 ty: MatchType::Failed(CheckFailedError::MatchNoneButExpected {
                     span: self.pattern.span(),
-                    match_file: context.match_file(),
+                    match_file: context
+                        .source_file(self.pattern.span().source_id())
+                        .unwrap(),
                     note: if cursor.end_of_file() == block_end {
                         None
                     } else {

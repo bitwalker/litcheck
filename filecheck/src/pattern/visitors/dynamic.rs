@@ -218,7 +218,7 @@ impl<'a, 'input, S: PatternSearcher<'input>> DynamicPatternSetVisitor<'a, S> {
                 matched.push(MatchResult::failed(
                     CheckFailedError::MatchNoneButExpected {
                         span,
-                        match_file: context.match_file(),
+                        match_file: context.source_file(span.source_id()).unwrap(),
                         note: None,
                     },
                 ));

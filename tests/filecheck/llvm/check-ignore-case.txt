@@ -14,10 +14,10 @@
 # RUN: FileCheck --ignore-case --check-prefix=LINE --input-file=%s %s
 
 ## Check that option --implicit-not works case insensitively.
-# RUN: sed '/^#/d' %s | FileCheck --implicit-check-not=sTrInG %s
+# RUN: sed '/^#/d' %s | FileCheck --implicit-check-not=sTrInG --allow-unused-prefixes %s
 # RUN: sed '/^#/d' %s \
 # RUN: | %ProtectFileCheckOutput \
-# RUN:   not FileCheck --ignore-case --implicit-check-not=sTrInG %s 2>&1 \
+# RUN:   not FileCheck --ignore-case --allow-unused-prefixes --implicit-check-not=sTrInG %s 2>&1 \
 # RUN: | FileCheck --check-prefix=ERROR %s
 
 this is the STRING to be matched
@@ -43,6 +43,13 @@ One Line To Match
 # LINE: {{o}}ne line
 # LINE-SAME: {{t}}o match
 
-# ERROR: command line:1:{{[0-9]+}}: error: IMPLICIT-CHECK-NOT: excluded string found in input
-# ERROR-NEXT: --implicit-check-not='sTrInG'
-# ERROR: note: found here
+# ERROR: match found, but was excluded{{[[:space:]].*}}stdin:7:13
+# ERROR-NEXT: 6 │
+# ERROR-NEXT: 7 │ this is the STRING to be matched
+# ERROR-NEXT:                 ───┬──
+# ERROR-NEXT:                    ╰── match found here
+
+# ERROR: see also{{[[:space:]].*}}--implicit-check-not
+# ERROR-NEXT: (sTrInG)
+# ERROR-NEXT: ────┬───
+# ERROR-NEXT:     ╰── by this pattern

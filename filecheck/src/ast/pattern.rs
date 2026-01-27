@@ -235,7 +235,7 @@ impl<'a> Ord for Prefix<'a> {
 }
 
 /// A check pattern is the part of a check line which must match in the check file somewhere
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum CheckPattern<'a> {
     /// There is no content, we're at the end of line
     Empty(SourceSpan),
@@ -663,7 +663,7 @@ impl<'a> From<Vec<CheckPatternPart<'a>>> for CheckPattern<'a> {
 /// matches respectively; with the before and after parts being literal
 /// (and optional). As such we have three types of segments/parts that
 /// we can observe on a line
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CheckPatternPart<'a> {
     /// This part consists of a match rule to be evaluated while matching
     Match(Match<'a>),

@@ -10,8 +10,8 @@ use crate::range::Range;
 #[repr(u32)]
 pub enum SourceGroup {
     File = 0,
-    Argument = u32::MAX - 1,
-    Unknown = u32::MAX,
+    Argument = ((u8::MAX - 1) as u32) << 24,
+    Unknown = (u8::MAX as u32) << 24,
 }
 
 /// A [SourceId] represents the index/identifier associated with a unique source file in a
@@ -392,7 +392,7 @@ impl DefaultSourceManagerImpl {
                 file
             }
             SourceGroup::Argument => {
-                let index = u32::try_from(self.files.len())
+                let index = u32::try_from(self.arguments.len())
                     .expect("system limit: too many argument sources tracked");
                 let id = SourceId::argument(index);
                 let file = Arc::new(SourceFile::from_raw_parts(id, content));

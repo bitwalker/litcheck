@@ -141,7 +141,7 @@ impl<'a, 'patterns, 'input> PatternSearcher<'input>
             Ok(MatchResult::failed(
                 CheckFailedError::MatchNoneButExpected {
                     span: self.span(),
-                    match_file: context.match_file(),
+                    match_file: context.source_file(self.span().source_id()).unwrap(),
                     note: None,
                 },
             ))

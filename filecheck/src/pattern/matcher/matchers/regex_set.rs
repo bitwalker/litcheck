@@ -483,7 +483,7 @@ where
                         let error = CheckFailedError::MatchError {
                             span,
                             input_file: context.input_file(),
-                            labels: vec![RelatedLabel::note(Label::at(pattern_span), context.match_file())],
+                            labels: vec![RelatedLabel::note(Label::at(pattern_span), context.source_file(pattern_span.source_id()).unwrap())],
                             help: Some("meta regex searcher failed to match the input even though an initial DFA pass found a match".to_string()),
                         };
                         Err(Report::new(error))
@@ -517,7 +517,7 @@ where
                         let error = CheckFailedError::MatchError {
                             span,
                             input_file: context.input_file(),
-                            labels: vec![RelatedLabel::note(Label::at(pattern_span), context.match_file())],
+                            labels: vec![RelatedLabel::note(Label::at(pattern_span), context.source_file(pattern_span.source_id()).unwrap())],
                             help: Some("onepass regex searcher failed to match the input even though an initial DFA pass found a match".to_string()),
                         };
                         Err(Report::new(error))
@@ -528,7 +528,7 @@ where
             Ok(MatchResult::failed(
                 CheckFailedError::MatchNoneButExpected {
                     span: self.span(),
-                    match_file: context.match_file(),
+                    match_file: context.source_file(self.span().source_id()).unwrap(),
                     note: None,
                 },
             ))

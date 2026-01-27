@@ -158,7 +158,7 @@ pub fn discover_blocks<'input, 'context: 'input>(
                             );
                             errors.push(CheckFailedError::MatchNoneButExpected {
                                 span,
-                                match_file: context.match_file(),
+                                match_file: context.source_file(span.source_id()).unwrap(),
                                 note: Some(msg),
                             });
                         }
@@ -174,7 +174,7 @@ pub fn discover_blocks<'input, 'context: 'input>(
                     });
                     errors.push(CheckFailedError::MatchNoneForInvalidPattern {
                         span: label.span(),
-                        match_file: context.match_file(),
+                        match_file: context.source_file(label.span().source_id()).unwrap(),
                         error: Some(RelatedError::new(err)),
                     });
                 }
@@ -319,7 +319,7 @@ pub fn check_group<'section, 'input, 'a: 'input>(
                         input_file: context.input_file(),
                         labels: vec![RelatedLabel::error(
                             Label::new(info.pattern_span, "by this pattern"),
-                            context.match_file(),
+                            context.source_file(info.pattern_span.source_id()).unwrap(),
                         )],
                     },
                 )])])),
@@ -327,7 +327,7 @@ pub fn check_group<'section, 'input, 'a: 'input>(
                     // Something went wrong with this pattern
                     Err(CheckFailedError::MatchNoneErrorNote {
                         span: pattern.span(),
-                        match_file: context.match_file(),
+                        match_file: context.source_file(pattern.span().source_id()).unwrap(),
                         error: Some(RelatedError::new(err)),
                     })
                 }
@@ -384,7 +384,9 @@ pub fn check_group<'section, 'input, 'a: 'input>(
                             } else {
                                 test_result.failed(CheckFailedError::MatchGroupFailed {
                                     span: rule.span(),
-                                    match_file: context.match_file(),
+                                    match_file: context
+                                        .source_file(rule.span().source_id())
+                                        .unwrap(),
                                     cause,
                                     skipped,
                                 });
@@ -395,7 +397,7 @@ pub fn check_group<'section, 'input, 'a: 'input>(
                     Err(err) => {
                         test_result.failed(CheckFailedError::MatchNoneErrorNote {
                             span: rule.span(),
-                            match_file: context.match_file(),
+                            match_file: context.source_file(rule.span().source_id()).unwrap(),
                             error: Some(RelatedError::new(err)),
                         });
                     }
@@ -440,7 +442,7 @@ pub fn check_group<'section, 'input, 'a: 'input>(
                         } else {
                             test_result.failed(CheckFailedError::MatchRepeatedError {
                                 span: rule.span(),
-                                match_file: context.match_file(),
+                                match_file: context.source_file(rule.span().source_id()).unwrap(),
                                 n,
                                 count,
                                 related,
@@ -451,7 +453,7 @@ pub fn check_group<'section, 'input, 'a: 'input>(
                     Err(err) => {
                         test_result.failed(CheckFailedError::MatchNoneErrorNote {
                             span: rule.span(),
-                            match_file: context.match_file(),
+                            match_file: context.source_file(rule.span().source_id()).unwrap(),
                             error: Some(RelatedError::new(err)),
                         });
                         return Ok(Err(matched));
@@ -471,7 +473,7 @@ pub fn check_group<'section, 'input, 'a: 'input>(
             Err(err) => {
                 test_result.failed(CheckFailedError::MatchNoneErrorNote {
                     span: check_dag.span(),
-                    match_file: context.match_file(),
+                    match_file: context.source_file(check_dag.span().source_id()).unwrap(),
                     error: Some(RelatedError::new(err)),
                 });
                 Ok(Err(vec![]))
@@ -519,14 +521,23 @@ pub fn check_group<'section, 'input, 'a: 'input>(
                                                                     pattern_span,
                                                                     "matched by this pattern",
                                                                 ),
-                                                                context.match_file(),
+                                                                context
+                                                                    .source_file(
+                                                                        pattern_span.source_id(),
+                                                                    )
+                                                                    .unwrap(),
                                                             ),
                                                             RelatedLabel::warn(
                                                                 Label::new(
                                                                     right_pattern_span,
                                                                     "because it cannot be reordered past this pattern",
                                                                 ),
-                                                                context.match_file(),
+                                                                context
+                                                                    .source_file(
+                                                                        right_pattern_span
+                                                                            .source_id(),
+                                                                    )
+                                                                    .unwrap(),
                                                             ),
                                                             RelatedLabel::note(
                                                                 Label::point(
@@ -567,9 +578,18 @@ pub fn check_group<'section, 'input, 'a: 'input>(
                                                                 span,
                                                                 input_file: context.input_file(),
                                                                 labels: vec![
-                                                                    RelatedLabel::error(Label::new(pattern_span, "matched by this pattern"), context.match_file()),
-                                                                    RelatedLabel::warn(Label::new(right_pattern_span, "because it cannot be reordered past this pattern"), context.match_file()),
-                                                                    RelatedLabel::note(Label::point(context.input_file.id(), right_range.start as u32, "which begins here"), context.input_file()),
+                                                                    RelatedLabel::error(
+                                                                        Label::new(pattern_span, "matched by this pattern"),
+                                                                        context.source_file(pattern_span.source_id()).unwrap()
+                                                                    ),
+                                                                    RelatedLabel::warn(
+                                                                        Label::new(right_pattern_span, "because it cannot be reordered past this pattern"),
+                                                                        context.source_file(right_pattern_span.source_id()).unwrap()
+                                                                    ),
+                                                                    RelatedLabel::note(
+                                                                        Label::point(context.input_file.id(), right_range.start as u32, "which begins here"),
+                                                                        context.input_file()
+                                                                    ),
                                                                 ],
                                                                 note: None,
                                                             });
@@ -590,7 +610,9 @@ pub fn check_group<'section, 'input, 'a: 'input>(
                         Err(err) => {
                             test_result.failed(CheckFailedError::MatchNoneErrorNote {
                                 span: check_dag.span(),
-                                match_file: context.match_file(),
+                                match_file: context
+                                    .source_file(check_dag.span().source_id())
+                                    .unwrap(),
                                 error: Some(RelatedError::new(err)),
                             });
                             Ok(Ok(right_matches))
@@ -612,7 +634,7 @@ pub fn check_group<'section, 'input, 'a: 'input>(
                     Err(err) => {
                         test_result.failed(CheckFailedError::MatchNoneErrorNote {
                             span: check_dag.span(),
-                            match_file: context.match_file(),
+                            match_file: context.source_file(check_dag.span().source_id()).unwrap(),
                             error: Some(RelatedError::new(err)),
                         });
                         Ok(Err(right_matches))
@@ -630,7 +652,9 @@ pub fn check_group<'section, 'input, 'a: 'input>(
                         Err(left_err) => {
                             test_result.failed(CheckFailedError::MatchNoneErrorNote {
                                 span: check_dag.span(),
-                                match_file: context.match_file(),
+                                match_file: context
+                                    .source_file(check_dag.span().source_id())
+                                    .unwrap(),
                                 error: Some(RelatedError::new(left_err)),
                             });
                             Err(vec![])
@@ -638,7 +662,7 @@ pub fn check_group<'section, 'input, 'a: 'input>(
                     };
                     test_result.failed(CheckFailedError::MatchNoneErrorNote {
                         span: right.span(),
-                        match_file: context.match_file(),
+                        match_file: context.source_file(right.span().source_id()).unwrap(),
                         error: Some(RelatedError::new(Report::new(right_err))),
                     });
                     Ok(result)
@@ -702,9 +726,18 @@ fn check_tree<'input, 'a: 'input>(
                                         span: info.span,
                                         input_file: context.input_file(),
                                         labels: vec![
-                                            RelatedLabel::error(Label::new(info.pattern_span, "excluded by this pattern"), context.match_file()),
-                                            RelatedLabel::note(Label::new(right_pattern_span, "exclusion is bounded by this pattern"), context.match_file()),
-                                            RelatedLabel::note(Label::point(context.input_file.id(), right_start as u32, "which corresponds to this location in the input"), context.input_file()),
+                                            RelatedLabel::error(
+                                                Label::new(info.pattern_span, "excluded by this pattern"),
+                                                context.source_file(info.pattern_span.source_id()).unwrap(),
+                                            ),
+                                            RelatedLabel::note(
+                                                Label::new(right_pattern_span, "exclusion is bounded by this pattern"),
+                                                context.source_file(right_pattern_span.source_id()).unwrap(),
+                                            ),
+                                            RelatedLabel::note(
+                                                Label::point(context.input_file.id(), right_start as u32, "which corresponds to this location in the input"),
+                                                context.input_file()
+                                            ),
                                         ],
                                     })]));
                                 }
@@ -713,7 +746,9 @@ fn check_tree<'input, 'a: 'input>(
                                     matched.push(Matches::from_iter([MatchResult::failed(
                                         CheckFailedError::MatchNoneErrorNote {
                                             span: root.span(),
-                                            match_file: context.match_file(),
+                                            match_file: context
+                                                .source_file(root.span().source_id())
+                                                .unwrap(),
                                             error: Some(RelatedError::new(err)),
                                         },
                                     )]));
@@ -767,7 +802,9 @@ fn check_tree<'input, 'a: 'input>(
                                             input_file: context.input_file(),
                                             labels: vec![RelatedLabel::error(
                                                 Label::new(info.pattern_span, "by this pattern"),
-                                                context.match_file(),
+                                                context
+                                                    .source_file(info.pattern_span.source_id())
+                                                    .unwrap(),
                                             )],
                                         },
                                     )]));
@@ -777,7 +814,9 @@ fn check_tree<'input, 'a: 'input>(
                                     matched.push(Matches::from_iter([MatchResult::failed(
                                         CheckFailedError::MatchNoneErrorNote {
                                             span: root.span(),
-                                            match_file: context.match_file(),
+                                            match_file: context
+                                                .source_file(root.span().source_id())
+                                                .unwrap(),
                                             error: Some(RelatedError::new(err)),
                                         },
                                     )]));
@@ -820,7 +859,7 @@ fn check_tree<'input, 'a: 'input>(
                                     input_file: context.input_file(),
                                     labels: vec![RelatedLabel::error(
                                         Label::new(info.pattern_span, "by this pattern"),
-                                        context.match_file(),
+                                        context.source_file(info.pattern_span.source_id()).unwrap(),
                                     )],
                                 },
                             )]));
@@ -830,7 +869,9 @@ fn check_tree<'input, 'a: 'input>(
                             left_matched.push(Matches::from_iter([MatchResult::failed(
                                 CheckFailedError::MatchNoneErrorNote {
                                     span: root.span(),
-                                    match_file: context.match_file(),
+                                    match_file: context
+                                        .source_file(root.span().source_id())
+                                        .unwrap(),
                                     error: Some(RelatedError::new(err)),
                                 },
                             )]));
@@ -853,7 +894,7 @@ fn check_tree<'input, 'a: 'input>(
                                     input_file: context.input_file(),
                                     labels: vec![RelatedLabel::error(
                                         Label::new(info.pattern_span, "by this pattern"),
-                                        context.match_file(),
+                                        context.source_file(info.pattern_span.source_id()).unwrap(),
                                     )],
                                 },
                             )]));
@@ -863,7 +904,9 @@ fn check_tree<'input, 'a: 'input>(
                             left_matched.push(Matches::from_iter([MatchResult::failed(
                                 CheckFailedError::MatchNoneErrorNote {
                                     span: root.span(),
-                                    match_file: context.match_file(),
+                                    match_file: context
+                                        .source_file(root.span().source_id())
+                                        .unwrap(),
                                     error: Some(RelatedError::new(err)),
                                 },
                             )]));
@@ -899,7 +942,7 @@ fn check_tree<'input, 'a: 'input>(
                                     input_file: context.input_file(),
                                     labels: vec![RelatedLabel::error(
                                         Label::new(info.pattern_span, "by this pattern"),
-                                        context.match_file(),
+                                        context.source_file(info.pattern_span.source_id()).unwrap(),
                                     )],
                                 },
                             )]));
@@ -909,7 +952,9 @@ fn check_tree<'input, 'a: 'input>(
                             right_matched.push(Matches::from_iter([MatchResult::failed(
                                 CheckFailedError::MatchNoneErrorNote {
                                     span: root.span(),
-                                    match_file: context.match_file(),
+                                    match_file: context
+                                        .source_file(root.span().source_id())
+                                        .unwrap(),
                                     error: Some(RelatedError::new(err)),
                                 },
                             )]));

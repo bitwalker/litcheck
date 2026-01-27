@@ -34,7 +34,7 @@ impl<'a> CheckFile<'a> {
 
 /// A check line represents a line in a check file, and is associated with some
 /// check type and pattern.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CheckLine<'a> {
     /// Where in the source file that the check was specified
     pub span: SourceSpan,

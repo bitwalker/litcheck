@@ -140,7 +140,7 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
                 return Ok(MatchResult::failed(
                     CheckFailedError::MatchNoneButExpected {
                         span: self.span,
-                        match_file: context.match_file(),
+                        match_file: context.source_file(self.span.source_id()).unwrap(),
                         note: None,
                     },
                 ));
@@ -281,8 +281,9 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
         context: &ContextGuard<'_, 'input, 'context>,
     ) -> DiagResult<MatchResult<'input>> {
         log::trace!(target: "smart:searcher", "attempting to match regex pattern: {:?}", {
-            pattern_source.unwrap_or_else(|| {
-                core::str::from_utf8(&context.match_file_bytes()[span.into_slice_index()]).unwrap_or("<invalid utf8>")
+            pattern_source.map(Cow::Borrowed).unwrap_or_else(|| {
+                let source_file = context.source_file(span.source_id()).unwrap();
+                core::str::from_utf8(&source_file.as_bytes()[span.into_slice_index()]).unwrap_or("<invalid utf8>").to_string().into()
             })
         });
         log::trace!(target: "smart:searcher", "search starting at offset {}", self.cursor.start());
@@ -305,7 +306,7 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
             Ok(MatchResult::failed(
                 CheckFailedError::MatchNoneButExpected {
                     span,
-                    match_file: context.match_file(),
+                    match_file: context.source_file(span.source_id()).unwrap(),
                     note: None,
                 },
             ))
@@ -321,8 +322,9 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
         context: &ContextGuard<'_, 'input, 'context>,
     ) -> DiagResult<MatchResult<'input>> {
         log::trace!(target: "smart:searcher", "attempting to match capturing regex pattern: {:?}", {
-            pattern_source.unwrap_or_else(|| {
-                core::str::from_utf8(&context.match_file_bytes()[pattern_span.into_slice_index()]).unwrap_or("<invalid utf8>")
+            pattern_source.map(Cow::Borrowed).unwrap_or_else(|| {
+                let source_file = context.source_file(pattern_span.source_id()).unwrap();
+                core::str::from_utf8(&source_file.as_bytes()[pattern_span.into_slice_index()]).unwrap_or("<invalid utf8>").to_string().into()
             })
         });
         log::trace!(target: "smart:searcher", "search starting at offset {}", self.cursor.start());
@@ -391,7 +393,7 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
             Ok(MatchResult::failed(
                 CheckFailedError::MatchNoneButExpected {
                     span: pattern_span,
-                    match_file: context.match_file(),
+                    match_file: context.source_file(pattern_span.source_id()).unwrap(),
                     note: None,
                 },
             ))
@@ -411,7 +413,7 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
             return Ok(MatchResult::failed(
                 CheckFailedError::MatchNoneButExpected {
                     span,
-                    match_file: context.match_file(),
+                    match_file: context.source_file(span.source_id()).unwrap(),
                     note: Some(
                         "unable to match because end of the searchable input was reached"
                             .to_string(),
@@ -472,10 +474,9 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
                         CheckFailedError::MatchFoundConstraintFailed {
                             span,
                             input_file: context.input_file(),
-                            pattern: Some(RelatedCheckError {
-                                span,
-                                match_file: context.match_file(),
-                            }),
+                            pattern: context
+                                .source_file(span.source_id())
+                                .map(|match_file| RelatedCheckError { span, match_file }),
                             error: Some(RelatedError::new(Report::new(error))),
                             help: None,
                         },
@@ -485,7 +486,7 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
                 Ok(MatchResult::failed(
                     CheckFailedError::MatchNoneButExpected {
                         span,
-                        match_file: context.match_file(),
+                        match_file: context.source_file(span.source_id()).unwrap(),
                         note: None,
                     },
                 ))
@@ -509,7 +510,7 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
             Ok(MatchResult::failed(
                 CheckFailedError::MatchNoneButExpected {
                     span,
-                    match_file: context.match_file(),
+                    match_file: context.source_file(span.source_id()).unwrap(),
                     note: None,
                 },
             ))
@@ -543,13 +544,13 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
                     input_file: context.input_file(),
                     pattern: Some(RelatedCheckError {
                         span,
-                        match_file: context.match_file(),
+                        match_file: context.source_file(span.source_id()).unwrap(),
                     }),
                     error: Some(RelatedError::new(Report::new(InvalidNumericCastError {
                         span: Some(span),
                         kind: std::num::IntErrorKind::InvalidDigit,
                         specific_span: Some(expr.span()),
-                        match_file: context.match_file(),
+                        match_file: context.source_file(span.source_id()).unwrap(),
                     }))),
                     help: Some(
                         "the expression evaluated to a string, but a number was expected"
@@ -626,19 +627,19 @@ fn evaluate_expr<'input>(
             let value = match var {
                 VariableName::User(name) | VariableName::Global(name) => {
                     let env = context.env();
-                    let value = env.get(var).cloned().ok_or_else(|| {
-                        let match_file = context.match_file();
-                        UndefinedVariableError {
+                    let value = env
+                        .get(var)
+                        .cloned()
+                        .ok_or_else(|| UndefinedVariableError {
                             span: var_span,
-                            match_file,
+                            match_file: context.source_file(var_span.source_id()).unwrap(),
                             name: name.into_inner(),
-                        }
-                    })?;
+                        })?;
                     match value {
                         Value::Undef => {
                             return Err(Report::new(UndefinedVariableError {
                                 span: var_span,
-                                match_file: context.match_file(),
+                                match_file: context.source_file(var_span.source_id()).unwrap(),
                                 name: name.into_inner(),
                             }));
                         }
@@ -658,7 +659,7 @@ fn evaluate_expr<'input>(
                     name => {
                         return Err(Report::new(UndefinedVariableError {
                             span: var_span,
-                            match_file: context.match_file(),
+                            match_file: context.source_file(var_span.source_id()).unwrap(),
                             name,
                         }));
                     }
@@ -737,13 +738,13 @@ fn evaluate_expr<'input>(
                     span: Some(op_span),
                     kind: std::num::IntErrorKind::InvalidDigit,
                     specific_span: Some(rhs.span()),
-                    match_file: context.match_file(),
+                    match_file: context.source_file(op_span.source_id()).unwrap(),
                 })),
                 (Right(_), _) => Err(Report::new(InvalidNumericCastError {
                     span: Some(op_span),
                     kind: std::num::IntErrorKind::InvalidDigit,
                     specific_span: Some(lhs.span()),
-                    match_file: context.match_file(),
+                    match_file: context.source_file(op_span.source_id()).unwrap(),
                 })),
             }
         }

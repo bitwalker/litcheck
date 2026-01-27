@@ -160,7 +160,9 @@ impl<'a> Matcher for RegexMatcher<'a> {
             Ok(MatchResult::failed(
                 CheckFailedError::MatchNoneButExpected {
                     span: self.pattern.span(),
-                    match_file: context.match_file(),
+                    match_file: context
+                        .source_file(self.pattern.span().source_id())
+                        .unwrap(),
                     note: None,
                 },
             ))
@@ -201,7 +203,7 @@ where
                         input_file: context.input_file(),
                         pattern: Some(RelatedCheckError {
                             span: pattern_span,
-                            match_file: context.match_file(),
+                            match_file: context.source_file(pattern_span.source_id()).unwrap(),
                         }),
                         error: Some(RelatedError::new(Report::new(error))),
                         help: Some(if let Some(name) = name {

@@ -31,7 +31,7 @@ impl<'input> Operand<'input> {
                 span: Some(span),
                 kind: std::num::IntErrorKind::Empty,
                 specific_span: None,
-                match_file: context.match_file(),
+                match_file: context.source_file(span.source_id()).unwrap(),
             }),
             Value::Str(value) => {
                 let value = match format.unwrap_or_default() {
@@ -66,7 +66,7 @@ impl<'input> Operand<'input> {
                                     span: Some(span),
                                     kind: std::num::IntErrorKind::InvalidDigit,
                                     specific_span: None,
-                                    match_file: context.match_file(),
+                                    match_file: context.source_file(span.source_id()).unwrap(),
                                 });
                             }
                         } else {
@@ -77,7 +77,7 @@ impl<'input> Operand<'input> {
                                 span: Some(span),
                                 kind: std::num::IntErrorKind::PosOverflow,
                                 specific_span: None,
-                                match_file: context.match_file(),
+                                match_file: context.source_file(span.source_id()).unwrap(),
                             });
                         }
 
@@ -90,7 +90,7 @@ impl<'input> Operand<'input> {
                                     span: Some(span),
                                     kind: *err.kind(),
                                     specific_span: None,
-                                    match_file: context.match_file(),
+                                    match_file: context.source_file(span.source_id()).unwrap(),
                                 }
                             })?
                         }
@@ -122,7 +122,7 @@ fn parse_number(
                 span: Some(span),
                 kind: std::num::IntErrorKind::PosOverflow,
                 specific_span: None,
-                match_file: context.match_file(),
+                match_file: context.source_file(span.source_id()).unwrap(),
             });
         }
         let value = value.trim_start_matches('0');
@@ -139,14 +139,14 @@ fn parse_number(
             span: Some(span),
             kind: *err.kind(),
             specific_span: None,
-            match_file: context.match_file(),
+            match_file: context.source_file(span.source_id()).unwrap(),
         })?;
     if !signed && value < 0 {
         return Err(InvalidNumericCastError {
             span: Some(span),
             kind: std::num::IntErrorKind::NegOverflow,
             specific_span: None,
-            match_file: context.match_file(),
+            match_file: context.source_file(span.source_id()).unwrap(),
         });
     }
     Ok(value)

@@ -114,7 +114,7 @@ impl FromStr for Check {
 }
 
 /// This represents the complete type of a CHECK* directive
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CheckType {
     span: SourceSpan,
     /// The kind of directive represented

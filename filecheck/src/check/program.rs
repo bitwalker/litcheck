@@ -188,7 +188,7 @@ pub struct CheckProgram<'a> {
 impl<'a> CheckProgram<'a> {
     pub fn compile(check_file: CheckFile<'a>, config: &Config) -> DiagResult<Self> {
         let lines = check_file.into_lines();
-        if lines.is_empty() {
+        if lines.is_empty() && config.options.implicit_check_not.is_empty() {
             return Err(Report::from(InvalidCheckFileError::Empty));
         }
 
@@ -207,11 +207,54 @@ impl<'a> CheckProgram<'a> {
         let mut label = None;
         let mut block = vec![];
         let mut blocks: VecDeque<(Option<CheckLine<'a>>, Vec<CheckLine<'a>>)> = VecDeque::default();
+
+        // If --implicit-check-not was set, construct a CheckLine that will be inserted at the start
+        // of the file, as well as between all positive checks.
+        let implicit_check_not_pattern = if config.options.implicit_check_not.is_empty() {
+            None
+        } else {
+            // We construct a single check line representing the conjunction of all the
+            // --implicit-check-not patterns to avoid scanning the same portions of the file over
+            // and over again. We create a pseudo-source file containing the constructed pattern to
+            // be used in diagnostics.
+            let mut pattern = String::new();
+            for (i, implicit_check_not_pattern) in
+                config.options.implicit_check_not.iter().enumerate()
+            {
+                if i > 0 {
+                    pattern.push('|');
+                }
+                pattern.push('(');
+                pattern.push_str(implicit_check_not_pattern.as_str());
+                pattern.push(')');
+            }
+            let source = config
+                .source_manager()
+                .load_argument("--implicit-check-not", pattern.clone());
+            let span = source.source_span();
+            Some(CheckLine::new(
+                span,
+                CheckType::new(span, Check::Not),
+                CheckPattern::Regex(RegexPattern::new(Span::new(span, pattern.into()))),
+            ))
+        };
+
+        // Insert the --implicit-check-not pattern at the start of the file, to ensure that at least
+        // one instance appears between the start of the file and the first positive check, and so
+        // at a minimum an otherwise empty check file will contain at least this one check.
+        if let Some(implicit_check_not_pattern) = implicit_check_not_pattern.as_ref() {
+            block.push(implicit_check_not_pattern.clone());
+        }
+
         while let Some(next) = iter.peek() {
             match next.kind() {
                 Check::Label => {
                     if !block.is_empty() {
                         blocks.push_back((label.take(), core::mem::take(&mut block)));
+                        // Insert the --implicit-check-not pattern at the start of any new block
+                        if let Some(implicit_check_not) = implicit_check_not_pattern.as_ref() {
+                            block.push(implicit_check_not.clone());
+                        }
                     }
                     label = iter.next();
                     while let Some(next) = iter.peek() {
@@ -225,7 +268,9 @@ impl<'a> CheckProgram<'a> {
                         }
                     }
                 }
-                Check::Empty | Check::Same | Check::Next if block.is_empty() && label.is_none() => {
+                Check::Empty | Check::Same | Check::Next
+                    if !can_insert_dependent_positive_check(&block, label.as_ref()) =>
+                {
                     return Err(Report::from(InvalidCheckFileError::InvalidFirstCheck {
                         kind: next.kind(),
                         line: next.span(),
@@ -235,9 +280,18 @@ impl<'a> CheckProgram<'a> {
                 | Check::Count(_)
                 | Check::Next
                 | Check::Same
-                | Check::Not
                 | Check::Dag
                 | Check::Empty => {
+                    block.push(iter.next().unwrap());
+
+                    // Insert the --implicit-check-not pattern after every positive check
+                    if let Some(implicit_check_not) = implicit_check_not_pattern.as_ref() {
+                        block.push(implicit_check_not.clone());
+                    }
+                }
+                Check::Not => {
+                    // Since CHECK-NOT is a negative check, we do not insert --implicit-check-not
+                    // patterns after them
                     block.push(iter.next().unwrap());
                 }
                 _ => unreachable!(),
@@ -486,4 +540,26 @@ impl<'a> CheckProgram<'a> {
             kind => unreachable!("we should never be compiling a rule for {kind} here"),
         }
     }
+}
+
+/// Returns true if we can insert a dependent positive check (i.e. CHECK-EMPTY, CHECK-SAME, or
+/// CHECK-NEXT) into the current block (with optional label).
+///
+/// The only criteria for this to return true, is that either the label is set (by definition a
+/// non-dependent positive check), or the block is non-empty and contains at least one non-dependent
+/// positive check (i.e. CHECK-LABEL, CHECK-PLAIN, CHECK-COUNT, or CHECK-DAG)
+fn can_insert_dependent_positive_check(
+    block: &[CheckLine<'_>],
+    label: Option<&CheckLine<'_>>,
+) -> bool {
+    if label.is_some() {
+        return true;
+    }
+
+    block.iter().any(|line| {
+        matches!(
+            line.ty.kind,
+            Check::Label | Check::Plain | Check::Count(_) | Check::Dag
+        )
+    })
 }
