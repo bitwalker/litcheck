@@ -645,7 +645,7 @@ checksum = "df1d3c3b53da64cf5760482273a98e575c651a67eec7f77df96b5b642de8f039"
 
 [[package]]
 name = "litcheck"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -666,7 +666,7 @@ dependencies = [
 
 [[package]]
 name = "litcheck-core"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "Inflector",
  "anyhow",
@@ -693,7 +693,7 @@ dependencies = [
 
 [[package]]
 name = "litcheck-filecheck"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -722,7 +722,7 @@ dependencies = [
 
 [[package]]
 name = "litcheck-lit"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "anyhow",
  "clap",
