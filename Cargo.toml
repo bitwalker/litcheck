@@ -8,7 +8,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.3.2"
+version = "0.4.0"
 rust-version = "1.90"
 authors = ["Paul Schoenfelder"]
 repository = "https://github.com/bitwalker/litcheck"
@@ -44,9 +44,9 @@ target-lexicon = "0.13"
 thiserror = "2.0"
 toml = { version = "0.9", features = ["preserve_order"] }
 
-litcheck = { version = "0.3.0", package = "litcheck-core", path = "./core" }
-filecheck = { version = "0.3.0", package = "litcheck-filecheck", path = "./filecheck" }
-lit = { version = "0.3.0", package = "litcheck-lit", path = "./lit" }
+litcheck = { version = "0.4.0", package = "litcheck-core", path = "./core" }
+filecheck = { version = "0.4.0", package = "litcheck-filecheck", path = "./filecheck" }
+lit = { version = "0.4.0", package = "litcheck-lit", path = "./lit" }
 
 [profile.release]
 opt-level = 2
