@@ -74,6 +74,8 @@ impl TestFormat for ShTest {
             }
         };
 
+        log::trace!(target: "lit:shtest", "compiled test script (no substitutions): {script:#?}");
+
         // Enforce requires
         if let Some(missing_features) = test.config.missing_features(&script.requires) {
             return Ok(

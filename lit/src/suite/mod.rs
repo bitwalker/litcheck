@@ -130,6 +130,8 @@ impl TestSuite {
 
         let parent_dir = path.parent().unwrap();
 
+        log::trace!(target: "lit:suite", "parent directory for suite is {}", parent_dir.display());
+
         if suite.source_dir() == Path::new("") {
             *suite.source_dir.get_mut() = Cow::Owned(parent_dir.to_path_buf());
         } else if suite.source_dir().is_relative() {
@@ -143,6 +145,7 @@ impl TestSuite {
                         path: suite.source_dir.get_ref().to_path_buf(),
                         cause: err,
                     })
+                    .with_source_code(source.clone())
                 })?;
             *suite.source_dir.get_mut() = Cow::Owned(source_dir);
         } else {
@@ -153,6 +156,7 @@ impl TestSuite {
                     path: suite.source_dir.get_ref().to_path_buf(),
                     cause: err,
                 })
+                .with_source_code(source.clone())
             })?;
             if suite.source_dir() != source_dir.as_path() {
                 *suite.source_dir.get_mut() = Cow::Owned(source_dir);
@@ -181,16 +185,16 @@ impl TestSuite {
             suite.temp_dir = Some(temp_dir);
         } else if suite.working_dir().is_relative() {
             let span = suite.working_dir.span();
-            let working_dir = parent_dir
-                .join(suite.working_dir.get_ref())
-                .canonicalize()
-                .map_err(|err| {
-                    Report::new(TestSuiteError::CouldNotCanonicalizePath {
-                        span: SourceSpan::from_range_unchecked(source.id(), span),
-                        path: suite.working_dir.get_ref().to_path_buf(),
-                        cause: err,
-                    })
-                })?;
+            let working_dir = parent_dir.join(suite.working_dir.get_ref());
+            log::trace!(target: "lit:suite", "working dir (relative) is {}", working_dir.display());
+            let working_dir = working_dir.canonicalize().map_err(|err| {
+                Report::new(TestSuiteError::CouldNotCanonicalizePath {
+                    span: SourceSpan::from_range_unchecked(source.id(), span),
+                    path: suite.working_dir.get_ref().to_path_buf(),
+                    cause: err,
+                })
+                .with_source_code(source.clone())
+            })?;
             *suite.working_dir.get_mut() = Cow::Owned(working_dir);
         } else {
             let span = suite.working_dir.span();
