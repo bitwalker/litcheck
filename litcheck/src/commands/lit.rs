@@ -2,8 +2,8 @@ use std::{
     collections::BTreeMap,
     process::ExitCode,
     sync::{
-        mpsc::{self, Sender},
         Arc,
+        mpsc::{self, Sender},
     },
 };
 

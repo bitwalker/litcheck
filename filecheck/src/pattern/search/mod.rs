@@ -5,8 +5,8 @@ mod regex;
 mod substring_set;
 
 pub use self::aho_corasick::AhoCorasickSearcher;
-pub use self::pattern_set::PatternSetSearcher;
 pub use self::r#default::DefaultSearcher;
+pub use self::pattern_set::PatternSetSearcher;
 pub use self::regex::RegexSearcher;
 pub use self::substring_set::SubstringSetSearcher;
 pub use crate::pattern::matcher::RegexSetSearcher;
