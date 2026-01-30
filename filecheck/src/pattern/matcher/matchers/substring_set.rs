@@ -465,10 +465,14 @@ CHECK-DAG: @sub1
 "
         );
         let input_file = source_file!(context.config, INPUT);
-        context.with_checks(match_file).with_input(input_file);
+        context
+            .with_checks(match_file.clone())
+            .with_input(input_file);
 
-        let pattern1 = Span::new(SourceSpan::UNKNOWN, Cow::Borrowed("@inc4"));
-        let pattern2 = Span::new(SourceSpan::UNKNOWN, Cow::Borrowed("@sub1"));
+        let pattern1_span = SourceSpan::from_range_unchecked(match_file.id(), 13..18);
+        let pattern1 = Span::new(pattern1_span, Cow::Borrowed("@inc4"));
+        let pattern2_span = SourceSpan::from_range_unchecked(match_file.id(), 30..35);
+        let pattern2 = Span::new(pattern2_span, Cow::Borrowed("@sub1"));
         let mut builder = SubstringSetMatcher::build();
         builder
             .with_patterns([pattern1, pattern2])
