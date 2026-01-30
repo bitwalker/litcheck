@@ -132,11 +132,31 @@ impl TestSuite {
 
         if suite.source_dir() == Path::new("") {
             *suite.source_dir.get_mut() = Cow::Owned(parent_dir.to_path_buf());
-        }
-
-        if suite.source_dir().is_relative() {
-            let source_dir = parent_dir.join(suite.source_dir.get_ref());
+        } else if suite.source_dir().is_relative() {
+            let span = suite.source_dir.span();
+            let source_dir = parent_dir
+                .join(suite.source_dir.get_ref())
+                .canonicalize()
+                .map_err(|err| {
+                    Report::new(TestSuiteError::CouldNotCanonicalizePath {
+                        span: SourceSpan::from_range_unchecked(source.id(), span),
+                        path: suite.source_dir.get_ref().to_path_buf(),
+                        cause: err,
+                    })
+                })?;
             *suite.source_dir.get_mut() = Cow::Owned(source_dir);
+        } else {
+            let span = suite.source_dir.span();
+            let source_dir = suite.source_dir.get_ref().canonicalize().map_err(|err| {
+                Report::new(TestSuiteError::CouldNotCanonicalizePath {
+                    span: SourceSpan::from_range_unchecked(source.id(), span),
+                    path: suite.source_dir.get_ref().to_path_buf(),
+                    cause: err,
+                })
+            })?;
+            if suite.source_dir() != source_dir.as_path() {
+                *suite.source_dir.get_mut() = Cow::Owned(source_dir);
+            }
         }
 
         if !suite.source_dir().is_dir() {
@@ -160,8 +180,30 @@ impl TestSuite {
             *suite.working_dir.get_mut() = Cow::Owned(temp_dir.path().to_path_buf());
             suite.temp_dir = Some(temp_dir);
         } else if suite.working_dir().is_relative() {
-            let working_dir = parent_dir.join(suite.working_dir.get_ref());
+            let span = suite.working_dir.span();
+            let working_dir = parent_dir
+                .join(suite.working_dir.get_ref())
+                .canonicalize()
+                .map_err(|err| {
+                    Report::new(TestSuiteError::CouldNotCanonicalizePath {
+                        span: SourceSpan::from_range_unchecked(source.id(), span),
+                        path: suite.working_dir.get_ref().to_path_buf(),
+                        cause: err,
+                    })
+                })?;
             *suite.working_dir.get_mut() = Cow::Owned(working_dir);
+        } else {
+            let span = suite.working_dir.span();
+            let working_dir = suite.working_dir.get_ref().canonicalize().map_err(|err| {
+                Report::new(TestSuiteError::CouldNotCanonicalizePath {
+                    span: SourceSpan::from_range_unchecked(source.id(), span),
+                    path: suite.working_dir.get_ref().to_path_buf(),
+                    cause: err,
+                })
+            })?;
+            if suite.working_dir() != working_dir.as_path() {
+                *suite.working_dir.get_mut() = Cow::Owned(working_dir);
+            }
         }
 
         if !suite.working_dir().is_dir() {

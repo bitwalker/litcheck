@@ -37,4 +37,12 @@ pub enum TestSuiteError {
         span: SourceSpan,
         working_dir: PathBuf,
     },
+    #[error("invalid test suite configuration")]
+    #[diagnostic()]
+    CouldNotCanonicalizePath {
+        #[label("could not canonicalize '{}': {cause}", .path.display())]
+        span: SourceSpan,
+        path: PathBuf,
+        cause: std::io::Error,
+    },
 }
