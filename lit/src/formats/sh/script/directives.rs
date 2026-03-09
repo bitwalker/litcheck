@@ -1,6 +1,6 @@
 use std::{any::Any, fmt, str::FromStr};
 
-use litcheck::diagnostics::{Diagnostic, SourceId, SourceSpan, Span, Spanned};
+use litcheck::diagnostics::{miette, Diagnostic, SourceId, SourceSpan, Span, Spanned};
 use regex::Regex;
 
 use crate::config::ScopedSubstitutionSet;

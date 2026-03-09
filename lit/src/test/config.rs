@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, path::Path};
 
 use litcheck::{
-    diagnostics::{DiagResult, Diagnostic, IntoDiagnostic, Report, SourceSpan},
+    diagnostics::{miette, DiagResult, Diagnostic, IntoDiagnostic, Report, SourceSpan},
     fs::PatternSet,
     Input, StaticCow,
 };

@@ -23,6 +23,8 @@ use std::sync::Arc;
 #[doc(hidden)]
 pub use litcheck;
 
+extern crate self as litcheck_filecheck;
+
 pub(crate) mod common {
     pub use std::{
         borrow::Cow,
@@ -39,7 +41,7 @@ pub(crate) mod common {
         diagnostics::{
             Diag, DiagResult, Diagnostic, FileName, Label, LabeledSpan, Report, SourceFile,
             SourceId, SourceLanguage, SourceManager, SourceManagerError, SourceManagerExt,
-            SourceSpan, Span, Spanned,
+            SourceSpan, Span, Spanned, miette,
         },
         range::{self, Range},
         symbols,
@@ -438,17 +440,18 @@ fn prefix_value_parser() -> ValueParser {
 #[macro_export]
 macro_rules! filecheck {
     ($input:expr, $checks:expr) => {
-        $crate::filecheck!($input, $checks, $crate::Config::default())
+        ::litcheck_filecheck::filecheck!($input, $checks, ::litcheck_filecheck::Config::default())
     };
 
     ($input:expr, $checks:expr, $config:expr) => {{
+        #[allow(unused)]
         let config = $config;
-        let input = $crate::source_file!(config, $input.to_string());
-        let checks = $crate::source_file!(config, $checks.to_string());
-        let mut test = $crate::Test::new(checks, &config);
+        let input = ::litcheck_filecheck::source_file!(config, $input.to_string());
+        let checks = ::litcheck_filecheck::source_file!(config, $checks.to_string());
+        let mut test = ::litcheck_filecheck::Test::new(checks, &config);
         match test.verify(input) {
             Err(err) => {
-                let printer = $crate::litcheck::reporting::PrintDiagnostic::new(err);
+                let printer = ::litcheck_filecheck::litcheck::reporting::PrintDiagnostic::new(err);
                 panic!("{printer}");
             }
             Ok(matches) => matches,

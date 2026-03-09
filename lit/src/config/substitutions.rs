@@ -1,9 +1,7 @@
-#![expect(unused_assignments)]
-
 use std::{borrow::Borrow, borrow::Cow, hash::Hash};
 
 use litcheck::{
-    diagnostics::{Diagnostic, SourceSpan, Span},
+    diagnostics::{miette, Diagnostic, SourceSpan, Span},
     StaticCow,
 };
 use serde::Deserialize;

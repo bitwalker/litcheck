@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use litcheck::diagnostics::{Diagnostic, SourceSpan};
+use litcheck::diagnostics::{miette, Diagnostic, SourceSpan};
 
 use crate::test::TestConfigError;
 

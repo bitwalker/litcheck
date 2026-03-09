@@ -1,10 +1,8 @@
-#![expect(unused_assignments)]
-
 use std::{borrow::Borrow, collections::BTreeSet, fmt, ops::Range, str::FromStr};
 
 use regex::Regex;
 
-use litcheck::diagnostics::{Diagnostic, SourceId, SourceSpan, Span};
+use litcheck::diagnostics::{miette, Diagnostic, SourceId, SourceSpan, Span};
 
 use crate::config::FeatureSet;
 

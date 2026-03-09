@@ -1,4 +1,4 @@
-use litcheck::diagnostics::{Diagnostic, SourceSpan};
+use litcheck::diagnostics::{Diagnostic, SourceSpan, miette};
 
 #[derive(Debug, Diagnostic, thiserror::Error, Clone)]
 pub enum LexerError {

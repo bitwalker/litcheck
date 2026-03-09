@@ -14,7 +14,7 @@ pub use self::suite::{
 };
 pub use self::test::{Test, TestConfig, TestConfigError, TestRegistry, TestResult, TestStatus};
 
-use litcheck::diagnostics::Diagnostic;
+use litcheck::diagnostics::{miette, Diagnostic};
 
 pub type FxIndexMap<K, V> =
     indexmap::IndexMap<K, V, core::hash::BuildHasherDefault<rustc_hash::FxHasher>>;

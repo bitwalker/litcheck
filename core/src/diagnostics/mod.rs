@@ -23,8 +23,8 @@ pub use self::{
 };
 
 pub use miette::{
-    Diagnostic, IntoDiagnostic, LabeledSpan, Report, Severity, SourceCode, SourceOffset, WrapErr,
-    bail, diagnostic,
+    self, Diagnostic, IntoDiagnostic, LabeledSpan, Report, Severity, SourceCode, SourceOffset,
+    WrapErr, bail, diagnostic,
 };
 
 #[cfg(feature = "fancy-diagnostics")]

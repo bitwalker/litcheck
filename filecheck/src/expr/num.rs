@@ -1,5 +1,3 @@
-#![expect(unused_assignments)]
-
 use crate::common::*;
 
 #[derive(Debug, Diagnostic, thiserror::Error)]

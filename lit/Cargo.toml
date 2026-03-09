@@ -13,10 +13,9 @@ license.workspace = true
 
 [features]
 default = ["fancy-diagnostics"]
-fancy-diagnostics = ["miette/fancy", "litcheck/fancy-diagnostics", "dep:console"]
+fancy-diagnostics = ["litcheck/fancy-diagnostics", "dep:console"]
 
 [dependencies]
-anyhow.workspace = true
 clap.workspace = true
 console = { workspace = true, optional = true }
 indexmap = { version = "2.1", features = ["serde"] }
@@ -24,7 +23,6 @@ itertools.workspace = true
 litcheck.workspace = true
 log.workspace = true
 intrusive-collections.workspace = true
-miette.workspace = true
 parking_lot.workspace = true
 rayon.workspace = true
 regex.workspace = true

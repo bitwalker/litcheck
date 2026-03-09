@@ -16,18 +16,15 @@ default = []
 fancy-diagnostics = ["miette/fancy"]
 
 [dependencies]
-anyhow.workspace = true
 clap.workspace = true
 compact_str.workspace = true
 either.workspace = true
 glob = "0.3"
-lock_api = "0.4"
 log.workspace = true
 miette.workspace = true
 memchr.workspace = true
 paste = "1.0"
 parking_lot.workspace = true
-rustc-hash.workspace = true
 serde.workspace = true
 serde_spanned = "1.0"
 smallvec.workspace = true
@@ -42,3 +39,9 @@ Inflector = "0.11"
 hashbrown.workspace = true
 rustc-hash.workspace = true
 toml.workspace = true
+
+[package.metadata.cargo-machete]
+ignored = [
+    "Inflector",
+    "hashbrown",
+]

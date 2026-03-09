@@ -1,5 +1,3 @@
-#![expect(unused_assignments)]
-
 pub mod directives;
 mod parser;
 #[cfg(test)]
@@ -8,7 +6,7 @@ mod tests;
 use std::{borrow::Cow, sync::Arc};
 
 use litcheck::diagnostics::{
-    DiagResult, Diagnostic, FileName, SourceFile, SourceSpan, Span, Spanned,
+    miette, DiagResult, Diagnostic, FileName, SourceFile, SourceSpan, Span, Spanned,
 };
 
 use self::directives::*;
