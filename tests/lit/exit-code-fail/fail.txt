@@ -1,0 +1,5 @@
+; This test always fails, it exists to verify that `lit run` exits with a
+; non-zero status code when a test fails.
+; RUN: echo hello | filecheck %s
+
+; CHECK: goodbye

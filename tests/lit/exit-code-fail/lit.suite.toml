@@ -1,0 +1,4 @@
+name = "exit-code-fail"
+patterns = ["*.txt"]
+
+[format.shtest]
