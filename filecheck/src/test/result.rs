@@ -88,8 +88,7 @@ impl TestResult {
 
     pub fn into_result(mut self) -> Result<Vec<MatchInfo<'static>>, TestFailed> {
         if self.is_ok() {
-            self.matches
-                .sort_by(|a, b| a.pattern_span.start().cmp(&b.pattern_span.start()));
+            self.matches.sort_by_key(|a| a.pattern_span.start());
             Ok(self.matches)
         } else {
             Err(self.error)

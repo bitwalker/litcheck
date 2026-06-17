@@ -569,31 +569,52 @@ pub fn check_group<'section, 'input, 'a: 'input>(
                                                 }
                                                 | CheckFailedError::MatchFoundButDiscarded {
                                                     ..
-                                                } => {
-                                                    if span.start().to_usize() >= right_range.start
-                                                        || span.end().to_usize()
-                                                            >= right_range.start
-                                                    {
-                                                        *mr = MatchResult::failed(CheckFailedError::MatchFoundButDiscarded {
-                                                                span,
-                                                                input_file: context.input_file(),
-                                                                labels: vec![
-                                                                    RelatedLabel::error(
-                                                                        Label::new(pattern_span, "matched by this pattern"),
-                                                                        context.source_file(pattern_span.source_id()).unwrap()
+                                                } if (span.start().to_usize()
+                                                    >= right_range.start
+                                                    || span.end().to_usize()
+                                                        >= right_range.start) =>
+                                                {
+                                                    *mr = MatchResult::failed(
+                                                        CheckFailedError::MatchFoundButDiscarded {
+                                                            span,
+                                                            input_file: context.input_file(),
+                                                            labels: vec![
+                                                                RelatedLabel::error(
+                                                                    Label::new(
+                                                                        pattern_span,
+                                                                        "matched by this pattern",
                                                                     ),
-                                                                    RelatedLabel::warn(
-                                                                        Label::new(right_pattern_span, "because it cannot be reordered past this pattern"),
-                                                                        context.source_file(right_pattern_span.source_id()).unwrap()
+                                                                    context
+                                                                        .source_file(
+                                                                            pattern_span
+                                                                                .source_id(),
+                                                                        )
+                                                                        .unwrap(),
+                                                                ),
+                                                                RelatedLabel::warn(
+                                                                    Label::new(
+                                                                        right_pattern_span,
+                                                                        "because it cannot be reordered past this pattern",
                                                                     ),
-                                                                    RelatedLabel::note(
-                                                                        Label::point(context.input_file.id(), right_range.start as u32, "which begins here"),
-                                                                        context.input_file()
+                                                                    context
+                                                                        .source_file(
+                                                                            right_pattern_span
+                                                                                .source_id(),
+                                                                        )
+                                                                        .unwrap(),
+                                                                ),
+                                                                RelatedLabel::note(
+                                                                    Label::point(
+                                                                        context.input_file.id(),
+                                                                        right_range.start as u32,
+                                                                        "which begins here",
                                                                     ),
-                                                                ],
-                                                                note: None,
-                                                            });
-                                                    }
+                                                                    context.input_file(),
+                                                                ),
+                                                            ],
+                                                            note: None,
+                                                        },
+                                                    );
                                                 }
                                                 _ => (),
                                             }
