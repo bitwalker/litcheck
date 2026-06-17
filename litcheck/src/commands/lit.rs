@@ -263,7 +263,14 @@ where
 
     print_results(&results_by_status, &config);
 
-    Ok(ExitCode::SUCCESS)
+    // Exit with a non-zero status code if any tests failed, or if the run
+    // was aborted before all tests could be executed.
+    let any_failed = results_by_status.keys().any(|status| status.is_failure());
+    if any_failed || result.is_err() {
+        Ok(ExitCode::FAILURE)
+    } else {
+        Ok(ExitCode::SUCCESS)
+    }
 }
 
 enum SelectResult {
