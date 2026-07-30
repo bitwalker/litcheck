@@ -195,7 +195,7 @@ where
     for test in registry.tests() {
         println!(
             "  {}::{} (format={})",
-            &test.suite.name(),
+            test.suite.name(),
             test.path.display(),
             test.config.format.name()
         );

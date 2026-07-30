@@ -138,7 +138,7 @@ impl TestSuiteRegistry for DefaultTestSuiteRegistry {
         };
 
         if let Some(suite) = self.find_nearest_suite(&input_path, search_root, config)? {
-            log::debug!("resolved input {} to {}", input.display(), &suite.id());
+            log::debug!("resolved input {} to {}", input.display(), suite.id());
             let suite_source_dir = suite.source_dir();
             let filter_path = input_path.strip_prefix(suite_source_dir).expect(
                 "test suite source directory should have been an ancestor of the input path",
@@ -146,7 +146,7 @@ impl TestSuiteRegistry for DefaultTestSuiteRegistry {
             if filter_path != Path::new("") {
                 log::debug!(
                     "filtering suite '{}' by path: '{}'",
-                    &suite.id(),
+                    suite.id(),
                     filter_path.display()
                 );
                 suite.filter_by_path(filter_path);

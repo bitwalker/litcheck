@@ -186,6 +186,7 @@ where
     }))
 }
 
+#[expect(clippy::result_large_err)]
 fn capture_group_to_capture_info<'input, 'context, C>(
     overall_span: SourceSpan,
     pattern_span: SourceSpan,

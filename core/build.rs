@@ -136,7 +136,7 @@ fn main() {
                     reserved.insert(id),
                     "duplicate symbol id {} in section {}",
                     id,
-                    &section.name
+                    section.name
                 );
             }
         }

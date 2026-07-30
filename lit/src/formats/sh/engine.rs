@@ -87,7 +87,7 @@ fn write_script(script: &TestScript, pipefail: bool) -> Vec<u8> {
             &mut buf,
             "echo 'RUN at line {}': {} >&2 && ",
             test.line(),
-            &quoted
+            quoted
         )
         .unwrap();
         buf.push_str("{ set -x; } 2>/dev/null && {\n");

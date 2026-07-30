@@ -178,7 +178,7 @@ impl TestSuite {
                 .wrap_err_with(|| {
                     format!(
                         "failed to create temporary directory for test suite at '{}'",
-                        &TestSuiteKey::new(suite.name.clone(), suite.path.clone()),
+                        TestSuiteKey::new(suite.name.clone(), suite.path.clone()),
                     )
                 })?;
             *suite.working_dir.get_mut() = Cow::Owned(temp_dir.path().to_path_buf());

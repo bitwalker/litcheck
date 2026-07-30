@@ -289,6 +289,7 @@ pub fn check_group_sections<'input, 'a: 'input>(
     }
 }
 
+#[expect(clippy::result_large_err)]
 pub fn check_group<'section, 'input, 'a: 'input>(
     group: &'section CheckGroup<'a>,
     test_result: &mut TestResult,
@@ -692,6 +693,7 @@ pub fn check_group<'section, 'input, 'a: 'input>(
     }
 }
 
+#[expect(clippy::result_large_err)]
 fn check_tree<'input, 'a: 'input>(
     tree: &CheckTree<'a>,
     test_result: &mut TestResult,

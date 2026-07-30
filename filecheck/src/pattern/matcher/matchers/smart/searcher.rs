@@ -108,7 +108,7 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
                 "match attempt starting at offset {} failed beginning at offset {} with reason: {}",
                 search_started_at,
                 self.match_end,
-                &result.ty
+                result.ty
             );
             // Reset the searcher, but start the next search where the cursor left off, but ensure
             // that we advance the cursor at least one byte to avoid looping indefinitely
@@ -558,7 +558,7 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
                 Some(ValueType::Number(Some(format))) => {
                     format!(
                         "{}",
-                        &Number {
+                        Number {
                             format: Some(format),
                             ..num
                         }

@@ -171,7 +171,7 @@ impl<'a> Spanned for RegexMatcher<'a> {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments, clippy::result_large_err)]
 pub fn try_convert_capture_to_type<'input, 'context, C>(
     pattern_id: PatternID,
     group_id: usize,

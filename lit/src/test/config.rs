@@ -128,10 +128,9 @@ impl TestConfig {
         let target = config.target();
 
         self.available_features
-            .insert(format!("system-{}", &host.operating_system));
-        self.available_features.insert(format!("host={}", &host));
-        self.available_features
-            .insert(format!("target={}", &target));
+            .insert(format!("system-{}", host.operating_system));
+        self.available_features.insert(format!("host={}", host));
+        self.available_features.insert(format!("target={}", target));
         if host == target {
             self.available_features.insert("native");
         }

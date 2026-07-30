@@ -119,7 +119,7 @@ impl TestContext {
     #[track_caller]
     pub fn parse_str<'a, 'ctx: 'a>(&'ctx mut self, source: &str) -> DiagResult<CheckFile<'a>> {
         let caller = core::panic::Location::caller();
-        let test_name = format!("{}{}_checks", &caller.file(), &caller.line());
+        let test_name = format!("{}{}_checks", caller.file(), caller.line());
         let source_file = self.config.source_manager.load(
             SourceLanguage::Unknown,
             FileName::from(test_name),

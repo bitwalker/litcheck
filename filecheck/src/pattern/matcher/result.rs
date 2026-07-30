@@ -74,6 +74,7 @@ impl<'input> MatchResult<'input> {
         }
     }
 
+    #[expect(clippy::result_large_err)]
     pub fn into_result(self) -> Result<Option<MatchInfo<'input>>, CheckFailedError> {
         match self {
             Self {
