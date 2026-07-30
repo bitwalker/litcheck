@@ -205,10 +205,20 @@ impl<T> IndexMut<Range<usize>> for [T] {
     }
 }
 
+/// Resolve `range` against `allowed`, returning `Err` with the requested bounds if they do not
+/// fit within `allowed`.
+///
+/// An inverted range, i.e. one whose start is past its end, is rejected as well. Callers of
+/// this typically `unwrap`, and an inverted range would otherwise be accepted here only to
+/// panic much later at the point of slicing, where the origin of the bad bounds is no longer
+/// apparent.
+///
+/// NOTE: The error carries a [core::ops::Range] rather than a [Range], because the requested
+/// bounds may be inverted, which [Range] does not permit.
 pub fn range_from_bounds<R: RangeBounds<usize>>(
     range: R,
     allowed: Range<usize>,
-) -> Result<Range<usize>, Range<usize>> {
+) -> Result<Range<usize>, core::ops::Range<usize>> {
     let start = match range.start_bound() {
         Bound::Included(&i) => i,
         Bound::Excluded(&i) => i + 1,
@@ -219,8 +229,8 @@ pub fn range_from_bounds<R: RangeBounds<usize>>(
         Bound::Excluded(&i) => i,
         Bound::Unbounded => allowed.end,
     };
-    if start < allowed.start || end > allowed.end {
-        Err(Range::new(start, end))
+    if start > end || start < allowed.start || end > allowed.end {
+        Err(start..end)
     } else {
         Ok(Range::new(start, end))
     }
@@ -242,4 +252,36 @@ pub fn range_from_bounds_with_defaults<R: RangeBounds<usize>>(
         Bound::Unbounded => default_end,
     };
     Range::new(start, end)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn range_from_bounds_resolves_unbounded_ends() {
+        let allowed = Range::new(0, 10);
+        assert_eq!(range_from_bounds(.., allowed), Ok(Range::new(0, 10)));
+        assert_eq!(range_from_bounds(3.., allowed), Ok(Range::new(3, 10)));
+        assert_eq!(range_from_bounds(..3, allowed), Ok(Range::new(0, 3)));
+        assert_eq!(range_from_bounds(2..=3, allowed), Ok(Range::new(2, 4)));
+    }
+
+    #[test]
+    fn range_from_bounds_rejects_out_of_bounds() {
+        let allowed = Range::new(2, 8);
+        assert_eq!(range_from_bounds(1..8, allowed), Err(1..8));
+        assert_eq!(range_from_bounds(2..9, allowed), Err(2..9));
+    }
+
+    /// An inverted range must be rejected here, rather than being passed along to panic later
+    /// at the point of slicing, where the origin of the bad bounds is no longer apparent.
+    #[test]
+    fn range_from_bounds_rejects_inverted_ranges() {
+        let allowed = Range::new(0, 10);
+        assert_eq!(range_from_bounds(8..4, allowed), Err(8..4));
+        // An empty-but-valid range at either end is still accepted
+        assert_eq!(range_from_bounds(4..4, allowed), Ok(Range::new(4, 4)));
+        assert_eq!(range_from_bounds(10..10, allowed), Ok(Range::new(10, 10)));
+    }
 }
