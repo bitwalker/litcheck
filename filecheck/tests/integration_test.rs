@@ -521,3 +521,49 @@ fn integration_test_input_file_diagnostics_use_input_source() {
         errors => panic!("unexpected errors: {errors:#?}"),
     }
 }
+
+/// A `CHECK-LABEL` that is not followed by any other directive is valid, and must be
+/// checked rather than silently dropped.
+///
+/// `compile_lines` only flushed a pending label into the block list when the block body
+/// was non-empty, so a label with no body was overwritten by the next label (or dropped
+/// at EOF). That left the compiled program with zero sections, and `check_blocks` then
+/// indexed `program.sections[0]` unconditionally and panicked.
+#[test]
+fn integration_test_check_label_without_body() -> DiagResult<()> {
+    let config = Config::default();
+
+    // A lone CHECK-LABEL, matching.
+    let match_file = source_file!(config, "CHECK-LABEL: alpha\n");
+    let input_file = source_file!(config, "alpha\nbeta\n");
+    let matches = Test::new(match_file, &config).verify(input_file)?;
+    assert_eq!(matches.len(), 1, "the label itself is a positive check");
+
+    // Two adjacent CHECK-LABELs, both matching. Neither may be dropped.
+    let match_file = source_file!(config, "CHECK-LABEL: alpha\nCHECK-LABEL: gamma\n");
+    let input_file = source_file!(config, "alpha\nbeta\ngamma\n");
+    let matches = Test::new(match_file, &config).verify(input_file)?;
+    assert_eq!(matches.len(), 2, "both labels must be checked");
+
+    Ok(())
+}
+
+/// The second of two adjacent `CHECK-LABEL`s must still be reported as unmatched, rather
+/// than being dropped during compilation and silently passing.
+#[test]
+fn integration_test_check_label_without_body_reports_failure() {
+    let config = Config::default();
+    let match_file = source_file!(config, "CHECK-LABEL: alpha\nCHECK-LABEL: absent\n");
+    let input_file = source_file!(config, "alpha\nbeta\n");
+
+    let error = Test::new(match_file, &config)
+        .verify(input_file)
+        .unwrap_err()
+        .downcast::<TestFailed>()
+        .unwrap();
+
+    assert_matches!(
+        error.errors(),
+        [CheckFailedError::MatchNoneButExpected { .. }]
+    );
+}

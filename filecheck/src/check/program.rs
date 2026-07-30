@@ -249,7 +249,9 @@ impl<'a> CheckProgram<'a> {
         while let Some(next) = iter.peek() {
             match next.kind() {
                 Check::Label => {
-                    if !block.is_empty() {
+                    // A label with an empty body is still a check that must be evaluated,
+                    // so flush whenever one is pending, not just when the body is non-empty.
+                    if label.is_some() || !block.is_empty() {
                         blocks.push_back((label.take(), core::mem::take(&mut block)));
                         // Insert the --implicit-check-not pattern at the start of any new block
                         if let Some(implicit_check_not) = implicit_check_not_pattern.as_ref() {
@@ -298,7 +300,7 @@ impl<'a> CheckProgram<'a> {
             }
         }
 
-        if !block.is_empty() {
+        if label.is_some() || !block.is_empty() {
             blocks.push_back((label.take(), block));
         }
 

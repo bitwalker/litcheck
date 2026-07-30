@@ -224,6 +224,10 @@ where
         // Update the match context cursor
         context.enter_block(block.range());
         let section_range = unsafe { block.sections.unwrap_unchecked() };
+        if section_range.is_empty() {
+            // An implicit block covering zero sections, i.e. there is nothing to check
+            continue;
+        }
         if section_range.len() > 1 {
             // No CHECK-LABEL
             check_group_sections(
