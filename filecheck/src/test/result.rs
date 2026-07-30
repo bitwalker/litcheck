@@ -96,7 +96,7 @@ impl TestResult {
     }
 
     pub fn unwrap_err(self) -> TestFailed {
-        if self.is_ok() {
+        if self.is_failed() {
             self.error
         } else {
             panic!(

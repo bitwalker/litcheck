@@ -34,14 +34,12 @@ impl Command for Not {
     }
 
     fn run(self) -> DiagResult<ExitCode> {
-        let mut cmd = match self.command.split_first() {
-            None => std::process::Command::new(&self.command[0]),
-            Some((prog, argv)) => {
-                let mut cmd = std::process::Command::new(prog);
-                cmd.args(argv);
-                cmd
-            }
+        let Some((prog, argv)) = self.command.split_first() else {
+            eprintln!("not: no command was given");
+            return Ok(ExitCode::from(126));
         };
+        let mut cmd = std::process::Command::new(prog);
+        cmd.args(argv);
         cmd.env("LLVM_DISABLE_CRASH_REPORT", "1");
         cmd.env("LLVM_DISABLE_SYMBOLIZATION", "1");
 
