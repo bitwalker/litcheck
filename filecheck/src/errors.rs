@@ -23,6 +23,45 @@ impl TestFailed {
     pub fn errors(&self) -> &[CheckFailedError] {
         self.errors.as_slice()
     }
+
+    /// Suppress repeated renderings of the same searched region.
+    ///
+    /// Several checks commonly fail against one region -- a group of CHECK-DAG patterns, for
+    /// instance -- and rendering it once per failure buries the differences between them.
+    /// The first failure to reach a region keeps it; later ones get a back-reference.
+    ///
+    /// This must run after all errors have been collected, and walks them in the order they
+    /// will be reported.
+    pub fn dedup_searched_regions(&mut self) {
+        fn visit(errors: &mut [CheckFailedError], seen: &mut Vec<SmallVec<[SourceSpan; 2]>>) {
+            for error in errors {
+                match error {
+                    CheckFailedError::MatchNoneButExpected { searched, .. } => {
+                        let key = searched
+                            .iter()
+                            .filter_map(SearchedRegion::region)
+                            .collect::<SmallVec<[_; 2]>>();
+                        // A region-less entry is a bare note, which is cheap and always kept
+                        if key.is_empty() {
+                            continue;
+                        }
+                        if seen.contains(&key) {
+                            *searched = smallvec![SearchedRegion::Note(
+                                "searched the same region of the input as an earlier failure"
+                            )];
+                        } else {
+                            seen.push(key);
+                        }
+                    }
+                    CheckFailedError::MatchGroupFailed { cause, .. } => visit(cause, seen),
+                    CheckFailedError::MatchAllFailed { failed } => visit(failed, seen),
+                    _ => (),
+                }
+            }
+        }
+
+        visit(&mut self.errors, &mut Vec::new());
+    }
 }
 
 #[derive(Diagnostic, Debug, thiserror::Error)]
@@ -169,6 +208,10 @@ pub enum CheckFailedError {
         span: SourceSpan,
         #[source_code]
         match_file: Arc<SourceFile>,
+        /// The region of the input which was searched for this pattern, if it is being
+        /// reported. See [SearchedRegion] and [CheckFailedError::match_none].
+        #[related]
+        searched: SmallVec<[SearchedRegion; 2]>,
         #[help]
         note: Option<String>,
     },
@@ -245,6 +288,41 @@ pub enum CheckFailedError {
     },
 }
 impl CheckFailedError {
+    /// Construct a [Self::MatchNoneButExpected] for `pattern_span`, annotated with the
+    /// region of the input which was searched.
+    ///
+    /// Whether the region is reported is governed by `--dump-input`; see [crate::Dump].
+    pub fn match_none<'input, 'context, C>(
+        pattern_span: SourceSpan,
+        input: &Input<'input>,
+        context: &C,
+    ) -> Self
+    where
+        C: Context<'input, 'context> + ?Sized,
+    {
+        let searched = if context.config().options.dump_input.is_enabled() {
+            SearchedRegion::describe(input.bounds(), context.input_file())
+        } else {
+            SmallVec::new()
+        };
+        Self::MatchNoneButExpected {
+            span: pattern_span,
+            match_file: context.source_file(pattern_span.source_id()).unwrap(),
+            searched,
+            note: None,
+        }
+    }
+
+    /// Attach an explanatory note to this error.
+    ///
+    /// Has no effect on variants which do not carry a note.
+    pub fn with_note(mut self, note: impl Into<String>) -> Self {
+        if let Self::MatchNoneButExpected { note: slot, .. } = &mut self {
+            *slot = Some(note.into());
+        }
+        self
+    }
+
     /// Returns true if this error was produced in the context of a possibly-valid match
     pub fn match_was_found(&self) -> bool {
         matches!(
@@ -348,6 +426,153 @@ impl CheckFailedError {
         }
 
         related
+    }
+}
+
+/// The maximum number of lines of input rendered inline when reporting the region of the
+/// input which was searched for a pattern.
+///
+/// Larger regions are reported by marking their endpoints instead. miette renders every
+/// line between two labels in the same source, so without this a failed match against a
+/// large input would dump the entire input to the terminal.
+const MAX_INLINE_SEARCHED_LINES: u32 = 10;
+
+/// Describes the region of the input which was searched, unsuccessfully, for a pattern.
+///
+/// This is attached to [CheckFailedError::MatchNoneButExpected] as a related diagnostic, so
+/// that a failed check reports not just _what_ failed to match, but _where_ we looked for it.
+#[derive(Debug)]
+pub enum SearchedRegion {
+    /// Render `span` of `input_file`, annotated with `label`.
+    ///
+    /// A region small enough to display in full produces a single marker covering the whole
+    /// region. A larger one produces a marker for each endpoint, so that the lines in
+    /// between are not printed.
+    Marker {
+        span: SourceSpan,
+        input_file: Arc<SourceFile>,
+        /// The headline for this marker. The trailing marker of a pair leaves this empty,
+        /// since the leading marker already introduced the region.
+        message: Option<String>,
+        label: &'static str,
+    },
+    /// A bare note, with no associated source to render.
+    Note(&'static str),
+}
+
+impl SearchedRegion {
+    /// Describe `range` of `input_file` as the region which was searched for a pattern.
+    pub fn describe(range: Range<usize>, input_file: Arc<SourceFile>) -> SmallVec<[Self; 2]> {
+        let id = input_file.id();
+        let eof = input_file.len();
+        let start = core::cmp::min(range.start, eof);
+        let end = core::cmp::min(core::cmp::max(range.end, start), eof);
+
+        // An empty region is worth reporting in its own right: it means the pattern never
+        // had a chance to match, which is usually a symptom of an earlier failed check
+        // having left the cursor at the end of the block.
+        if start == end {
+            return smallvec![Self::Note(if start >= eof {
+                "the search began at the end of the input, so no input remained to be searched"
+            } else {
+                "the region of input available to be searched was empty"
+            })];
+        }
+
+        let first_line = input_file.location(SourceSpan::at(id, start as u32)).line;
+        // `end` is exclusive, so the last byte actually searched is the one before it.
+        let last_line = input_file
+            .location(SourceSpan::at(id, (end - 1) as u32))
+            .line;
+        let num_lines = last_line.to_u32().saturating_sub(first_line.to_u32()) + 1;
+
+        if num_lines <= MAX_INLINE_SEARCHED_LINES {
+            let message = if num_lines == 1 {
+                format!("searched this region of the input (line {first_line})")
+            } else {
+                format!("searched this region of the input (lines {first_line}-{last_line})")
+            };
+            return smallvec![Self::Marker {
+                span: SourceSpan::from_range_unchecked(id, start..end),
+                input_file,
+                message: Some(message),
+                label: "no match anywhere in this region",
+            }];
+        }
+
+        // Too large to render in full, so mark the endpoints. The trailing marker points at
+        // the start of the last line searched rather than at `end` itself, since a point
+        // span at EOF has no line to attach to.
+        let last_line_start = input_file
+            .content()
+            .line_start(input_file.content().line_index((end as u32 - 1).into()))
+            .map(|idx| idx.to_u32())
+            .unwrap_or(end as u32 - 1);
+        let reached_eof = end == eof;
+        smallvec![
+            Self::Marker {
+                span: SourceSpan::at(id, start as u32),
+                input_file: input_file.clone(),
+                message: Some(format!(
+                    "searched {num_lines} lines of input without a match (lines {first_line}-{last_line})"
+                )),
+                label: "search began here",
+            },
+            Self::Marker {
+                span: SourceSpan::at(id, last_line_start),
+                input_file,
+                message: Some(
+                    if reached_eof {
+                        "...and ran to the end of the input"
+                    } else {
+                        "...and ran to here"
+                    }
+                    .to_string(),
+                ),
+                label: "no match was found in any of the intervening lines",
+            },
+        ]
+    }
+
+    /// Returns the region of input this describes, for de-duplication purposes.
+    ///
+    /// [Self::Note] has no region, and is never suppressed.
+    pub fn region(&self) -> Option<SourceSpan> {
+        match self {
+            Self::Marker { span, .. } => Some(*span),
+            Self::Note(_) => None,
+        }
+    }
+}
+
+impl fmt::Display for SearchedRegion {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Marker { message, .. } => f.write_str(message.as_deref().unwrap_or("")),
+            Self::Note(note) => f.write_str(note),
+        }
+    }
+}
+
+impl std::error::Error for SearchedRegion {}
+
+impl Diagnostic for SearchedRegion {
+    fn severity(&self) -> Option<litcheck::diagnostics::Severity> {
+        Some(litcheck::diagnostics::Severity::Advice)
+    }
+    fn source_code(&self) -> Option<&dyn litcheck::diagnostics::SourceCode> {
+        match self {
+            Self::Marker { input_file, .. } => Some(input_file),
+            Self::Note(_) => None,
+        }
+    }
+    fn labels(&self) -> Option<Box<dyn Iterator<Item = LabeledSpan> + '_>> {
+        match self {
+            Self::Marker { span, label, .. } => Some(Box::new(core::iter::once(
+                LabeledSpan::new_with_span(Some(label.to_string()), *span),
+            ))),
+            Self::Note(_) => None,
+        }
     }
 }
 

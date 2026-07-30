@@ -11,7 +11,9 @@ pub mod pattern;
 pub mod rules;
 mod test;
 
-pub use self::errors::{CheckFailedError, RelatedCheckError, RelatedError, TestFailed};
+pub use self::errors::{
+    CheckFailedError, RelatedCheckError, RelatedError, SearchedRegion, TestFailed,
+};
 #[cfg(test)]
 pub use self::test::TestContext;
 pub use self::test::{Test, TestResult};
@@ -348,6 +350,32 @@ pub enum Dump {
     Fail,
     /// Never dump input
     Never,
+}
+
+impl Dump {
+    /// Returns true if failed checks should be annotated with the region of the input
+    /// which was searched.
+    ///
+    /// NOTE: `Always` is currently equivalent to `Fail`. Unlike upstream FileCheck, we do
+    /// not yet emit an annotated dump of the whole input for passing runs; this flag only
+    /// governs the input context attached to failures.
+    pub const fn is_enabled(&self) -> bool {
+        matches!(self, Self::Always | Self::Fail)
+    }
+
+    /// The text shown for `--dump-input=help`
+    pub const HELP: &'static str = "\
+The --dump-input option controls whether failed checks are annotated with the region of
+the input that was searched for the pattern which failed to match.
+
+  never   Do not annotate failures with input context.
+  fail    Annotate failed checks with the searched region. This is the default.
+  always  As `fail`. Reserved for a future mode which dumps the whole annotated input.
+  help    Show this message and exit.
+
+Regions spanning more than a handful of lines are reported by marking their endpoints,
+rather than by printing every line, so that a failed match against a large input does not
+flood the terminal.";
 }
 
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq, ValueEnum)]

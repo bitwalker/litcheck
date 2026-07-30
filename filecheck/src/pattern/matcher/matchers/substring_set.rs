@@ -147,13 +147,11 @@ impl<'a> Matcher for SubstringSetMatcher<'a> {
                 pattern_id,
             )))
         } else {
-            Ok(MatchResult::failed(
-                CheckFailedError::MatchNoneButExpected {
-                    span: self.span(),
-                    match_file: context.source_file(self.span().source_id()).unwrap(),
-                    note: None,
-                },
-            ))
+            Ok(MatchResult::failed(CheckFailedError::match_none(
+                self.span(),
+                &input,
+                context,
+            )))
         }
     }
 }

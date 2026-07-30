@@ -95,6 +95,9 @@ impl<'a, 'input, S: PatternSearcher<'input>> DynamicPatternSetVisitor<'a, S> {
         &mut self,
         context: &mut ContextGuard<'guard, 'input, 'context>,
     ) -> DiagResult<Matches<'input>> {
+        // Captured up front: the searcher's input shrinks as the search advances, but the
+        // region we report on failure is the one we set out to search.
+        let searched = self.searcher.searched();
         // Until we have matched all patterns in the set:
         //
         // 1. For each unvisited prefix
@@ -215,13 +218,11 @@ impl<'a, 'input, S: PatternSearcher<'input>> DynamicPatternSetVisitor<'a, S> {
                     continue;
                 }
                 let span = pattern.span();
-                matched.push(MatchResult::failed(
-                    CheckFailedError::MatchNoneButExpected {
-                        span,
-                        match_file: context.source_file(span.source_id()).unwrap(),
-                        note: None,
-                    },
-                ));
+                matched.push(MatchResult::failed(CheckFailedError::match_none(
+                    span,
+                    &context.search_range(searched),
+                    context,
+                )));
             }
         }
         Ok(matched)

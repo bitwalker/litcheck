@@ -37,13 +37,9 @@ impl Matcher for AsciiWhitespaceMatcher {
     {
         let buffer = input.as_slice();
         if input.is_empty() || !buffer[0].is_ascii_whitespace() {
-            return Ok(MatchResult::failed(
-                CheckFailedError::MatchNoneButExpected {
-                    span: self.span,
-                    match_file: context.source_file(self.span().source_id()).unwrap(),
-                    note: None,
-                },
-            ));
+            return Ok(MatchResult::failed(CheckFailedError::match_none(
+                self.span, &input, context,
+            )));
         }
 
         let start = input.start();

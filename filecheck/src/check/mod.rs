@@ -150,17 +150,11 @@ pub fn discover_blocks<'input, 'context: 'input>(
                                 end: None,
                                 eof,
                             });
-                            let span = label.span();
-                            let msg = format!(
-                                "Unable to find a match for this pattern in the input.\
-                            Search started at byte {}, ending at {eof}",
-                                context.cursor().start()
-                            );
-                            errors.push(CheckFailedError::MatchNoneButExpected {
-                                span,
-                                match_file: context.source_file(span.source_id()).unwrap(),
-                                note: Some(msg),
-                            });
+                            errors.push(CheckFailedError::match_none(
+                                label.span(),
+                                &buffer,
+                                context,
+                            ));
                         }
                     }
                 }

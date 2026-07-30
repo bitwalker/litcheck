@@ -97,13 +97,9 @@ impl<'a> MatcherMut for SmartMatcher<'a> {
                 extract_captures_from_match(self.span, matched, &captures, &self.parts, context)?;
             Ok(matched)
         } else {
-            Ok(MatchResult::failed(
-                CheckFailedError::MatchNoneButExpected {
-                    span: self.span,
-                    match_file: context.source_file(self.span.source_id()).unwrap(),
-                    note: None,
-                },
-            ))
+            Ok(MatchResult::failed(CheckFailedError::match_none(
+                self.span, &input, context,
+            )))
         }
     }
 }

@@ -137,13 +137,11 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
                 log::trace!(target: "smart:searcher", "no more input to consume: cannot match");
                 // No match possible
                 self.captures.set_pattern(None);
-                return Ok(MatchResult::failed(
-                    CheckFailedError::MatchNoneButExpected {
-                        span: self.span,
-                        match_file: context.source_file(self.span.source_id()).unwrap(),
-                        note: None,
-                    },
-                ));
+                return Ok(MatchResult::failed(CheckFailedError::match_none(
+                    self.span,
+                    &self.input,
+                    context,
+                )));
             }
 
             match part {
@@ -303,13 +301,11 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
             )))
         } else {
             log::trace!(target: "smart:searcher", "no match found");
-            Ok(MatchResult::failed(
-                CheckFailedError::MatchNoneButExpected {
-                    span,
-                    match_file: context.source_file(span.source_id()).unwrap(),
-                    note: None,
-                },
-            ))
+            Ok(MatchResult::failed(CheckFailedError::match_none(
+                span,
+                &self.input,
+                context,
+            )))
         }
     }
 
@@ -390,13 +386,11 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
                 .with_captures(captured),
             ))
         } else {
-            Ok(MatchResult::failed(
-                CheckFailedError::MatchNoneButExpected {
-                    span: pattern_span,
-                    match_file: context.source_file(pattern_span.source_id()).unwrap(),
-                    note: None,
-                },
-            ))
+            Ok(MatchResult::failed(CheckFailedError::match_none(
+                pattern_span,
+                &self.input,
+                context,
+            )))
         }
     }
 
@@ -411,14 +405,8 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
         let format = format.unwrap_or_default();
         if self.cursor.as_slice().is_empty() {
             return Ok(MatchResult::failed(
-                CheckFailedError::MatchNoneButExpected {
-                    span,
-                    match_file: context.source_file(span.source_id()).unwrap(),
-                    note: Some(
-                        "unable to match because end of the searchable input was reached"
-                            .to_string(),
-                    ),
-                },
+                CheckFailedError::match_none(span, &self.input, context)
+                    .with_note("unable to match because end of the searchable input was reached"),
             ));
         }
 
@@ -483,13 +471,11 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
                     )),
                 }
             } else {
-                Ok(MatchResult::failed(
-                    CheckFailedError::MatchNoneButExpected {
-                        span,
-                        match_file: context.source_file(span.source_id()).unwrap(),
-                        note: None,
-                    },
-                ))
+                Ok(MatchResult::failed(CheckFailedError::match_none(
+                    span,
+                    &self.input,
+                    context,
+                )))
             }
         } else if let Some(matched) = pattern.find(input) {
             log::trace!(target: "smart:searcher", "match found starting at offset {} with len {}", matched.start(), matched.len());
@@ -507,13 +493,11 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
                 span,
             )))
         } else {
-            Ok(MatchResult::failed(
-                CheckFailedError::MatchNoneButExpected {
-                    span,
-                    match_file: context.source_file(span.source_id()).unwrap(),
-                    note: None,
-                },
-            ))
+            Ok(MatchResult::failed(CheckFailedError::match_none(
+                span,
+                &self.input,
+                context,
+            )))
         }
     }
 

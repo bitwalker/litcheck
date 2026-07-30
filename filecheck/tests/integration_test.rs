@@ -500,7 +500,11 @@ fn integration_test_input_file_diagnostics_use_input_source() {
         .unwrap();
 
     match error.errors() {
-        [CheckFailedError::MatchFoundButWrongLine { span, input_file, .. }] => {
+        [
+            CheckFailedError::MatchFoundButWrongLine {
+                span, input_file, ..
+            },
+        ] => {
             assert_eq!(
                 span.source_id(),
                 input_id,
@@ -566,4 +570,117 @@ fn integration_test_check_label_without_body_reports_failure() {
         error.errors(),
         [CheckFailedError::MatchNoneButExpected { .. }]
     );
+}
+
+mod searched_region {
+    use super::*;
+    use filecheck::{Dump, SearchedRegion};
+
+    fn failures(checks: &str, input: &str, dump_input: Dump) -> Vec<CheckFailedError> {
+        let config = Config {
+            options: Options {
+                dump_input,
+                ..Options::default()
+            },
+            ..Config::default()
+        };
+        let match_file = source_file!(config, checks);
+        let input_file = source_file!(config, input);
+        Test::new(match_file, &config)
+            .verify(input_file)
+            .unwrap_err()
+            .downcast::<TestFailed>()
+            .unwrap()
+            .errors
+    }
+
+    fn regions(error: &CheckFailedError) -> &[SearchedRegion] {
+        match error {
+            CheckFailedError::MatchNoneButExpected { searched, .. } => searched,
+            other => panic!("expected MatchNoneButExpected, got: {other:#?}"),
+        }
+    }
+
+    /// A region small enough to display is reported as a single marker covering the whole
+    /// region, so the text that was actually searched is visible.
+    #[test]
+    fn small_region_is_reported_in_full() {
+        let input = "alpha\nbeta\ngamma\n";
+        let errors = failures("CHECK: nope\n", input, Dump::Fail);
+
+        match regions(&errors[0]) {
+            [
+                SearchedRegion::Marker {
+                    span, input_file, ..
+                },
+            ] => {
+                assert_eq!(
+                    input_file.source_slice(*span),
+                    Some(input),
+                    "the marker should cover exactly the region that was searched"
+                );
+            }
+            other => panic!("expected a single marker, got: {other:#?}"),
+        }
+    }
+
+    /// A region too large to display is reported by marking its endpoints, so that a failed
+    /// match against a large input does not print every line in between.
+    #[test]
+    fn large_region_is_reported_by_its_endpoints() {
+        let input = (0..300).fold(String::new(), |mut acc, i| {
+            acc.push_str(&format!("line {i}\n"));
+            acc
+        });
+        let errors = failures("CHECK: nope\n", &input, Dump::Fail);
+
+        match regions(&errors[0]) {
+            [
+                SearchedRegion::Marker { span: start, .. },
+                SearchedRegion::Marker { span: end, .. },
+            ] => {
+                assert!(start.is_empty(), "endpoints are point spans, not ranges");
+                assert!(end.is_empty(), "endpoints are point spans, not ranges");
+                assert!(start.start() < end.start());
+                // The trailing marker points at the last line, not past the end of input.
+                assert!(end.start().to_usize() < input.len());
+            }
+            other => panic!("expected two endpoint markers, got: {other:#?}"),
+        }
+    }
+
+    /// Failing against an empty region is worth saying out loud: it means the pattern never
+    /// had a chance to match, rather than having been searched for and not found.
+    #[test]
+    fn empty_region_is_reported_as_a_note() {
+        // The CHECK consumes the only line, leaving nothing for the CHECK-NEXT to search.
+        let errors = failures("CHECK: alpha\nCHECK-NEXT: beta\n", "alpha\n", Dump::Fail);
+        assert_matches!(regions(&errors[0]), [SearchedRegion::Note(_)]);
+    }
+
+    /// When several checks fail against the same region, only the first renders it.
+    #[test]
+    fn repeated_regions_are_reported_once() {
+        let errors = failures(
+            "CHECK-DAG: absent_one\nCHECK-DAG: absent_two\nCHECK-DAG: absent_three\n",
+            "alpha\nbeta\ngamma\n",
+            Dump::Fail,
+        );
+        assert_eq!(errors.len(), 3);
+
+        assert_matches!(regions(&errors[0]), [SearchedRegion::Marker { .. }]);
+        for error in &errors[1..] {
+            assert_matches!(regions(error), [SearchedRegion::Note(_)]);
+        }
+    }
+
+    /// `--dump-input=never` suppresses the annotation entirely.
+    #[test]
+    fn dump_input_never_suppresses_the_region() {
+        let errors = failures("CHECK: nope\n", "alpha\nbeta\n", Dump::Never);
+        assert!(
+            regions(&errors[0]).is_empty(),
+            "no region should be attached when --dump-input=never"
+        );
+    }
 }

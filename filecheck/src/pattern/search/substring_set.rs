@@ -15,6 +15,8 @@ pub struct SubstringSetSearcher<'a, 'patterns, 'input> {
     pattern: AhoCorasick,
     /// The searcher used to maintain the search state in the buffer
     searcher: AhoCorasickSearcher<'input>,
+    /// The bounds of the input as originally given, before the search advanced through it
+    searched: Range<usize>,
 }
 impl<'a, 'patterns, 'input> SubstringSetSearcher<'a, 'patterns, 'input> {
     pub fn new(
@@ -45,6 +47,7 @@ impl<'a, 'patterns, 'input> SubstringSetSearcher<'a, 'patterns, 'input> {
                 Report::from(diag)
             })?;
 
+        let searched = input.bounds();
         let searcher = AhoCorasickSearcher::new(input.into());
 
         Ok(Self {
@@ -54,6 +57,7 @@ impl<'a, 'patterns, 'input> SubstringSetSearcher<'a, 'patterns, 'input> {
             patterns,
             pattern,
             searcher,
+            searched,
         })
     }
 
@@ -109,6 +113,9 @@ impl<'a, 'patterns, 'input> PatternSearcher<'input>
     fn input(&self) -> &Self::Input {
         self.searcher.input()
     }
+    fn searched(&self) -> Range<usize> {
+        self.searched
+    }
     fn last_match_end(&self) -> Option<usize> {
         self.searcher.last_match_end()
     }
@@ -138,13 +145,11 @@ impl<'a, 'patterns, 'input> PatternSearcher<'input>
                 pattern_id,
             )))
         } else {
-            Ok(MatchResult::failed(
-                CheckFailedError::MatchNoneButExpected {
-                    span: self.span(),
-                    match_file: context.source_file(self.span().source_id()).unwrap(),
-                    note: None,
-                },
-            ))
+            Ok(MatchResult::failed(CheckFailedError::match_none(
+                self.span(),
+                &context.search_range(self.searched),
+                context,
+            )))
         }
     }
 }

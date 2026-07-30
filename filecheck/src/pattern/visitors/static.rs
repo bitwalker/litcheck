@@ -50,6 +50,9 @@ impl<'a, 'input, S: PatternSearcher<'input>> StaticPatternSetVisitor<'a, S> {
         &mut self,
         context: &mut ContextGuard<'_, 'input, '_>,
     ) -> DiagResult<Matches<'input>> {
+        // Captured up front: the searcher's input shrinks as the search advances, but the
+        // region we report on failure is the one we set out to search.
+        let searched = self.searcher.searched();
         let mut matches = Matches::with_capacity(self.patterns_len());
         loop {
             let result = self.searcher.try_match_next(context)?;
@@ -142,13 +145,11 @@ impl<'a, 'input, S: PatternSearcher<'input>> StaticPatternSetVisitor<'a, S> {
                             let span = self.searcher.pattern_span(
                                 <S as PatternSearcher>::PatternID::new_unchecked(pattern_id),
                             );
-                            matches.push(MatchResult::failed(
-                                CheckFailedError::MatchNoneButExpected {
-                                    span,
-                                    match_file: context.source_file(span.source_id()).unwrap(),
-                                    note: None,
-                                },
-                            ));
+                            matches.push(MatchResult::failed(CheckFailedError::match_none(
+                                span,
+                                &context.search_range(searched),
+                                context,
+                            )));
                         }
                     } else {
                         assert!(errors.iter().all(|e| e.is_none()));

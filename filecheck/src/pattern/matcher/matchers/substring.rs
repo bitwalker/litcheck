@@ -93,13 +93,9 @@ impl<'a> Matcher for SubstringMatcher<'a> {
             let span = SourceSpan::from_range_unchecked(input.source_id(), matched.range());
             Ok(MatchResult::ok(MatchInfo::new(span, self.span)))
         } else {
-            Ok(MatchResult::failed(
-                CheckFailedError::MatchNoneButExpected {
-                    span: self.span,
-                    match_file: context.source_file(self.span.source_id()).unwrap(),
-                    note: None,
-                },
-            ))
+            Ok(MatchResult::failed(CheckFailedError::match_none(
+                self.span, &input, context,
+            )))
         }
     }
 }

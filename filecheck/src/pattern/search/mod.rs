@@ -55,6 +55,11 @@ pub trait PatternSearcher<'input> {
     type PatternID: PatternIdentifier;
 
     fn input(&self) -> &Self::Input;
+    /// The region of the input this searcher was originally constructed to search.
+    ///
+    /// Unlike [Self::input], this does not shrink as the search advances, so it is what
+    /// should be reported when a pattern is never found.
+    fn searched(&self) -> Range<usize>;
     fn last_match_end(&self) -> Option<usize>;
     fn set_last_match_end(&mut self, end: usize);
     fn patterns_len(&self) -> usize;

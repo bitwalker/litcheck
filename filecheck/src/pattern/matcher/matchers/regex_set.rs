@@ -75,6 +75,8 @@ pub struct RegexSetSearcher<'a, 'input, A = dense::DFA<Vec<u32>>> {
     /// there is no requirement that all patterns have the same
     /// number or type of captures
     capture_types: Vec<Vec<Capture>>,
+    /// The bounds of the input as originally given, before the search advanced through it
+    searched: Range<usize>,
 }
 impl<'a, 'input> RegexSetSearcher<'a, 'input> {
     pub fn new(
@@ -96,6 +98,7 @@ impl<'a, 'input> RegexSetSearcher<'a, 'input> {
 impl<'a, 'input, A: Automaton> RegexSetSearcher<'a, 'input, A> {
     pub fn from_matcher(matcher: RegexSetMatcher<'a, A>, input: Input<'input>) -> Self {
         let captures = matcher.captures;
+        let searched = input.bounds();
         let search = Search::start(input, captures);
         Self {
             search,
@@ -103,6 +106,7 @@ impl<'a, 'input, A: Automaton> RegexSetSearcher<'a, 'input, A> {
             regex: matcher.regex,
             capturing_regex: matcher.capturing_regex,
             capture_types: matcher.capture_types,
+            searched,
         }
     }
 }
@@ -110,6 +114,7 @@ impl<'a, 'input, A: Automaton> RegexSetSearcher<'a, 'input, A> {
 impl<'a, 'input, A: Automaton + Clone> RegexSetSearcher<'a, 'input, A> {
     pub fn from_matcher_ref(matcher: &RegexSetMatcher<'a, A>, input: Input<'input>) -> Self {
         let captures = matcher.captures.clone();
+        let searched = input.bounds();
         let search = Search::start(input, captures);
         Self {
             search,
@@ -117,6 +122,7 @@ impl<'a, 'input, A: Automaton + Clone> RegexSetSearcher<'a, 'input, A> {
             regex: matcher.regex.clone(),
             capturing_regex: matcher.capturing_regex.clone(),
             capture_types: matcher.capture_types.clone(),
+            searched,
         }
     }
 }
@@ -363,6 +369,9 @@ where
     fn input(&self) -> &Self::Input {
         &self.search.input
     }
+    fn searched(&self) -> Range<usize> {
+        self.searched
+    }
     fn last_match_end(&self) -> Option<usize> {
         self.search.last_match_end
     }
@@ -525,13 +534,11 @@ where
                 }
             }
         } else {
-            Ok(MatchResult::failed(
-                CheckFailedError::MatchNoneButExpected {
-                    span: self.span(),
-                    match_file: context.source_file(self.span().source_id()).unwrap(),
-                    note: None,
-                },
-            ))
+            Ok(MatchResult::failed(CheckFailedError::match_none(
+                self.span(),
+                &context.search_range(self.searched),
+                context,
+            )))
         }
     }
 }

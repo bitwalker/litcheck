@@ -39,21 +39,18 @@ where
         if start >= block_end {
             // Cannot match, since the search range would
             // overflow the current block.
+            let at_eof = cursor.end_of_file() == block_end;
+            let mut error = CheckFailedError::match_none(
+                self.pattern.span(),
+                &context.search_range(start..block_end),
+                context,
+            );
+            if !at_eof {
+                error =
+                    error.with_note("search was stopped at end of the preceding CHECK-LABEL scope");
+            }
             return Ok(Matches::from(MatchResult {
-                ty: MatchType::Failed(CheckFailedError::MatchNoneButExpected {
-                    span: self.pattern.span(),
-                    match_file: context
-                        .source_file(self.pattern.span().source_id())
-                        .unwrap(),
-                    note: if cursor.end_of_file() == block_end {
-                        None
-                    } else {
-                        Some(
-                            "search was stopped at end of the preceding CHECK-LABEL scope"
-                                .to_string(),
-                        )
-                    },
-                }),
+                ty: MatchType::Failed(error),
                 info: None,
             }));
         }

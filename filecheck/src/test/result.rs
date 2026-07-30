@@ -91,6 +91,9 @@ impl TestResult {
             self.matches.sort_by_key(|a| a.pattern_span.start());
             Ok(self.matches)
         } else {
+            // All errors have been collected, so we can now tell which of them are reporting
+            // the same region of input, and render it only once
+            self.error.dedup_searched_regions();
             Err(self.error)
         }
     }

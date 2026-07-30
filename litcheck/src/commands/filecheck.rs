@@ -49,6 +49,11 @@ impl Command for FileCheck {
 
         options.validate()?;
 
+        if options.dump_input == filecheck::Dump::Help {
+            println!("{}", filecheck::Dump::HELP);
+            return Ok(ExitCode::SUCCESS);
+        }
+
         let config = Config {
             options,
             ..Default::default()

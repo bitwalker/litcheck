@@ -41,12 +41,19 @@ impl Rule for CheckEmpty {
             }
             .into())
         } else {
+            // Report the line we required to be empty, so the failure shows what was there
+            // instead. When the cursor is mid-line, that line is included as well, since
+            // that is why we never got to consider the next one.
+            let searched = core::cmp::min(cursor.start(), next_line_start)..next_eol;
             Ok(MatchResult {
-                ty: MatchType::Failed(CheckFailedError::MatchNoneButExpected {
-                    span: self.span,
-                    match_file: context.source_file(self.span.source_id()).unwrap(),
-                    note: None,
-                }),
+                ty: MatchType::Failed(
+                    CheckFailedError::match_none(
+                        self.span,
+                        &context.search_range(searched),
+                        context,
+                    )
+                    .with_note("expected the next line of input to be empty"),
+                ),
                 info: None,
             }
             .into())

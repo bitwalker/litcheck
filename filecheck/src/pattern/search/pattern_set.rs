@@ -4,6 +4,8 @@ use crate::common::*;
 
 pub struct PatternSetSearcher<'a, 'patterns, 'input> {
     input: Input<'input>,
+    /// The bounds of `input` as originally given, before the search advanced through it
+    searched: Range<usize>,
     last_match_end: Option<usize>,
     /// The set of raw input patterns from which
     /// this matcher was constructed
@@ -28,6 +30,7 @@ impl<'a, 'patterns, 'input> PatternSetSearcher<'a, 'patterns, 'input> {
         let next_starts = vec![0; num_patterns];
 
         Ok(Self {
+            searched: input.bounds(),
             input,
             last_match_end: None,
             patterns,
@@ -68,6 +71,9 @@ impl<'a, 'patterns, 'input> PatternSearcher<'input> for PatternSetSearcher<'a, '
 
     fn input(&self) -> &Self::Input {
         &self.input
+    }
+    fn searched(&self) -> Range<usize> {
+        self.searched
     }
     fn last_match_end(&self) -> Option<usize> {
         self.last_match_end
@@ -217,13 +223,11 @@ impl<'a, 'patterns, 'input> PatternSearcher<'input> for PatternSetSearcher<'a, '
                 }
                 Ok(found)
             }
-            None => Ok(MatchResult::failed(
-                CheckFailedError::MatchNoneButExpected {
-                    span: self.span(),
-                    match_file: context.source_file(self.span().source_id()).unwrap(),
-                    note: None,
-                },
-            )),
+            None => Ok(MatchResult::failed(CheckFailedError::match_none(
+                self.span(),
+                &context.search_range(self.searched),
+                context,
+            ))),
         }
     }
 }

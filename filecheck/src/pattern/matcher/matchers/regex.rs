@@ -157,15 +157,11 @@ impl<'a> Matcher for RegexMatcher<'a> {
                 captures: capture_infos,
             }))
         } else {
-            Ok(MatchResult::failed(
-                CheckFailedError::MatchNoneButExpected {
-                    span: self.pattern.span(),
-                    match_file: context
-                        .source_file(self.pattern.span().source_id())
-                        .unwrap(),
-                    note: None,
-                },
-            ))
+            Ok(MatchResult::failed(CheckFailedError::match_none(
+                self.pattern.span(),
+                &input,
+                context,
+            )))
         }
     }
 }
