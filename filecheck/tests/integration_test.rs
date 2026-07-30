@@ -475,3 +475,49 @@ public builtin.function @test::spill_nested_scf_if(v0: ptr<element, u8>) -> u32 
     test.verify(input_file)?;
     Ok(())
 }
+
+/// Regression test: diagnostics which reference a location in the *input* file must be
+/// rendered against the input file, not the check file.
+///
+/// Rules are applied through `Context::protect`, which previously initialized the guard's
+/// `input_file` from the match file, so every input-file span was resolved against the
+/// check file's source, producing garbled (or entirely absent) snippets.
+#[test]
+fn integration_test_input_file_diagnostics_use_input_source() {
+    const CHECKS: &str = "CHECK: entry:\nCHECK-SAME: WRONGLINE\n";
+    const INPUT: &str = "define void @foo() {\nentry:\n  WRONGLINE is over here\n  ret void\n}\n";
+
+    let config = Config::default();
+    let match_file = source_file!(config, CHECKS);
+    let input_file = source_file!(config, INPUT);
+    let input_id = input_file.id();
+
+    let mut test = Test::new(match_file.clone(), &config);
+    let error = test
+        .verify(input_file)
+        .unwrap_err()
+        .downcast::<TestFailed>()
+        .unwrap();
+
+    match error.errors() {
+        [CheckFailedError::MatchFoundButWrongLine { span, input_file, .. }] => {
+            assert_eq!(
+                span.source_id(),
+                input_id,
+                "match span should refer to the input file"
+            );
+            assert_eq!(
+                input_file.id(),
+                input_id,
+                "the source rendered for this diagnostic should be the input file"
+            );
+            // The span must actually name the matched text within that source.
+            assert_eq!(
+                input_file.source_slice(*span),
+                Some("WRONGLINE"),
+                "span must resolve to the matched text in the rendered source"
+            );
+        }
+        errors => panic!("unexpected errors: {errors:#?}"),
+    }
+}

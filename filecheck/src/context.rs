@@ -117,7 +117,7 @@ impl<'guard, 'input, 'context> Context<'input, 'context>
         ContextGuard {
             config: self.config,
             match_file: self.match_file.clone(),
-            input_file: self.match_file.clone(),
+            input_file: self.input_file.clone(),
             scope: self.scope.protect(),
             cursor: self.cursor.protect(),
         }
@@ -217,7 +217,7 @@ impl<'input, 'context: 'input> Context<'input, 'context> for MatchContext<'input
         ContextGuard {
             config: self.config,
             match_file: self.match_file.clone(),
-            input_file: self.match_file.clone(),
+            input_file: self.input_file.clone(),
             scope: self.env.protect(),
             cursor: self.cursor.protect(),
         }
