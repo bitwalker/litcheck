@@ -1,0 +1,4 @@
+# This test is committed with CRLF line endings on purpose, and exists to verify that
+# FileCheck handles DOS-style input. Without this, a clone with core.autocrlf set will
+# rewrite it to LF and the test will fail.
+tests/filecheck/llvm/dos-style-eol.txt -text

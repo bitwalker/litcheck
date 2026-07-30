@@ -577,9 +577,19 @@ mod searched_region {
     use filecheck::{Dump, SearchedRegion};
 
     fn failures(checks: &str, input: &str, dump_input: Dump) -> Vec<CheckFailedError> {
+        failures_verbose(checks, input, dump_input, 0)
+    }
+
+    fn failures_verbose(
+        checks: &str,
+        input: &str,
+        dump_input: Dump,
+        verbose: u8,
+    ) -> Vec<CheckFailedError> {
         let config = Config {
             options: Options {
                 dump_input,
+                verbose,
                 ..Options::default()
             },
             ..Config::default()
@@ -682,5 +692,37 @@ mod searched_region {
             regions(&errors[0]).is_empty(),
             "no region should be attached when --dump-input=never"
         );
+    }
+
+    /// `-vv` opts out of the endpoint summary: if you asked for verbose output you would
+    /// rather have the whole region than a precis of it.
+    #[test]
+    fn verbose_renders_large_regions_in_full() {
+        let input = (0..300).fold(String::new(), |mut acc, i| {
+            acc.push_str(&format!("line {i}\n"));
+            acc
+        });
+
+        // Two verbosity levels: -v alone still summarizes, -vv does not.
+        assert_eq!(
+            regions(&failures_verbose("CHECK: nope\n", &input, Dump::Fail, 1)[0]).len(),
+            2,
+            "-v should still summarize a large region by its endpoints"
+        );
+
+        match regions(&failures_verbose("CHECK: nope\n", &input, Dump::Fail, 2)[0]) {
+            [
+                SearchedRegion::Marker {
+                    span, input_file, ..
+                },
+            ] => {
+                assert_eq!(
+                    input_file.source_slice(*span),
+                    Some(input.as_str()),
+                    "-vv should render the whole region"
+                );
+            }
+            other => panic!("expected a single full-region marker, got: {other:#?}"),
+        }
     }
 }

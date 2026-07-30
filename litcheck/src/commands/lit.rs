@@ -238,13 +238,9 @@ where
         show_output: config.options.all || config.options.verbose,
     };
 
-    let results = Arc::new(TestResultManager::new(
-        receiver,
-        config.clone(),
-        registry.into_iter(),
-    ));
+    let pending = Arc::new(PendingTests::new(config.clone(), registry.into_iter()));
 
-    let result = TestResultManagerIter(results.clone())
+    let result = PendingTestsIter(pending.clone())
         .par_bridge()
         .progress_with(runner.progress.clone())
         .try_for_each_with(runner, |runner, selection| match selection {
@@ -259,7 +255,8 @@ where
         println!();
     }
 
-    let results_by_status = Arc::into_inner(results).unwrap().into_results()?;
+    // All workers have finished, so every sender has been dropped and the channel is closed
+    let results_by_status = collect_results(receiver, Arc::into_inner(pending).unwrap(), &config)?;
 
     print_results(&results_by_status, &config);
 
@@ -283,69 +280,27 @@ struct TestReport {
     pub result: TestResult,
 }
 
-struct TestResultManager<I: Iterator<Item = Arc<Test>> + Send> {
-    receiver: mpsc::Receiver<TestReport>,
+/// The queue of tests still to be handed out to workers.
+///
+/// This is shared across the worker threads, so it deliberately holds nothing but the queue
+/// and the configuration needed to decide whether a test is selected. In particular the
+/// results channel is kept out of it: `Receiver` is not `Sync`, and putting it here would
+/// leave the shared state `Send` only by assertion rather than by construction.
+struct PendingTests<I: Iterator<Item = Arc<Test>> + Send> {
     config: Arc<Config>,
     tests: parking_lot::Mutex<I>,
 }
-unsafe impl<I: Iterator<Item = Arc<Test>> + Send> Send for TestResultManager<I> {}
-impl<I: Iterator<Item = Arc<Test>> + Send> TestResultManager<I> {
-    fn new(receiver: mpsc::Receiver<TestReport>, config: Arc<Config>, tests: I) -> Self {
+impl<I: Iterator<Item = Arc<Test>> + Send> PendingTests<I> {
+    fn new(config: Arc<Config>, tests: I) -> Self {
         Self {
-            receiver,
             config,
             tests: parking_lot::Mutex::new(tests),
         }
     }
-
-    fn into_results(self) -> DiagResult<BTreeMap<TestStatus, Vec<TestReport>>> {
-        let mut all_excluded = true;
-        let mut results = BTreeMap::<TestStatus, Vec<TestReport>>::default();
-        for report in self.receiver {
-            if report.result.status != TestStatus::Excluded {
-                all_excluded = false;
-            }
-            results
-                .entry(report.result.status)
-                .or_insert_with(Vec::new)
-                .push(report);
-        }
-        let mut skipped = vec![];
-        let excluded = results.entry(TestStatus::Excluded).or_insert(vec![]);
-        for test in self.tests.into_inner() {
-            if self.config.is_selected(test.name()) {
-                all_excluded = false;
-                skipped.push(TestReport {
-                    test,
-                    result: TestResult::new(TestStatus::Skipped),
-                });
-            } else {
-                excluded.push(TestReport {
-                    test,
-                    result: TestResult::new(TestStatus::Excluded),
-                });
-            }
-        }
-        if excluded.is_empty() {
-            results.remove(&TestStatus::Excluded);
-        }
-        if !skipped.is_empty() {
-            results.insert(TestStatus::Skipped, skipped);
-        }
-        if all_excluded {
-            Err(LitError::NoTestsSelected {
-                available: results.values().map(|reports| reports.len()).sum(),
-            }
-            .into())
-        } else {
-            Ok(results)
-        }
-    }
 }
 
-struct TestResultManagerIter<I: Iterator<Item = Arc<Test>> + Send>(Arc<TestResultManager<I>>);
-unsafe impl<I: Iterator<Item = Arc<Test>> + Send> Send for TestResultManagerIter<I> {}
-impl<I: Iterator<Item = Arc<Test>> + Send> Iterator for TestResultManagerIter<I> {
+struct PendingTestsIter<I: Iterator<Item = Arc<Test>> + Send>(Arc<PendingTests<I>>);
+impl<I: Iterator<Item = Arc<Test>> + Send> Iterator for PendingTestsIter<I> {
     type Item = SelectResult;
 
     #[inline(always)]
@@ -356,6 +311,59 @@ impl<I: Iterator<Item = Arc<Test>> + Send> Iterator for TestResultManagerIter<I>
         } else {
             Some(SelectResult::Excluded(test))
         }
+    }
+}
+
+/// Drain the reports produced by the workers, and account for any tests which were never
+/// handed out because the run was aborted early.
+///
+/// This must only be called once every worker has finished, both so that the channel is
+/// closed and so that `pending` holds whatever is left of the queue.
+fn collect_results<I: Iterator<Item = Arc<Test>> + Send>(
+    receiver: mpsc::Receiver<TestReport>,
+    pending: PendingTests<I>,
+    config: &Config,
+) -> DiagResult<BTreeMap<TestStatus, Vec<TestReport>>> {
+    let mut all_excluded = true;
+    let mut results = BTreeMap::<TestStatus, Vec<TestReport>>::default();
+    for report in receiver {
+        if report.result.status != TestStatus::Excluded {
+            all_excluded = false;
+        }
+        results
+            .entry(report.result.status)
+            .or_insert_with(Vec::new)
+            .push(report);
+    }
+    let mut skipped = vec![];
+    let excluded = results.entry(TestStatus::Excluded).or_insert(vec![]);
+    for test in pending.tests.into_inner() {
+        if config.is_selected(test.name()) {
+            all_excluded = false;
+            skipped.push(TestReport {
+                test,
+                result: TestResult::new(TestStatus::Skipped),
+            });
+        } else {
+            excluded.push(TestReport {
+                test,
+                result: TestResult::new(TestStatus::Excluded),
+            });
+        }
+    }
+    if excluded.is_empty() {
+        results.remove(&TestStatus::Excluded);
+    }
+    if !skipped.is_empty() {
+        results.insert(TestStatus::Skipped, skipped);
+    }
+    if all_excluded {
+        Err(LitError::NoTestsSelected {
+            available: results.values().map(|reports| reports.len()).sum(),
+        }
+        .into())
+    } else {
+        Ok(results)
     }
 }
 

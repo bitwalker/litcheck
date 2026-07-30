@@ -15,7 +15,6 @@ pub struct TestResult {
     elapsed: Option<Duration>,
     start: Option<Instant>,
 }
-unsafe impl Send for TestResult {}
 impl From<std::process::Output> for TestResult {
     fn from(output: std::process::Output) -> Self {
         let mut result = Self::new(output.status.into());

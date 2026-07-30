@@ -277,6 +277,7 @@ mod tests {
     /// An inverted range must be rejected here, rather than being passed along to panic later
     /// at the point of slicing, where the origin of the bad bounds is no longer apparent.
     #[test]
+    #[allow(clippy::reversed_empty_ranges, reason = "the reversed range is the subject")]
     fn range_from_bounds_rejects_inverted_ranges() {
         let allowed = Range::new(0, 10);
         assert_eq!(range_from_bounds(8..4, allowed), Err(8..4));

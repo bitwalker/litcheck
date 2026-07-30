@@ -246,9 +246,10 @@ pub struct Options {
     ///
     /// If specified a single time, it causes filecheck to print good directive pattern matches
     ///
-    /// If specified multiple times, filecheck will emit internal diagnostics to aid in troubleshooting.
+    /// If specified multiple times, the region of input searched by a failed check is always
+    /// shown in full, rather than being summarized by its endpoints once it grows large.
     ///
-    /// If `--dump-input=fail` or `--dump-input=always`, add information as input annotations instead.
+    /// Has no effect on failed checks if `--dump-input=never`.
     #[arg(long, short = 'v', action = ArgAction::Count, help_heading = "Output")]
     pub verbose: u8,
     /// Whether, and how, to color terminal output
@@ -460,7 +461,7 @@ fn prefix_value_parser() -> ValueParser {
 /// ; CHECK-NEXT: b
 /// ; CHECK-NEXT: b
 /// ; CHECK-NEXT: c
-/// ");
+/// ", config);
 /// ```
 ///
 /// If successful, the `filecheck!` macro returns the pattern matches produced by verifying the

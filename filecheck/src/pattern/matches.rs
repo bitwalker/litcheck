@@ -82,6 +82,9 @@ impl<'input> Matches<'input> {
         I: IntoIterator<Item = MatchResult<'input>>,
     {
         self.0.extend(iter);
+        // Like `push` and `append`, this must leave the results ordered by their position in
+        // the input, with failures last, since `range` depends on that ordering
+        self.sort();
     }
 
     /// Return the maximum extent of the successful matches, or None if

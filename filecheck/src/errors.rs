@@ -300,8 +300,13 @@ impl CheckFailedError {
     where
         C: Context<'input, 'context> + ?Sized,
     {
-        let searched = if context.config().options.dump_input.is_enabled() {
-            SearchedRegion::describe(input.bounds(), context.input_file())
+        let config = context.config();
+        let searched = if config.options.dump_input.is_enabled() {
+            SearchedRegion::describe(
+                input.bounds(),
+                context.input_file(),
+                config.tracing_enabled(),
+            )
         } else {
             SmallVec::new()
         };
@@ -435,6 +440,9 @@ impl CheckFailedError {
 /// Larger regions are reported by marking their endpoints instead. miette renders every
 /// line between two labels in the same source, so without this a failed match against a
 /// large input would dump the entire input to the terminal.
+///
+/// Passing `-vv` overrides this, on the basis that if you asked for the verbose output you
+/// would rather have the whole region than a summary of it.
 const MAX_INLINE_SEARCHED_LINES: u32 = 10;
 
 /// Describes the region of the input which was searched, unsuccessfully, for a pattern.
@@ -462,7 +470,14 @@ pub enum SearchedRegion {
 
 impl SearchedRegion {
     /// Describe `range` of `input_file` as the region which was searched for a pattern.
-    pub fn describe(range: Range<usize>, input_file: Arc<SourceFile>) -> SmallVec<[Self; 2]> {
+    ///
+    /// Set `always_inline` to render the region in full however large it is, rather than
+    /// collapsing it to its endpoints past [MAX_INLINE_SEARCHED_LINES].
+    pub fn describe(
+        range: Range<usize>,
+        input_file: Arc<SourceFile>,
+        always_inline: bool,
+    ) -> SmallVec<[Self; 2]> {
         let id = input_file.id();
         let eof = input_file.len();
         let start = core::cmp::min(range.start, eof);
@@ -486,7 +501,7 @@ impl SearchedRegion {
             .line;
         let num_lines = last_line.to_u32().saturating_sub(first_line.to_u32()) + 1;
 
-        if num_lines <= MAX_INLINE_SEARCHED_LINES {
+        if always_inline || num_lines <= MAX_INLINE_SEARCHED_LINES {
             let message = if num_lines == 1 {
                 format!("searched this region of the input (line {first_line})")
             } else {
