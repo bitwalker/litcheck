@@ -216,10 +216,27 @@ pub trait SourceManager: Debug {
     fn location_to_span(&self, loc: Location) -> Option<SourceSpan>;
     /// Convert a [SourceSpan] to an equivalent [Location], if the span is valid
     fn location(&self, span: SourceSpan) -> Result<Location, SourceManagerError>;
-    /// Get the source associated with `id` as a string slice
-    fn source(&self, id: SourceId) -> Result<&str, SourceManagerError>;
-    /// Get the source corresponding to `span` as a string slice
-    fn source_slice(&self, span: SourceSpan) -> Result<&str, SourceManagerError>;
+    /// Get the source associated with `id`
+    ///
+    /// The returned [SourceFileRef] holds a strong reference to the content, so it stays
+    /// valid for as long as it is held, even if this manager's view of that document is
+    /// subsequently changed via [Self::update] — such an update copies on write rather than
+    /// modifying content which is still referenced.
+    fn source(&self, id: SourceId) -> Result<SourceFileRef, SourceManagerError> {
+        let file = self.get(id)?;
+        let span = file.source_span().into_range();
+        Ok(file.slice(span))
+    }
+    /// Get the source corresponding to `span`
+    ///
+    /// See [Self::source] for the lifetime guarantees of the returned handle.
+    fn source_slice(&self, span: SourceSpan) -> Result<SourceFileRef, SourceManagerError> {
+        let file = self.get(span.source_id())?;
+        if file.source_slice(span.into_slice_index()).is_none() {
+            return Err(SourceManagerError::InvalidBounds);
+        }
+        Ok(file.slice(span.into_range()))
+    }
 }
 
 impl<T: ?Sized + SourceManager> SourceManager for Arc<T> {
@@ -283,11 +300,11 @@ impl<T: ?Sized + SourceManager> SourceManager for Arc<T> {
         (**self).location(span)
     }
     #[inline(always)]
-    fn source(&self, id: SourceId) -> Result<&str, SourceManagerError> {
+    fn source(&self, id: SourceId) -> Result<SourceFileRef, SourceManagerError> {
         (**self).source(id)
     }
     #[inline(always)]
-    fn source_slice(&self, span: SourceSpan) -> Result<&str, SourceManagerError> {
+    fn source_slice(&self, span: SourceSpan) -> Result<SourceFileRef, SourceManagerError> {
         (**self).source_slice(span)
     }
 }
@@ -534,23 +551,6 @@ impl SourceManager for DefaultSourceManager {
         let manager = self.0.read();
         manager.location(span)
     }
-
-    fn source(&self, id: SourceId) -> Result<&str, SourceManagerError> {
-        let manager = self.0.read();
-        let ptr = manager.get(id).map(|file| file.as_str() as *const str)?;
-        drop(manager);
-        // SAFETY: Because the lifetime of the returned reference is bound to the manager, and
-        // because we can only ever add files, not modify/remove them, this is safe. Exclusive
-        // access to the manager does _not_ mean exclusive access to the contents of previously
-        // added source files
-        Ok(unsafe { &*ptr })
-    }
-
-    fn source_slice(&self, span: SourceSpan) -> Result<&str, SourceManagerError> {
-        self.source(span.source_id())?
-            .get(span.into_slice_index().into_range())
-            .ok_or(SourceManagerError::InvalidBounds)
-    }
 }
 
 #[cfg(test)]
@@ -562,5 +562,83 @@ mod error_assertions {
 
     fn _assert_source_manager_error_bounds(err: SourceManagerError) {
         _assert_error_is_send_sync_static(err);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::diagnostics::{Position, Selection, SourceLanguage};
+
+    /// A handle returned by [SourceManager::source] must remain valid across an update to the
+    /// document it refers to.
+    ///
+    /// `source` used to hand back a `&str` derived from a raw pointer into the manager's
+    /// `Arc<SourceFile>`, on the stated assumption that content is only ever added, never
+    /// modified. `update` breaks that assumption: it reaches for the content through
+    /// `Arc::make_mut` and rewrites the `String` in place, which can reallocate out from
+    /// under any outstanding reference.
+    ///
+    /// Returning a `SourceFileRef` holds the content alive, so `Arc::make_mut` copies rather
+    /// than mutating shared content, and the handle keeps observing what it was given.
+    #[test]
+    fn source_handle_survives_update_of_the_same_file() {
+        let manager = DefaultSourceManager::default();
+        let file = manager.load(
+            SourceLanguage::Unknown,
+            FileName::Virtual("test".into()),
+            "alpha\nbeta\n".to_string(),
+        );
+        let id = file.id();
+        // Drop our own handle so the manager holds the only other reference; if `update` were
+        // going to mutate in place, this is when it would.
+        drop(file);
+
+        let borrowed = manager.source(id).expect("source should be available");
+        assert_eq!(borrowed.as_str(), "alpha\nbeta\n");
+
+        manager
+            .update(
+                id,
+                "REPLACED, AND SUBSTANTIALLY LONGER SO AS TO FORCE A REALLOCATION\n".to_string(),
+                Some(Selection::new(Position::new(0, 0), Position::new(1, 0))),
+                1,
+            )
+            .expect("update should succeed");
+
+        assert_eq!(
+            borrowed.as_str(),
+            "alpha\nbeta\n",
+            "an outstanding handle must keep observing the content it was given"
+        );
+        assert_eq!(
+            manager.source(id).unwrap().as_str(),
+            "REPLACED, AND SUBSTANTIALLY LONGER SO AS TO FORCE A REALLOCATION\nbeta\n",
+            "a fresh handle must observe the updated content"
+        );
+    }
+
+    /// `source_slice` rejects a span which is out of bounds for its file, rather than
+    /// panicking when the returned handle is read.
+    #[test]
+    fn source_slice_rejects_out_of_bounds_spans() {
+        let manager = DefaultSourceManager::default();
+        let file = manager.load(
+            SourceLanguage::Unknown,
+            FileName::Virtual("test".into()),
+            "alpha\n".to_string(),
+        );
+
+        assert_eq!(
+            manager
+                .source_slice(SourceSpan::new(file.id(), Range::new(0u32, 5u32)))
+                .unwrap()
+                .as_str(),
+            "alpha"
+        );
+        assert_matches!(
+            manager.source_slice(SourceSpan::new(file.id(), Range::new(0u32, 999u32))),
+            Err(SourceManagerError::InvalidBounds)
+        );
     }
 }
