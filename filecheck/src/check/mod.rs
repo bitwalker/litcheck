@@ -49,10 +49,12 @@ impl<'a> Checker<'a> {
             ));
         }
 
-        match discover_blocks(&self.program, &mut context) {
+        let mut result = match discover_blocks(&self.program, &mut context) {
             Ok(blocks) => check_blocks(blocks, &self.program, &mut context),
             Err(failed) => TestResult::from_error(failed),
-        }
+        };
+        result.attach_input_dump(&context);
+        result
     }
 }
 

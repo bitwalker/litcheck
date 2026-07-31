@@ -98,6 +98,28 @@ impl TestResult {
         }
     }
 
+    /// Attach an annotated dump of the input to this result, if the test failed and
+    /// `--dump-input` asked for one.
+    ///
+    /// Must be called once checking is complete, so that the dump can be annotated with every
+    /// match which did succeed.
+    pub fn attach_input_dump<'input, 'context: 'input>(
+        &mut self,
+        context: &MatchContext<'input, 'context>,
+    ) {
+        // NOTE: `--dump-input=always` is currently treated as `fail`; we do not yet dump the
+        // input for a passing run. See `Dump::is_enabled`.
+        if self.is_ok() || !context.config.options.dump_input.is_enabled() {
+            return;
+        }
+        self.error.input_dump = Some(InputDump::new(
+            context.input_file(),
+            &context.match_file(),
+            &self.matches,
+            self.num_errors(),
+        ));
+    }
+
     pub fn unwrap_err(self) -> TestFailed {
         if self.is_failed() {
             self.error

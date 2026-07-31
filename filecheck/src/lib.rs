@@ -12,7 +12,7 @@ pub mod rules;
 mod test;
 
 pub use self::errors::{
-    CheckFailedError, RelatedCheckError, RelatedError, SearchedRegion, TestFailed,
+    CheckFailedError, InputDump, RelatedCheckError, RelatedError, SearchedRegion, TestFailed,
 };
 #[cfg(test)]
 pub use self::test::TestContext;
@@ -58,7 +58,7 @@ pub(crate) mod common {
     pub use crate::cursor::{Cursor, CursorGuard, CursorPosition};
     pub use crate::env::{Env, LexicalScope, LexicalScopeMut, ScopeGuard};
     pub use crate::errors::{
-        CheckFailedError, RelatedCheckError, RelatedError, RelatedLabel, TestFailed,
+        CheckFailedError, InputDump, RelatedCheckError, RelatedError, RelatedLabel, TestFailed,
     };
     pub use crate::expr::{BinaryOp, Expr, Number, NumberFormat, Value, VariableName};
     pub use crate::input::Input;

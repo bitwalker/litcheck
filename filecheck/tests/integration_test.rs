@@ -726,3 +726,90 @@ mod searched_region {
         }
     }
 }
+
+mod input_dump {
+    use super::*;
+    use filecheck::Dump;
+
+    fn failure(checks: &str, input: &str, dump_input: Dump) -> TestFailed {
+        let config = Config {
+            options: Options {
+                dump_input,
+                ..Options::default()
+            },
+            ..Config::default()
+        };
+        let match_file = source_file!(config, checks);
+        let input_file = source_file!(config, input);
+        Test::new(match_file, &config)
+            .verify(input_file)
+            .unwrap_err()
+            .downcast::<TestFailed>()
+            .unwrap()
+    }
+
+    /// The dump is what makes "the pattern is absent from the input" distinguishable from
+    /// "the pattern is present but did not match" without re-running the command by hand.
+    #[test]
+    fn dump_is_attached_on_failure() {
+        let failed = failure("CHECK: alpha\nCHECK: absent\n", "alpha\nbeta\n", Dump::Fail);
+        let dump = failed.input_dump.expect("expected an input dump");
+        let rendered = render(&dump);
+
+        // The whole input must be rendered, not just the neighbourhood of the annotations.
+        assert!(rendered.contains("alpha"), "{rendered}");
+        assert!(rendered.contains("beta"), "{rendered}");
+        // ...and the match which did succeed must be attributed to its check line.
+        assert!(
+            rendered.contains("matched by the check on line 1"),
+            "{rendered}"
+        );
+    }
+
+    /// A failure raised while discovering CHECK-LABEL blocks aborts before any other check
+    /// runs, so the dump must still be produced -- this is the case that motivated it.
+    #[test]
+    fn dump_is_attached_when_a_check_label_fails() {
+        let failed = failure(
+            "CHECK: alpha\nCHECK-LABEL: absent_label\n",
+            "alpha\nbeta\n",
+            Dump::Fail,
+        );
+        let dump = failed.input_dump.expect("expected an input dump");
+        let rendered = render(&dump);
+        assert!(
+            rendered.contains("alpha") && rendered.contains("beta"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("no checks matched anywhere in this input"),
+            "{rendered}"
+        );
+    }
+
+    #[test]
+    fn dump_is_suppressed_by_dump_input_never() {
+        let failed = failure("CHECK: absent\n", "alpha\n", Dump::Never);
+        assert!(failed.input_dump.is_none());
+    }
+
+    /// The reported line count must not include the empty line implied by a trailing newline.
+    #[test]
+    fn dump_line_count_excludes_trailing_newline() {
+        let failed = failure("CHECK: absent\n", "one\ntwo\nthree\n", Dump::Fail);
+        let dump = failed.input_dump.expect("expected an input dump");
+        assert!(
+            dump.to_string().contains("3 line(s)"),
+            "expected 3 lines, got: {dump}"
+        );
+    }
+
+    fn render(d: &dyn litcheck::diagnostics::Diagnostic) -> String {
+        let handler = litcheck::reporting::GraphicalReportHandler::new_themed(
+            litcheck::reporting::GraphicalTheme::unicode_nocolor(),
+        );
+        let mut out = String::new();
+        handler.render_report(&mut out, d).unwrap();
+        out
+    }
+}

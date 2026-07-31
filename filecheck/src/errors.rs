@@ -1,13 +1,32 @@
 use crate::common::*;
 use crate::test::TestInputType;
 
-#[derive(Diagnostic, Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error)]
 #[error("{test_from} failed")]
-#[diagnostic(help("see below for details"))]
 pub struct TestFailed {
     pub test_from: TestInputType,
-    #[related]
     pub errors: Vec<CheckFailedError>,
+    /// An annotated dump of the input, if `--dump-input` requested one.
+    ///
+    /// Rendered last, after the individual failures.
+    pub input_dump: Option<InputDump>,
+}
+
+// NOTE: `Diagnostic` is implemented by hand rather than derived because this type has two
+// sources of related diagnostics. miette's derive silently honours only the *first* field
+// marked `#[related]` and discards the rest, so deriving here would drop the input dump.
+impl Diagnostic for TestFailed {
+    fn help<'a>(&'a self) -> Option<Box<dyn fmt::Display + 'a>> {
+        Some(Box::new("see below for details"))
+    }
+    fn related<'a>(&'a self) -> Option<Box<dyn Iterator<Item = &'a dyn Diagnostic> + 'a>> {
+        Some(Box::new(
+            self.errors
+                .iter()
+                .map(|err| err as &dyn Diagnostic)
+                .chain(self.input_dump.iter().map(|dump| dump as &dyn Diagnostic)),
+        ))
+    }
 }
 impl TestFailed {
     pub fn new<'input, 'context: 'input>(
@@ -17,6 +36,7 @@ impl TestFailed {
         Self {
             test_from: TestInputType(context.match_file().uri().clone()),
             errors,
+            input_dump: None,
         }
     }
 
@@ -431,6 +451,113 @@ impl CheckFailedError {
         }
 
         related
+    }
+}
+
+/// An annotated dump of the input which was checked.
+///
+/// Rendered when a check fails and `--dump-input` is enabled. The point of this is to answer
+/// the question the per-failure diagnostics cannot: whether the text a pattern was looking for
+/// is present in the input at all. Without it, "pattern absent" and "pattern present but not
+/// matched" are indistinguishable without re-running the command by hand — which is not an
+/// option when the failure only reproduces in CI.
+///
+/// The whole input is rendered, annotated with the region each successful check matched.
+#[derive(Debug)]
+pub struct InputDump {
+    input_file: Arc<SourceFile>,
+    summary: String,
+    labels: Vec<Label>,
+}
+
+impl InputDump {
+    /// Build a dump of `input_file`, annotated with the matches which did succeed.
+    ///
+    /// `match_file` is used to report the check-file line responsible for each match; matches
+    /// originating elsewhere (e.g. an `--implicit-check-not` pattern, which lives in its own
+    /// pseudo-file) are annotated without one.
+    pub fn new(
+        input_file: Arc<SourceFile>,
+        match_file: &SourceFile,
+        matched: &[MatchInfo<'static>],
+        num_failed: usize,
+    ) -> Self {
+        let id = input_file.id();
+        let eof = input_file.len();
+        // The line of the last byte, rather than `line_count`, which counts the empty line
+        // implied by a trailing newline and would report one line too many.
+        let num_lines = if eof == 0 {
+            0
+        } else {
+            input_file
+                .location(SourceSpan::at(id, (eof - 1) as u32))
+                .line
+                .to_u32()
+        };
+
+        let mut labels = Vec::with_capacity(matched.len() + 1);
+        // A label spanning the entire input, so that every line is rendered rather than just
+        // the neighbourhood of the annotations. Its message lands at the end of the dump.
+        labels.push(Label::new(
+            SourceSpan::from_range_unchecked(id, 0..eof),
+            if matched.is_empty() {
+                "no checks matched anywhere in this input".to_string()
+            } else {
+                format!("{} check(s) matched, as annotated above", matched.len())
+            },
+        ));
+
+        for info in matched {
+            // Zero-length matches (e.g. CHECK-EMPTY) have nothing to underline
+            if info.span.is_empty() {
+                continue;
+            }
+            let label = match line_of(match_file, info.pattern_span) {
+                Some(line) => format!("matched by the check on line {line}"),
+                None => "matched by an implicit check".to_string(),
+            };
+            labels.push(Label::new(info.span, label));
+        }
+
+        Self {
+            input_file,
+            summary: format!(
+                "the input that was checked ({num_lines} line(s), {num_failed} failed check(s))"
+            ),
+            labels,
+        }
+    }
+}
+
+/// The line in `file` at which `span` begins, if `span` belongs to `file`.
+fn line_of(file: &SourceFile, span: SourceSpan) -> Option<u32> {
+    if span.source_id() != file.id() {
+        return None;
+    }
+    Some(file.location(span).line.to_u32())
+}
+
+impl fmt::Display for InputDump {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(&self.summary)
+    }
+}
+
+impl std::error::Error for InputDump {}
+
+impl Diagnostic for InputDump {
+    fn severity(&self) -> Option<litcheck::diagnostics::Severity> {
+        Some(litcheck::diagnostics::Severity::Advice)
+    }
+    fn source_code(&self) -> Option<&dyn litcheck::diagnostics::SourceCode> {
+        Some(&self.input_file)
+    }
+    fn labels(&self) -> Option<Box<dyn Iterator<Item = LabeledSpan> + '_>> {
+        if self.labels.is_empty() {
+            None
+        } else {
+            Some(Box::new(self.labels.iter().cloned().map(Into::into)))
+        }
     }
 }
 
