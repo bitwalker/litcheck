@@ -86,6 +86,7 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
             Err(err) => return ControlFlow::Break(Err(err)),
         };
         if let Some(info) = result.info.as_ref() {
+            let prefix_start = info.span.start().to_usize();
             self.part_matched(info.span.into_slice_index());
             self.cursor.set_anchored(true);
 
@@ -110,14 +111,14 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
                 self.match_end,
                 result.ty
             );
-            // Reset the searcher, but start the next search where the cursor left off, but ensure
-            // that we advance the cursor at least one byte to avoid looping indefinitely
-            let search_stopped_at = self.match_end;
-            self.reset(core::cmp::max(search_stopped_at, search_started_at + 1));
-            if anchored {
+            // Retry after the prefix start so overlapping candidates remain searchable.
+            // Stop before reset would clamp a position beyond the search range back to EOF.
+            let next_start = prefix_start + 1;
+            if anchored || next_start > self.input.end() {
                 self.captures.set_pattern(None);
                 return ControlFlow::Break(Ok(()));
             }
+            self.reset(next_start);
         } else {
             // No possible match in remaining input
             self.captures.set_pattern(None);
