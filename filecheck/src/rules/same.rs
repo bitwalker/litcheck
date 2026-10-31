@@ -40,7 +40,7 @@ where
                 info: Some(info),
             } if ty.is_ok() => {
                 let cursor = context.cursor_mut();
-                assert!(info.span.start().to_usize() < cursor.end_of_line());
+                assert!(info.span.end().to_usize() <= cursor.end_of_line());
                 cursor.set_start(info.span.end().to_usize());
                 Ok(MatchResult::new(ty, Some(info)).into())
             }
