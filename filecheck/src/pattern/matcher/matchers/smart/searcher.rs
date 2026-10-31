@@ -133,17 +133,6 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
         context: &mut ContextGuard<'_, 'input, 'context>,
     ) -> DiagResult<MatchResult<'input>> {
         for part in parts.iter() {
-            if self.cursor.is_empty() {
-                log::trace!(target: "smart:searcher", "no more input to consume: cannot match");
-                // No match possible
-                self.captures.set_pattern(None);
-                return Ok(MatchResult::failed(CheckFailedError::match_none(
-                    self.span,
-                    &self.input,
-                    context,
-                )));
-            }
-
             match part {
                 MatchOp::Constraint {
                     span,
