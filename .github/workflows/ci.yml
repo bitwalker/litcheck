@@ -6,11 +6,9 @@ on:
       - main
     paths-ignore:
       - "**.md"
-      - "**.txt"
   pull_request:
     paths-ignore:
       - "**.md"
-      - "**.txt"
 
 env:
   # Set the new value when the cache grows too much and we hit the runner's disk space limit
