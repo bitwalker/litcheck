@@ -17,7 +17,7 @@ macro_rules! numeric_bound_impl {
     ($type:ty) => {
         impl NumericRangeBound for $type {
             const ZERO: Self = 0;
-            const ONE: Self = 0;
+            const ONE: Self = 1;
 
             #[inline(always)]
             fn saturating_sub(self, rhs: Self) -> Self {
@@ -100,20 +100,18 @@ impl<T: NumericRangeBound> Range<T> {
     /// Shrink the length of this range by one element from the front, returning the first item in the range.
     #[inline]
     pub fn pop_front(&mut self) -> Option<T> {
-        let item = self.start;
-        let next = item + <T as NumericRangeBound>::ONE;
-        if next <= self.end {
-            self.start = next;
-            Some(item)
-        } else {
-            None
+        if self.is_empty() {
+            return None;
         }
+        let item = self.start;
+        self.start += <T as NumericRangeBound>::ONE;
+        Some(item)
     }
 
     /// Shrink the length of this range by one element from the end, returning the last item in the range.
     #[inline]
     pub fn pop_back(&mut self) -> Option<T> {
-        if self.start == self.end {
+        if self.is_empty() {
             None
         } else {
             let item = self.end.saturating_sub(<T as NumericRangeBound>::ONE);
@@ -127,7 +125,7 @@ impl<T: NumericRangeBound> Range<T> {
     /// NOTE: This function will saturate to `self.end` to ensure the range remains valid.
     #[inline]
     pub fn shrink_front(&mut self, n: T) {
-        self.start = core::cmp::min(self.start + n, self.end);
+        self.start += core::cmp::min(n, self.len());
     }
 
     /// Truncate this range such that it's length is `new_len`, i.e. `start..(start + new_len)`
@@ -137,7 +135,7 @@ impl<T: NumericRangeBound> Range<T> {
     /// NOTE: This function will panic if `new_len` is greater than the current length
     #[inline]
     pub fn truncate(&mut self, new_len: T) {
-        assert!(self.len() > new_len);
+        assert!(new_len <= self.len());
         self.end = self.start + new_len;
     }
 }
@@ -257,6 +255,47 @@ pub fn range_from_bounds_with_defaults<R: RangeBounds<usize>>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    macro_rules! check_bounds {
+        ($($ty:ty),* $(,)?) => {$(
+            {
+                let mut front = Range::new(0 as $ty, 3 as $ty);
+                for expected in [Some(0), Some(1), Some(2), None, None] {
+                    assert_eq!(front.pop_front(), expected);
+                }
+                let mut back = Range::new(0 as $ty, 3 as $ty);
+                for expected in [Some(2), Some(1), Some(0), None, None] {
+                    assert_eq!(back.pop_back(), expected);
+                }
+                let mut mixed = Range::new(0 as $ty, 3 as $ty);
+                assert_eq!(mixed.pop_front(), Some(0));
+                assert_eq!(mixed.pop_back(), Some(2));
+                assert_eq!(mixed.pop_front(), Some(1));
+                assert!(mixed.is_empty());
+                assert_eq!(mixed.pop_back(), None);
+                let mut endpoint = Range::new(<$ty>::MAX - 1, <$ty>::MAX);
+                assert_eq!(endpoint.pop_front(), Some(<$ty>::MAX - 1));
+                assert_eq!(endpoint.pop_front(), None);
+                assert_eq!(endpoint.pop_back(), None);
+            }
+        )*};
+    }
+
+    #[test]
+    fn pops_exhaust_half_open_ranges_without_overflow() {
+        check_bounds!(u8, u16, u32, u64, usize);
+    }
+
+    #[test]
+    fn shrinking_and_truncating_preserve_range_bounds() {
+        let mut range = Range::new(1u8, 3);
+        range.truncate(2);
+        assert_eq!(range, Range::new(1, 3));
+        range.shrink_front(u8::MAX);
+        assert_eq!(range, Range::new(3, 3));
+        range.truncate(0);
+        assert!(range.is_empty());
+    }
 
     #[test]
     fn range_from_bounds_resolves_unbounded_ends() {
