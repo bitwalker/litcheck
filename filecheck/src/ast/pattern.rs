@@ -258,6 +258,67 @@ impl<'a> PartialEq for CheckPattern<'a> {
     }
 }
 impl<'a> CheckPattern<'a> {
+    /// Require this positive pattern to consume a complete line, preserving captures and spans.
+    pub fn match_full_lines(self, strict_whitespace: bool) -> Self {
+        let span = self.span();
+        let mut parts = match self {
+            Self::Empty(_) => return self,
+            Self::Literal(literal) => vec![CheckPatternPart::Literal(literal)],
+            Self::Regex(regex) => vec![CheckPatternPart::Regex(regex)],
+            Self::Match(parts) => parts.into_inner(),
+        };
+        if !strict_whitespace {
+            if let Some(CheckPatternPart::Literal(literal)) = parts.first_mut() {
+                **literal = Cow::Owned(literal.trim_start_matches([' ', '\t']).into());
+            }
+            if let Some(CheckPatternPart::Literal(literal)) = parts.last_mut() {
+                **literal = Cow::Owned(literal.trim_end_matches([' ', '\t']).into());
+            }
+        }
+        for part in &mut parts {
+            match part {
+                CheckPatternPart::Literal(literal) => {
+                    let mut pattern = String::new();
+                    let mut previous_was_space = false;
+                    for character in literal.chars() {
+                        let space = !strict_whitespace && matches!(character, ' ' | '\t');
+                        if space {
+                            if !previous_was_space {
+                                pattern.push_str("[ \\t]+");
+                            }
+                        } else {
+                            regex_syntax::escape_into(&character.to_string(), &mut pattern);
+                        }
+                        previous_was_space = space;
+                    }
+                    *part = CheckPatternPart::Regex(RegexPattern::new(Span::new(
+                        literal.span(),
+                        pattern.into(),
+                    )));
+                }
+                // Keep alternatives scoped to their original regex block when compacting.
+                CheckPatternPart::Regex(regex) => {
+                    *regex.pattern = format!("(?:{})", regex.pattern.inner()).into();
+                }
+                CheckPatternPart::Match(_) => (),
+            }
+        }
+        let (start, end) = if strict_whitespace {
+            ("^", "$")
+        } else {
+            ("^[ \\t]*", "[ \\t]*$")
+        };
+        parts.insert(
+            0,
+            CheckPatternPart::Regex(RegexPattern::new(Span::new(span, start.into()))),
+        );
+        parts.push(CheckPatternPart::Regex(RegexPattern::new(Span::new(
+            span,
+            end.into(),
+        ))));
+        Self::Match(Span::new(span, parts))
+    }
+
     pub fn is_empty(&self) -> bool {
         match self {
             Self::Empty(_) => true,

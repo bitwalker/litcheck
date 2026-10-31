@@ -1,10 +1,10 @@
 // RUN: %ProtectFileCheckOutput \
 // RUN: not FileCheck --match-full-lines --dump-input=never --input-file %s %s  2>&1 \
-// RUN:   | FileCheck --check-prefix=ERROR --implicit-check-not=error: %s
+// RUN:   | FileCheck --check-prefix=ERROR --implicit-check-not='{{× (no matches|one or more|match found)}}' %s
 // RUN: %ProtectFileCheckOutput \
 // RUN: not FileCheck --match-full-lines --strict-whitespace --dump-input=never --input-file %s %s \
 // RUN: 2>&1 | FileCheck --check-prefix=ERROR-STRICT --check-prefix=ERROR \
-// RUN:                  --implicit-check-not=error: %s
+// RUN:                  --implicit-check-not='{{× (no matches|one or more|match found)}}' %s
 
 Label 1
 a line
@@ -29,28 +29,44 @@ Label 66
 // CHECK:a line
 // CHECK:trailing whitespace
 // CHECK:trailing more whitespace   
-// ERROR-STRICT:error: {{C}}HECK: expected string not found in input
-// ERROR-STRICT:// {{C}}HECK:trailing whitespace
+// ERROR-STRICT: one or more matches were not found for a set of expected patterns
+// ERROR-STRICT: no matches were found for expected pattern
+// ERROR-STRICT-NEXT: match-full-lines.txt:[[#@LINE-4]]:10
+// ERROR-STRICT: {{C}}HECK:trailing whitespace
+// ERROR-STRICT: pattern at this location was not matched
 
 // CHECK-LABEL:Label 2
 // CHECK:a line
 // CHECK-NEXT:leading whitespace
 // CHECK-NEXT:   leading more whitespace
-// ERROR-STRICT:error: {{C}}HECK-NEXT: expected string not found in input
-// ERROR-STRICT:// {{C}}HECK-NEXT:leading whitespace
+// ERROR-STRICT: one or more matches were not found for a set of expected patterns
+// ERROR-STRICT: no matches were found for expected pattern
+// ERROR-STRICT-NEXT: match-full-lines.txt:[[#@LINE-4]]:15
+// ERROR-STRICT: {{C}}HECK-NEXT:leading whitespace
+// ERROR-STRICT: pattern at this location was not matched
 
 // CHECK-LABEL:Label 3
 // CHECK:line
-// ERROR:error: {{C}}HECK: expected string not found in input
-// ERROR:// {{C}}HECK:line
+// ERROR: no matches were found for expected pattern
+// ERROR-NEXT: match-full-lines.txt:[[#@LINE-2]]:10
+// ERROR: {{C}}HECK:line
+// ERROR: pattern at this location was not matched
 
 // CHECK-LABEL:Label 4
 // CHECK:a line
 // CHECK-NOT:random
-// ERROR:error: {{C}}HECK-NOT: excluded string found in input
-// ERROR:a random thing
+// ERROR: match found, but was excluded
+// ERROR-NEXT: match-full-lines.txt:[[#@LINE-36]]:3
+// ERROR: a random thing
+// ERROR: match found here
+// ERROR: see also
+// ERROR-NEXT: match-full-lines.txt:[[#@LINE-6]]:14
+// ERROR: {{C}}HECK-NOT:random
+// ERROR: by this pattern
 
 // CHECK-LABEL:Label 5
 // CHECK-LABEL:Label 6
-// ERROR:error: {{C}}HECK-LABEL: expected string not found in input
-// ERROR:{{C}}HECK-LABEL:Label 6
+// ERROR: no matches were found for expected pattern
+// ERROR-NEXT: match-full-lines.txt:[[#@LINE-2]]:16
+// ERROR: {{C}}HECK-LABEL:Label 6
+// ERROR: pattern at this location was not matched

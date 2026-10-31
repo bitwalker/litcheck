@@ -203,7 +203,15 @@ impl<'a> CheckProgram<'a> {
     /// Preprocess lines into blocks/groups
     fn compile_lines(&mut self, lines: Vec<CheckLine<'a>>, config: &Config) -> DiagResult<()> {
         // Divide up input lines into blocks
-        let mut iter = lines.into_iter().peekable();
+        let mut iter = lines
+            .into_iter()
+            .map(|mut line| {
+                if config.options.match_full_lines && !matches!(line.kind(), Check::Not | Check::Empty) {
+                    line.pattern = line.pattern.match_full_lines(config.options.strict_whitespace);
+                }
+                line
+            })
+            .peekable();
         let mut label = None;
         let mut block = vec![];
         let mut blocks: VecDeque<(Option<CheckLine<'a>>, Vec<CheckLine<'a>>)> = VecDeque::default();
@@ -504,7 +512,7 @@ impl<'a> CheckProgram<'a> {
         pattern: CheckPattern<'a>,
         config: &Config,
     ) -> DiagResult<Box<dyn DynRule + 'a>> {
-        let pattern = if ty.is_literal_match() {
+        let pattern = if ty.is_literal_match() && !config.options.match_full_lines {
             Pattern::compile_literal(pattern, config)?
         } else {
             Pattern::compile(pattern, config)?

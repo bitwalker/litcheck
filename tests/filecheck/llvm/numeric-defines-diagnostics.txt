@@ -5,49 +5,49 @@ RUN: %ProtectFileCheckOutput \
 RUN: not FileCheck -D#10VALUE=10 --input-file %s %s 2>&1 \
 RUN:   | FileCheck %s --check-prefix NUMERRCLINAME
 
-NUMERRCLINAME: error: invalid value '#10VALUE=10' for '--define <NAME=VALUE>':
+NUMERRCLINAME: error: invalid value '#10VALUE=10' for '--define <NAME=VALUE>':   x unrecognized token
 NUMERRCLINAME-NEXT:   ,----
-NUMERICLINAME-NEXT: 1 | #10VALUE=10
-NUMERICLINAME-NEXT:   :  ^|
-NUMERICLINAME-NEXT:   :    -- lexed a 10 here
-NUMERICLINAME-NEXT:   `----
-NUMERICLINAME-NEXT:  help: expected one of: ident, "%"
+NUMERRCLINAME-NEXT: 1 | #10VALUE=10
+NUMERRCLINAME-NEXT:   :  ^|
+NUMERRCLINAME-NEXT:   :   `-- lexed a 10 here
+NUMERRCLINAME-NEXT:   `----
+NUMERRCLINAME-NEXT:  help: expected one of: ident, "%"
 
 ; Invalid definition of pseudo variable.
 RUN: %ProtectFileCheckOutput \
 RUN: not FileCheck -D#@VALUE=10 --input-file %s %s 2>&1 \
 RUN:   | FileCheck %s --strict-whitespace --match-full-lines --check-prefix NUMERRCLIPSEUDO
 
-NUMERRCLIPSEUDO: error: invalid value '#@VALUE=10' for '--define <NAME=VALUE>':
-NUMERRCLIPSEUDO-NEXT:   ,----
-NUMERRCLIPSEUDO-NEXT: 1 | #@VALUE=10
-NUMERRCLIPSEUDO-NEXT:   :  |
-NUMERRCLIPSEUDO-NEXT:   :  `-- lexed a @ here
-NUMERRCLIPSEUDO-NEXT:   `----
-NUMERRCLIPSEUDO-NEXT:  help: expected one of: ident, "%"
+NUMERRCLIPSEUDO: error: invalid value '#@VALUE=10' for '--define <NAME=VALUE>':   x unrecognized token
+NUMERRCLIPSEUDO-NEXT:    ,----
+NUMERRCLIPSEUDO-NEXT:  1 | #@VALUE=10
+NUMERRCLIPSEUDO-NEXT:    :  |
+NUMERRCLIPSEUDO-NEXT:    :  `-- lexed a @ here
+NUMERRCLIPSEUDO-NEXT:    `----
+NUMERRCLIPSEUDO-NEXT:   help: expected one of: ident, "%"
 
 ; Invalid definition of an expression.
 RUN: %ProtectFileCheckOutput \
 RUN: not FileCheck -D#VALUE+2=10 --input-file %s %s 2>&1 \
 RUN:   | FileCheck %s --strict-whitespace --match-full-lines --check-prefix NUMERRCLITRAIL
 
-NUMERRCLITRAIL: error: invalid value '#VALUE+2=10' for '--define <NAME=VALUE>':
-NUMERRCLITRAIL-NEXT:   ,----
-NUMERRCLITRAIL-NEXT: 1 | #VALUE+2=10
-NUMERRCLITRAIL-NEXT:   :       |
-NUMERRCLITRAIL-NEXT:   :       `-- lexed a + here
-NUMERRCLITRAIL-NEXT:   `----
-NUMERRCLITRAIL-NEXT:  help: expected one of: "="
+NUMERRCLITRAIL: error: invalid value '#VALUE+2=10' for '--define <NAME=VALUE>':   x unrecognized token
+NUMERRCLITRAIL-NEXT:    ,----
+NUMERRCLITRAIL-NEXT:  1 | #VALUE+2=10
+NUMERRCLITRAIL-NEXT:    :       |
+NUMERRCLITRAIL-NEXT:    :       `-- lexed a + here
+NUMERRCLITRAIL-NEXT:    `----
+NUMERRCLITRAIL-NEXT:   help: expected one of: "="
 
 ; Invalid format for variable.
 RUN: %ProtectFileCheckOutput \
 RUN: not FileCheck -D#,VALUE=10 --input-file %s %s 2>&1 \
 RUN:   | FileCheck %s --strict-whitespace --match-full-lines --check-prefix NUMERRCLIFMT
 
-NUMERRCLIFMT: error: invalid value '#,VALUE=10' for '--define <NAME=VALUE>':
-NUMERRCLIFMT-NEXT:   ,----
-NUMERRCLIFMT-NEXT: 1 | #,VALUE=10
-NUMERRCLIFMT-NEXT:   :  |
-NUMERRCLIFMT-NEXT:   :  `-- lexed a , here
-NUMERRCLIFMT-NEXT:   `----
-NUMERRCLIFMT-NEXT:  help: expected one of: ident, "%"
+NUMERRCLIFMT: error: invalid value '#,VALUE=10' for '--define <NAME=VALUE>':   x unrecognized token
+NUMERRCLIFMT-NEXT:    ,----
+NUMERRCLIFMT-NEXT:  1 | #,VALUE=10
+NUMERRCLIFMT-NEXT:    :  |
+NUMERRCLIFMT-NEXT:    :  `-- lexed a , here
+NUMERRCLIFMT-NEXT:    `----
+NUMERRCLIFMT-NEXT:   help: expected one of: ident, "%"

@@ -42,12 +42,12 @@ RUN: %ProtectFileCheckOutput \
 RUN: not FileCheck -D10VALUE=10 --input-file %s %s 2>&1 \
 RUN:   | FileCheck %s --strict-whitespace --match-full-lines --check-prefix ERRCLINAME
 
-ERRCLINAME: error: invalid value '10VALUE=10' for '--define <NAME=VALUE>':
-ERRCLINAME-SAME: name contains invalid characters
-ERRCLINAME-NEXT:   ,----
-ERRCLINAME-NEXT: 1 | 10VALUE=10
-ERRCLINAME-NEXT:   : ^^^^^^^
-ERRCLINAME-NEXT:   `----
+ERRCLINAME: error: invalid value '10VALUE=10' for '--define <NAME=VALUE>':   x name contains invalid characters
+ERRCLINAME-NEXT:    ,----
+ERRCLINAME-NEXT:  1 | 10VALUE=10
+ERRCLINAME-NEXT:    : ^^^^^^^
+ERRCLINAME-NEXT:    `----
+ERRCLINAME-NEXT:   help: variable names must match the pattern `[A-Za-z_][A-Za-z0-9_]*`
 
 
 ; Invalid definition of pseudo variable.
@@ -55,12 +55,12 @@ RUN: %ProtectFileCheckOutput \
 RUN: not FileCheck -D@VALUE=10 --input-file %s %s 2>&1 \
 RUN:   | FileCheck %s --strict-whitespace --match-full-lines --check-prefix ERRCLIPSEUDO
 
-ERRCLIPSEUDO: error: invalid value '@VALUE=10' for '--define <NAME=VALUE>':
-ERRCLIPSEUDO-SAME: name contains invalid characters
-ERRCLIPSEUDO-NEXT:   ,----
-ERRCLIPSEUDO-NEXT: 1 | @VALUE=10
-ERRCLIPSEUDO-NEXT:   : ^^^^^^
-ERRCLIPSEUDO-NEXT:   `----
+ERRCLIPSEUDO: error: invalid value '@VALUE=10' for '--define <NAME=VALUE>':   x name contains invalid characters
+ERRCLIPSEUDO-NEXT:    ,----
+ERRCLIPSEUDO-NEXT:  1 | @VALUE=10
+ERRCLIPSEUDO-NEXT:    : ^^^^^^
+ERRCLIPSEUDO-NEXT:    `----
+ERRCLIPSEUDO-NEXT:   help: variable names must match the pattern `[A-Za-z_][A-Za-z0-9_]*`
 
 
 ; Invalid definition of an expression.

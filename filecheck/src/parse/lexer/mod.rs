@@ -441,15 +441,12 @@ impl<'input> Lexer<'input> {
                     if delim_range.start > last_delimiter_end {
                         let raw = &self.input.buffer()[last_delimiter_end..delim_range.start];
                         if !strip_prefix_space
+                            || self.strict_whitespace
+                            || self.match_full_lines
                             || !raw.iter().all(u8::is_ascii_whitespace)
                             || !is_first
                         {
                             let content = self.input.as_str(last_delimiter_end..delim_range.start);
-                            let content = if is_first && strip_prefix_space {
-                                content.strip_prefix(' ').unwrap_or(content)
-                            } else {
-                                content
-                            };
                             self.buffer.push_back(Ok((
                                 last_delimiter_end,
                                 Token::Raw(content),
@@ -488,15 +485,12 @@ impl<'input> Lexer<'input> {
                     if delim_range.start > last_delimiter_end {
                         let raw = &self.input.buffer()[last_delimiter_end..delim_range.start];
                         if !strip_prefix_space
+                            || self.strict_whitespace
+                            || self.match_full_lines
                             || !raw.iter().all(u8::is_ascii_whitespace)
                             || !is_first
                         {
                             let content = self.input.as_str(last_delimiter_end..delim_range.start);
-                            let content = if is_first && strip_prefix_space {
-                                content.strip_prefix(' ').unwrap_or(content)
-                            } else {
-                                content
-                            };
                             self.buffer.push_back(Ok((
                                 last_delimiter_end,
                                 Token::Raw(content),
@@ -575,12 +569,11 @@ impl<'input> Lexer<'input> {
         // The line has been sliced up in delimited parts, but we have to handle any trailing content
         if last_delimiter_end < eol && in_match.is_none() && in_regex.is_none() {
             let line = self.input.as_str(last_delimiter_end..eol);
-            if !strip_prefix_space || !line.trim().is_empty() {
-                let line = if is_first && strip_prefix_space {
-                    line.strip_prefix(' ').unwrap_or(line)
-                } else {
-                    line
-                };
+            if !strip_prefix_space
+                || self.strict_whitespace
+                || self.match_full_lines
+                || !line.trim().is_empty()
+            {
                 self.buffer
                     .push_back(Ok((last_delimiter_end, Token::Raw(line), eol)));
             }
