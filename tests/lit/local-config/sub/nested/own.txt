@@ -1,0 +1,2 @@
+REQUIRES: nested-suite, nested-local
+RUN: true

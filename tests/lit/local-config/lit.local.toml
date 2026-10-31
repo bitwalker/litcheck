@@ -1,0 +1,9 @@
+available_features = ["root"]
+
+[env]
+LIT_ROOT = "root"
+LIT_OVERRIDE = "root"
+
+[substitutions]
+LOCAL_ROOT_TOKEN = "root"
+LOCAL_OVERRIDE_TOKEN = "root"

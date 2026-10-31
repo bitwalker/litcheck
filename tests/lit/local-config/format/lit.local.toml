@@ -1,0 +1,2 @@
+[format.executable]
+unsupported = ["native"]

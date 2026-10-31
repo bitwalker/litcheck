@@ -1,0 +1,7 @@
+available_features = ["foo"]
+
+[env]
+LIT_SUB = "sub"
+
+[substitutions]
+LOCAL_SUB_TOKEN = "sub"

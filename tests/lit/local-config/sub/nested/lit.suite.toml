@@ -1,0 +1,5 @@
+name = "local-nested"
+patterns = ["*.txt"]
+available_features = ["nested-suite"]
+
+[format.shtest]

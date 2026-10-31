@@ -1,0 +1,11 @@
+name = "local-config"
+patterns = ["*.txt"]
+available_features = ["suite"]
+
+[env]
+LIT_SUITE = "suite"
+
+[substitutions]
+LOCAL_SUITE_TOKEN = "suite"
+
+[format.shtest]

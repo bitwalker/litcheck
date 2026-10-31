@@ -275,15 +275,6 @@ impl DefaultTestSuiteRegistry {
         config: &Config,
     ) -> DiagResult<Option<Arc<TestSuite>>> {
         log::debug!(target: "lit:suite:registry", "finding nearest suite containing {}", path.display());
-        // If `dir` is not explicitly represented in `config_paths`, then it hasn't
-        // been visited to check for a `lit.suite.toml` file yet, and we can't rely
-        // on the nearest ancestor to be correct. Otherwise, the nearest ancestor
-        // refers to the nearest path in `config_paths`
-        if let Some(cache_key) = self.config_cache.nearest_ancestor(path) {
-            log::debug!(target: "lit:suite:registry", "found nearest ancestor suite in cache: '{}'", cache_key.data.name());
-            return Ok(Some(self.get(cache_key.into_value())));
-        }
-
         let dir = if path.is_dir() {
             path
         } else {
@@ -294,6 +285,9 @@ impl DefaultTestSuiteRegistry {
         // directory contains `path`.
         log::debug!(target: "lit:suite:registry", "searching ancestors of {}", dir.display());
         for ancestor in dir.ancestors() {
+            if let Some(cache_key) = self.config_cache.get(ancestor) {
+                return Ok(Some(self.get(cache_key)));
+            }
             let is_cwd = ancestor == cwd;
             let mut found = fs::search_directory(ancestor, false, |entry| {
                 entry.file_name() == "lit.suite.toml"
@@ -332,69 +326,6 @@ impl DefaultTestSuiteRegistry {
 
         Ok(suite)
     }
-
-    // Visits each test suite under management, and runs test discovery for that suite
-    // using the provided configuration.
-    //
-    // This is safe to call multiple times, each subsequent load will clear all previously
-    // loaded tests, and run discovery on an empty test set for each suite.
-    /*
-    fn load_tests(&mut self, config: &Config) -> DiagResult<()> {
-        log::debug!(target: "lit:suite:registry", "loading tests into registry..");
-
-        for suite in self.suites.iter() {
-            log::debug!(target: "lit:suite:registry", "loading tests for '{}'", &suite.id());
-            // Now that all specified test suites are loaded and have filters applied,
-            // perform test discovery for each suite taking those filters into account.
-            let tests = self
-                .tests_by_suite
-                .get_mut(&suite.id())
-                .expect("invalid test suite key");
-            tests.clear();
-
-            // If we have no specific selections, select everything
-            let search_paths = {
-                let mut lock = suite.search_paths();
-                core::mem::take(&mut *lock)
-            };
-            if search_paths.is_empty() {
-                log::debug!(
-                    target: "lit:suite:registry",
-                    "no search paths given, searching entire suite source directory for tests"
-                );
-                let found = suite.config.format.registry().all(suite.clone())?;
-                log::debug!(target: "lit:suite:registry", "found {} tests", found.len());
-                tests.append(found);
-            } else {
-                log::debug!(
-                    target: "lit:suite:registry",
-                    "{} search paths were given, searching just those paths for tests",
-                    search_paths.len()
-                );
-                for path in search_paths.iter() {
-                    log::debug!(target: "lit:suite:registry", "searching {} for tests..", path.display());
-                    // Look for local configuration that applies to these tests,
-                    // using the suite config if no local config is present
-                    let local_config =
-                        get_local_config(&suite, path, config, &mut self.local_config_cache)?;
-                    let found = local_config.format.registry().find(
-                        path,
-                        suite.clone(),
-                        local_config.clone(),
-                    )?;
-                    log::debug!(target: "lit:suite:registry", "found {} tests", found.len());
-                    tests.append(found);
-                }
-            }
-
-            *suite.search_paths() = search_paths;
-        }
-
-        log::debug!(target: "lit:suite:registry", "loading complete!");
-
-        Ok(())
-    }
-     */
 }
 
 fn get_local_config(
@@ -411,45 +342,5 @@ fn get_local_config(
         path.parent().unwrap().to_path_buf()
     };
 
-    // If we already have a cache entry for the given path, we're done
-    if let Some(config) = local_config_cache.get(&path) {
-        return Ok(config.clone());
-    }
-
-    // Otherwise, we are going to reify a config for each level in the directory tree
-    // between the nearest ancestor for which we have already computed a configuration -
-    // using the suite config and source directory as a fallback - and `path_in_suite`.
-    // We start at that point and descend to `path_in_suite`, computing the effective
-    // configuration at each step if we encounter a `lit.local.toml` at that level.
-    let (mut config, search_root_in_suite) =
-        if let Some(entry) = local_config_cache.nearest_ancestor(&path) {
-            (
-                entry.data.clone(),
-                entry.path.strip_prefix(source_dir).unwrap().to_path_buf(),
-            )
-        } else {
-            (suite.config.clone(), path_in_suite.to_path_buf())
-        };
-
-    let mut path = source_dir.to_path_buf();
-    for component in search_root_in_suite.components() {
-        path.push(AsRef::<Path>::as_ref(&component));
-
-        let mut found =
-            fs::search_directory(&path, false, |entry| entry.file_name() == "lit.local.toml");
-        if let Some(entry) = found.next() {
-            let entry = entry.into_diagnostic()?;
-            let mut cfg = TestConfig::parse(entry.path(), lit)?;
-            cfg.inherit(&config);
-            cfg.set_default_substitutions(lit, suite, &path);
-            cfg.set_default_features(lit);
-            let cfg = Arc::<TestConfig>::from(cfg);
-            local_config_cache.insert(&path, cfg.clone());
-            config = cfg;
-        }
-    }
-
-    // Return the constructed configuration, or fallback to cloning the suite config
-    local_config_cache.insert(&path, config.clone());
-    Ok(config)
+    TestConfig::resolve_local(&path, suite, lit, local_config_cache)
 }

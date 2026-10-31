@@ -1,0 +1,3 @@
+REQUIRES: suite, root, foo, bar
+RUN: test "$LIT_OVERRIDE" = deep
+RUN: test LOCAL_OVERRIDE_TOKEN = deep

@@ -1,0 +1,2 @@
+REQUIRES: root, foo
+RUN: false

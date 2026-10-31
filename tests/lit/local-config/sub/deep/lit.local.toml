@@ -1,0 +1,7 @@
+available_features = ["bar"]
+
+[env]
+LIT_OVERRIDE = "deep"
+
+[substitutions]
+LOCAL_OVERRIDE_TOKEN = "deep"

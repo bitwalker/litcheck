@@ -2,7 +2,7 @@ use std::{path::Path, sync::Arc};
 
 use litcheck::{
     diagnostics::{DiagResult, IntoDiagnostic},
-    fs,
+    fs::{self, PathPrefixTree},
 };
 
 use crate::{
@@ -31,14 +31,13 @@ impl TestRegistry for DefaultTestRegistry {
         suites: &mut dyn TestSuiteRegistry,
     ) -> DiagResult<TestList> {
         log::debug!(target: "lit:test:registry", "finding all tests for suite '{}'", suite.name());
-        let source_dir = suite.source_dir();
-        get_file_based_tests(
-            source_dir,
-            suite.clone(),
+        let test_config = TestConfig::resolve_local(
+            suite.source_dir(),
+            &suite,
             config,
-            suite.config.clone(),
-            suites,
-        )
+            &mut PathPrefixTree::default(),
+        )?;
+        self.find(Path::new(""), suite, config, test_config, suites)
     }
 
     fn find(
@@ -96,36 +95,41 @@ fn get_file_based_tests(
 
     let mut nested = Vec::new();
     let searcher = fs::Searcher::<_>::new(search_path, true, |entry| {
-        if entry.file_type().is_dir() {
-            let path = entry.path();
-            if path == search_path || path == suite.source_dir() {
-                return true;
-            }
-            // Do not recurse into directories which contain a `lit.suite.toml`
-            if entry
-                .path()
-                .join("lit.suite.toml")
-                .try_exists()
-                .is_ok_and(|exists| exists)
-            {
-                nested.push(entry.path().to_path_buf());
-                return false;
-            }
-            true
-        } else {
-            log::trace!(target: "lit:test:registry", "checking if file is valid test: {}", entry.path().display());
-            is_file_based_test(entry.path(), &suite, &test_config)
+        let path = entry.path();
+        if !entry.file_type().is_dir() || path == search_path || path == suite.source_dir() {
+            return true;
         }
+        // Nested suites start their own configuration inheritance and discovery.
+        let is_nested = path
+            .join("lit.suite.toml")
+            .try_exists()
+            .is_ok_and(|exists| exists);
+        if is_nested {
+            nested.push(path.to_path_buf());
+        }
+        !is_nested
     });
 
     // Collect tests from search results
     let mut tests = TestList::default();
+    let mut local_configs = PathPrefixTree::default();
+    local_configs.insert(search_path, test_config);
     for result in searcher.into_walker() {
         let test_entry = result.into_diagnostic()?;
         if test_entry.file_type().is_dir() {
+            TestConfig::resolve_local(test_entry.path(), &suite, config, &mut local_configs)?;
             continue;
         }
         let test_path = test_entry.into_path();
+        let test_config = TestConfig::resolve_local(
+            test_path.parent().unwrap(),
+            &suite,
+            config,
+            &mut local_configs,
+        )?;
+        if !is_file_based_test(&test_path, &suite, &test_config) {
+            continue;
+        }
         log::trace!(target: "lit:test:registry", "found test file: {}", test_path.display());
         let relative_path = test_path
             .strip_prefix(suite.source_dir())

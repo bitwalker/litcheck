@@ -1,8 +1,8 @@
-use std::{collections::BTreeMap, path::Path};
+use std::{collections::BTreeMap, path::Path, sync::Arc};
 
 use litcheck::{
     diagnostics::{miette, DiagResult, Diagnostic, IntoDiagnostic, Report, SourceSpan},
-    fs::PatternSet,
+    fs::{PathPrefixTree, PatternSet},
     Input, StaticCow,
 };
 use serde::Deserialize;
@@ -65,6 +65,45 @@ pub struct TestConfig {
     pub available_features: FeatureSet,
 }
 impl TestConfig {
+    /// Resolve inherited local configuration from the suite root through `directory`.
+    ///
+    /// A cached ancestor already includes its own local configuration, so only its
+    /// descendants need to be loaded. Callers may seed the cache with an effective
+    /// configuration supplied by another registry.
+    pub(crate) fn resolve_local(
+        directory: &Path,
+        suite: &super::TestSuite,
+        lit: &Config,
+        cache: &mut PathPrefixTree<Arc<Self>>,
+    ) -> DiagResult<Arc<Self>> {
+        debug_assert!(directory.starts_with(suite.source_dir()));
+
+        let mut config = suite.config.clone();
+        let mut directories = Vec::new();
+        for path in directory
+            .ancestors()
+            .take_while(|path| path.starts_with(suite.source_dir()))
+        {
+            if let Some(cached) = cache.get(path) {
+                config = cached.clone();
+                break;
+            }
+            directories.push(path);
+        }
+
+        for directory in directories.into_iter().rev() {
+            let path = directory.join("lit.local.toml");
+            if path.try_exists().into_diagnostic()? {
+                let mut local = Self::parse(&path, lit)?;
+                local.inherit(&config);
+                config = Arc::from(local);
+            }
+            cache.insert(directory, config.clone());
+        }
+
+        Ok(config)
+    }
+
     /// Parse local test suite configuration from `input`, inheriting from `parent` where applicable
     pub fn parse<P: AsRef<Path>>(path: P, config: &Config) -> DiagResult<Box<Self>> {
         let path = path.as_ref();

@@ -80,16 +80,15 @@ impl Command for Lit {
 
     /// The main entrypoint for the `lit` command
     fn run(self) -> DiagResult<ExitCode> {
-        
-        
-        
         let (config, show_suites, show_tests) = match self {
-            Self::Run(options) => {
-                (Arc::new(lit::Config {
+            Self::Run(options) => (
+                Arc::new(lit::Config {
                     options,
                     ..Default::default()
-                }), false, false)
-            }
+                }),
+                false,
+                false,
+            ),
             Self::Suites {
                 tests,
                 filter,
@@ -379,7 +378,7 @@ impl TestRunner {
     pub fn run(&mut self, test: Arc<Test>, config: &Config) -> DiagResult<()> {
         self.progress.set_message(test.name().to_string());
 
-        let result = test.suite.config.format.execute(&test, config)?;
+        let result = test.config.format.execute(&test, config)?;
         if result.is_failure() {
             self.progress.suspend(|| {
                 println!(

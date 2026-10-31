@@ -1,0 +1,9 @@
+REQUIRES: suite, root, foo, bar
+RUN: test "$LIT_SUITE" = suite
+RUN: test "$LIT_ROOT" = root
+RUN: test "$LIT_SUB" = sub
+RUN: test "$LIT_OVERRIDE" = deep
+RUN: test LOCAL_SUITE_TOKEN = suite
+RUN: test LOCAL_ROOT_TOKEN = root
+RUN: test LOCAL_SUB_TOKEN = sub
+RUN: test LOCAL_OVERRIDE_TOKEN = deep
