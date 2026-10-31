@@ -1,10 +1,22 @@
+mod exclusion;
 mod program;
 
 use std::path::Path;
 
+pub use self::exclusion::ExclusionGroup;
 pub use self::program::{CheckGroup, CheckProgram, CheckSection, CheckTree};
 
-use crate::{common::*, pattern::matcher::MatchAny};
+use crate::common::*;
+
+/// Whether checking can continue, distinguishing an ordinary miss from a failed exclusion.
+#[derive(Debug)]
+pub enum CheckOutcome<'input> {
+    Matched(Vec<Matches<'input>>),
+    Unmatched(Vec<Matches<'input>>),
+    ExclusionFailed(Vec<Matches<'input>>),
+}
+
+use CheckOutcome::{ExclusionFailed, Matched, Unmatched};
 
 pub struct Checker<'a> {
     config: &'a Config,
@@ -246,18 +258,7 @@ pub fn check_block_section<'input, 'a: 'input>(
     test_result: &mut TestResult,
     context: &mut MatchContext<'input, 'a>,
 ) {
-    for group in body.iter() {
-        match check_group(group, test_result, context) {
-            Ok(Ok(matched) | Err(matched)) => {
-                matched
-                    .into_iter()
-                    .for_each(|matches| test_result.append(matches));
-            }
-            Err(err) => {
-                test_result.failed(err);
-            }
-        }
-    }
+    check_groups(body, test_result, context);
 }
 
 pub fn check_group_sections<'input, 'a: 'input>(
@@ -265,19 +266,35 @@ pub fn check_group_sections<'input, 'a: 'input>(
     test_result: &mut TestResult,
     context: &mut MatchContext<'input, 'a>,
 ) {
-    for section in body.iter() {
-        let CheckSection::Group { body: group } = section else {
-            unreachable!()
-        };
+    check_groups(
+        body.iter().map(|section| match section {
+            CheckSection::Group { body } => body,
+            _ => unreachable!(),
+        }),
+        test_result,
+        context,
+    );
+}
+
+fn check_groups<'group, 'input, 'a: 'input + 'group>(
+    groups: impl IntoIterator<Item = &'group CheckGroup<'a>>,
+    test_result: &mut TestResult,
+    context: &mut MatchContext<'input, 'a>,
+) {
+    for group in groups {
         match check_group(group, test_result, context) {
-            Ok(Ok(matched) | Err(matched)) => {
+            Ok(ExclusionFailed(matched)) => {
+                matched
+                    .into_iter()
+                    .for_each(|matches| test_result.append(matches));
+                break;
+            }
+            Ok(Matched(matched) | Unmatched(matched)) => {
                 matched
                     .into_iter()
                     .for_each(|matches| test_result.append(matches));
             }
-            Err(err) => {
-                test_result.failed(err);
-            }
+            Err(error) => test_result.failed(error),
         }
     }
 }
@@ -287,42 +304,21 @@ pub fn check_group<'section, 'input, 'a: 'input>(
     group: &'section CheckGroup<'a>,
     test_result: &mut TestResult,
     context: &mut MatchContext<'input, 'a>,
-) -> Result<Result<Vec<Matches<'input>>, Vec<Matches<'input>>>, CheckFailedError> {
+) -> Result<CheckOutcome<'input>, CheckFailedError> {
     match group {
         CheckGroup::Never(pattern) => {
-            // The given pattern should not match any of
-            // the remaining input in this block
-            let input = context.search_block();
-            match check_not(pattern, input, context) {
-                Ok(Ok(num_patterns)) => {
-                    if context.config.remarks_enabled()
-                        && let Ok(loc) = context.source_manager().file_line_col(pattern.span())
-                    {
-                        eprintln!(
-                            "{loc}: remark: CHECK-NOT: none of the expected strings were found in the input"
-                        );
-                    }
-                    (0..num_patterns).for_each(|_| test_result.passed());
-                    Ok(Ok(vec![]))
+            let matches = pattern.apply(context.search_block(), context);
+            if matches.has_errors() {
+                Ok(ExclusionFailed(vec![matches]))
+            } else {
+                if context.config.remarks_enabled()
+                    && let Ok(loc) = context.source_manager().file_line_col(pattern.span())
+                {
+                    eprintln!(
+                        "{loc}: remark: CHECK-NOT: none of the expected strings were found in the input"
+                    );
                 }
-                Ok(Err(info)) => Ok(Err(vec![Matches::from_iter([MatchResult::failed(
-                    CheckFailedError::MatchFoundButExcluded {
-                        span: info.span,
-                        input_file: context.input_file(),
-                        labels: vec![RelatedLabel::error(
-                            Label::new(info.pattern_span, "by this pattern"),
-                            context.source_file(info.pattern_span.source_id()).unwrap(),
-                        )],
-                    },
-                )])])),
-                Err(err) => {
-                    // Something went wrong with this pattern
-                    Err(CheckFailedError::MatchNoneErrorNote {
-                        span: pattern.span(),
-                        match_file: context.source_file(pattern.span().source_id()).unwrap(),
-                        error: Some(RelatedError::new(err)),
-                    })
-                }
+                Ok(Matched(vec![matches]))
             }
         }
         CheckGroup::Ordered(rules) => {
@@ -383,7 +379,7 @@ pub fn check_group<'section, 'input, 'a: 'input>(
                                     skipped,
                                 });
                             }
-                            return Ok(Err(matched));
+                            return Ok(Unmatched(matched));
                         }
                     }
                     Err(err) => {
@@ -396,9 +392,9 @@ pub fn check_group<'section, 'input, 'a: 'input>(
                 }
             }
             if matched.is_empty() || matched.iter().all(|m| m.range().is_none()) {
-                Ok(Err(matched))
+                Ok(Unmatched(matched))
             } else {
-                Ok(Ok(matched))
+                Ok(Matched(matched))
             }
         }
         CheckGroup::Repeated { rule, count } => {
@@ -439,7 +435,7 @@ pub fn check_group<'section, 'input, 'a: 'input>(
                                 count,
                                 related,
                             });
-                            return Ok(Err(matched));
+                            return Ok(Unmatched(matched));
                         }
                     }
                     Err(err) => {
@@ -448,18 +444,18 @@ pub fn check_group<'section, 'input, 'a: 'input>(
                             match_file: context.source_file(rule.span().source_id()).unwrap(),
                             error: Some(RelatedError::new(err)),
                         });
-                        return Ok(Err(matched));
+                        return Ok(Unmatched(matched));
                     }
                 }
             }
-            Ok(Ok(matched))
+            Ok(Matched(matched))
         }
         CheckGroup::Unordered(check_dag) => match check_dag.apply(context) {
             Ok(matches) => {
                 if matches.range().is_none() {
-                    Ok(Err(vec![matches]))
+                    Ok(Unmatched(vec![matches]))
                 } else {
-                    Ok(Ok(vec![matches]))
+                    Ok(Matched(vec![matches]))
                 }
             }
             Err(err) => {
@@ -468,7 +464,7 @@ pub fn check_group<'section, 'input, 'a: 'input>(
                     match_file: context.source_file(check_dag.span().source_id()).unwrap(),
                     error: Some(RelatedError::new(err)),
                 });
-                Ok(Err(vec![]))
+                Ok(Unmatched(vec![]))
             }
         },
         CheckGroup::Bounded {
@@ -477,7 +473,7 @@ pub fn check_group<'section, 'input, 'a: 'input>(
         } => {
             let initial_result = check_dag.apply(context);
             match check_group(right, test_result, context) {
-                Ok(Ok(mut right_matches)) => {
+                Ok(Matched(mut right_matches)) => {
                     let right_range = right_matches[0]
                         .range()
                         .expect("expected at least one match");
@@ -618,7 +614,7 @@ pub fn check_group<'section, 'input, 'a: 'input>(
                             let mut matched = Vec::with_capacity(1 + right_matches.len());
                             matched.push(left_matches);
                             matched.append(&mut right_matches);
-                            Ok(Ok(matched))
+                            Ok(Matched(matched))
                         }
                         Err(err) => {
                             test_result.failed(CheckFailedError::MatchNoneErrorNote {
@@ -628,20 +624,20 @@ pub fn check_group<'section, 'input, 'a: 'input>(
                                     .unwrap(),
                                 error: Some(RelatedError::new(err)),
                             });
-                            Ok(Ok(right_matches))
+                            Ok(Matched(right_matches))
                         }
                     }
                 }
-                Ok(Err(mut right_matches)) => match initial_result {
+                Ok(Unmatched(mut right_matches)) => match initial_result {
                     Ok(left_matches) => {
                         let mut matched = Vec::with_capacity(1 + right_matches.len());
                         let is_ok = left_matches.range().is_none();
                         matched.push(left_matches);
                         matched.append(&mut right_matches);
                         if is_ok {
-                            Ok(Err(matched))
+                            Ok(Unmatched(matched))
                         } else {
-                            Ok(Ok(matched))
+                            Ok(Matched(matched))
                         }
                     }
                     Err(err) => {
@@ -650,16 +646,27 @@ pub fn check_group<'section, 'input, 'a: 'input>(
                             match_file: context.source_file(check_dag.span().source_id()).unwrap(),
                             error: Some(RelatedError::new(err)),
                         });
-                        Ok(Err(right_matches))
+                        Ok(Unmatched(right_matches))
                     }
                 },
+                Ok(ExclusionFailed(mut right_matches)) => {
+                    match initial_result {
+                        Ok(left_matches) => right_matches.insert(0, left_matches),
+                        Err(error) => test_result.failed(CheckFailedError::MatchNoneErrorNote {
+                            span: check_dag.span(),
+                            match_file: context.source_file(check_dag.span().source_id()).unwrap(),
+                            error: Some(RelatedError::new(error)),
+                        }),
+                    }
+                    Ok(ExclusionFailed(right_matches))
+                }
                 Err(right_err) => {
                     let result = match initial_result {
                         Ok(left_matches) => {
                             if left_matches.range().is_none() {
-                                Err(vec![left_matches])
+                                Unmatched(vec![left_matches])
                             } else {
-                                Ok(vec![left_matches])
+                                Matched(vec![left_matches])
                             }
                         }
                         Err(left_err) => {
@@ -670,7 +677,7 @@ pub fn check_group<'section, 'input, 'a: 'input>(
                                     .unwrap(),
                                 error: Some(RelatedError::new(left_err)),
                             });
-                            Err(vec![])
+                            Unmatched(vec![])
                         }
                     };
                     test_result.failed(CheckFailedError::MatchNoneErrorNote {
@@ -691,315 +698,138 @@ fn check_tree<'input, 'a: 'input>(
     tree: &CheckTree<'a>,
     test_result: &mut TestResult,
     context: &mut MatchContext<'input, 'a>,
-) -> Result<Result<Vec<Matches<'input>>, Vec<Matches<'input>>>, CheckFailedError> {
+) -> Result<CheckOutcome<'input>, CheckFailedError> {
     match tree {
         CheckTree::MatchAll(group) => check_group(group, test_result, context),
         CheckTree::MatchAround { root, left, right } => {
-            let mut matched = vec![];
-            match check_tree(left, test_result, context).expect("unexpected check-not error") {
-                // There may be some errors, but at least one pattern matched
-                Ok(mut left_matched) => {
-                    assert!(
-                        !left_matched.is_empty(),
-                        "expected at least one match result"
-                    );
-                    // Set aside the start of the exclusion region between `left` and `right`
-                    let left_end = left_matched
-                        .iter()
-                        .filter_map(|matches| matches.range().map(|r| r.end))
-                        .max()
-                        .unwrap();
-                    // Add the left matches to the pending test results
-                    matched.append(&mut left_matched);
-                    match check_tree(right, test_result, context)
-                        .expect("unexpected check-not error")
-                    {
-                        Ok(mut right_matched) => {
-                            assert!(
-                                !right_matched.is_empty(),
-                                "expected at least one match result"
-                            );
-                            // Find the end of the exclusion region
-                            let right_start = right_matched
-                                .iter()
-                                .filter_map(|matches| matches.range().map(|r| r.start))
-                                .min()
-                                .unwrap();
-                            // Ensure none of the CHECK-NOT patterns match in the exclusion region
-                            let exclusion = context.search_range(left_end..right_start);
-                            match check_not(root, exclusion, context) {
-                                Ok(Ok(num_passed)) => {
-                                    (0..num_passed).for_each(|_| test_result.passed());
-                                }
-                                Ok(Err(info)) => {
-                                    let right_pattern_span = match right.first() {
-                                        Left(group) => group.first_pattern_span(),
-                                        Right(patterns) => patterns.first_pattern_span(),
-                                    };
-                                    matched.push(Matches::from_iter([MatchResult::failed(CheckFailedError::MatchFoundButExcluded {
-                                        span: info.span,
-                                        input_file: context.input_file(),
-                                        labels: vec![
-                                            RelatedLabel::error(
-                                                Label::new(info.pattern_span, "excluded by this pattern"),
-                                                context.source_file(info.pattern_span.source_id()).unwrap(),
-                                            ),
-                                            RelatedLabel::note(
-                                                Label::new(right_pattern_span, "exclusion is bounded by this pattern"),
-                                                context.source_file(right_pattern_span.source_id()).unwrap(),
-                                            ),
-                                            RelatedLabel::note(
-                                                Label::point(context.input_file.id(), right_start as u32, "which corresponds to this location in the input"),
-                                                context.input_file()
-                                            ),
-                                        ],
-                                    })]));
-                                }
-                                Err(err) => {
-                                    // Something went wrong with this pattern
-                                    matched.push(Matches::from_iter([MatchResult::failed(
-                                        CheckFailedError::MatchNoneErrorNote {
-                                            span: root.span(),
-                                            match_file: context
-                                                .source_file(root.span().source_id())
-                                                .unwrap(),
-                                            error: Some(RelatedError::new(err)),
-                                        },
-                                    )]));
-                                }
-                            }
-                            // Add the right matches to the test results
-                            matched.append(&mut right_matched);
-                        }
-                        Err(mut right_matched) => {
-                            // TODO: Check to see if the right-hand side would have matched BEFORE left, and present a better error
-
-                            // Since none of the right-hand patterns matched, we will treat the CHECK-NOT patterns
-                            // as having passed, since the error of interest is the failed match
-                            (0..root.pattern_len()).for_each(|_| test_result.passed());
-                            // Add the right matches to the test results
-                            matched.append(&mut right_matched);
-                        }
-                    }
-                    Ok(Ok(matched))
-                }
-                // None of the left-hand patterns matched
-                Err(mut left_matched) => {
-                    // Add the failed matches to the test results
-                    matched.append(&mut left_matched);
-                    // Proceed with the right-hand patterns
-                    let left_end = context.cursor().start();
-                    match check_tree(right, test_result, context)
-                        .expect("unexpected check-not error")
-                    {
-                        Ok(mut right_matched) => {
-                            assert!(
-                                !right_matched.is_empty(),
-                                "expected at least one match result"
-                            );
-                            // Find the end of the exclusion region
-                            let right_start = right_matched
-                                .iter()
-                                .filter_map(|matches| matches.range().map(|r| r.start))
-                                .min()
-                                .unwrap();
-                            // Ensure none of the CHECK-NOT patterns match in the exclusion region
-                            let exclusion = context.search_range(left_end..right_start);
-                            match check_not(root, exclusion, context) {
-                                Ok(Ok(num_passed)) => {
-                                    (0..num_passed).for_each(|_| test_result.passed());
-                                }
-                                Ok(Err(info)) => {
-                                    matched.push(Matches::from_iter([MatchResult::failed(
-                                        CheckFailedError::MatchFoundButExcluded {
-                                            span: info.span,
-                                            input_file: context.input_file(),
-                                            labels: vec![RelatedLabel::error(
-                                                Label::new(info.pattern_span, "by this pattern"),
-                                                context
-                                                    .source_file(info.pattern_span.source_id())
-                                                    .unwrap(),
-                                            )],
-                                        },
-                                    )]));
-                                }
-                                Err(err) => {
-                                    // Something went wrong with this pattern
-                                    matched.push(Matches::from_iter([MatchResult::failed(
-                                        CheckFailedError::MatchNoneErrorNote {
-                                            span: root.span(),
-                                            match_file: context
-                                                .source_file(root.span().source_id())
-                                                .unwrap(),
-                                            error: Some(RelatedError::new(err)),
-                                        },
-                                    )]));
-                                }
-                            }
-                            // Add the right matches to the test results
-                            matched.append(&mut right_matched);
-                            Ok(Ok(matched))
-                        }
-                        Err(mut right_matched) => {
-                            // Since none of the right-hand patterns matched, we will treat the CHECK-NOT patterns
-                            // as having passed, since the error of interest is the failed match
-                            (0..root.pattern_len()).for_each(|_| test_result.passed());
-                            // Add the right matches to the test results
-                            matched.append(&mut right_matched);
-                            Ok(Err(matched))
-                        }
-                    }
-                }
-            }
-        }
-        CheckTree::MatchBefore { root, left } => {
-            let left_end = context.cursor().start();
-            match check_tree(left, test_result, context).expect("unexpected check-not error") {
-                Ok(mut left_matched) => {
-                    assert!(
-                        !left_matched.is_empty(),
-                        "expected at least one match result"
-                    );
-
-                    let exclusion = context.search_block();
-                    match check_not(root, exclusion, context) {
-                        Ok(Ok(num_passed)) => {
-                            (0..num_passed).for_each(|_| test_result.passed());
-                        }
-                        Ok(Err(info)) => {
-                            left_matched.push(Matches::from_iter([MatchResult::failed(
-                                CheckFailedError::MatchFoundButExcluded {
-                                    span: info.span,
-                                    input_file: context.input_file(),
-                                    labels: vec![RelatedLabel::error(
-                                        Label::new(info.pattern_span, "by this pattern"),
-                                        context.source_file(info.pattern_span.source_id()).unwrap(),
-                                    )],
-                                },
-                            )]));
-                        }
-                        Err(err) => {
-                            // Something went wrong with this pattern
-                            left_matched.push(Matches::from_iter([MatchResult::failed(
-                                CheckFailedError::MatchNoneErrorNote {
-                                    span: root.span(),
-                                    match_file: context
-                                        .source_file(root.span().source_id())
-                                        .unwrap(),
-                                    error: Some(RelatedError::new(err)),
-                                },
-                            )]));
-                        }
-                    }
-                    Ok(Ok(left_matched))
-                }
-                Err(mut left_matched) => {
-                    // None of the left-hand patterns matched, but we can proceed with the CHECK-NOT anyway
-                    let right_start = context.cursor().end();
-                    let exclusion = context.search_range(left_end..right_start);
-                    match check_not(root, exclusion, context) {
-                        Ok(Ok(num_passed)) => {
-                            (0..num_passed).for_each(|_| test_result.passed());
-                        }
-                        Ok(Err(info)) => {
-                            left_matched.push(Matches::from_iter([MatchResult::failed(
-                                CheckFailedError::MatchFoundButExcluded {
-                                    span: info.span,
-                                    input_file: context.input_file(),
-                                    labels: vec![RelatedLabel::error(
-                                        Label::new(info.pattern_span, "by this pattern"),
-                                        context.source_file(info.pattern_span.source_id()).unwrap(),
-                                    )],
-                                },
-                            )]));
-                        }
-                        Err(err) => {
-                            // Something went wrong with this pattern
-                            left_matched.push(Matches::from_iter([MatchResult::failed(
-                                CheckFailedError::MatchNoneErrorNote {
-                                    span: root.span(),
-                                    match_file: context
-                                        .source_file(root.span().source_id())
-                                        .unwrap(),
-                                    error: Some(RelatedError::new(err)),
-                                },
-                            )]));
-                        }
-                    }
-                    Ok(Err(left_matched))
-                }
-            }
-        }
-        CheckTree::MatchAfter { root, right } => {
-            let left_end = context.cursor().start();
-            match check_tree(right, test_result, context).expect("unexpected check-not error") {
-                Ok(mut right_matched) => {
-                    assert!(
-                        !right_matched.is_empty(),
-                        "expected at least one match result"
-                    );
+            let (left_matched, mut matched) = match check_tree(left, test_result, context)? {
+                Matched(matched) => (true, matched),
+                Unmatched(matched) => (false, matched),
+                ExclusionFailed(matched) => return Ok(ExclusionFailed(matched)),
+            };
+            let left_end = if left_matched {
+                matched
+                    .iter()
+                    .filter_map(|matches| matches.range().map(|r| r.end))
+                    .max()
+                    .unwrap()
+            } else {
+                context.cursor().start()
+            };
+            match check_tree(right, test_result, context)? {
+                Matched(mut right_matched) => {
                     let right_start = right_matched
                         .iter()
                         .filter_map(|matches| matches.range().map(|r| r.start))
                         .min()
                         .unwrap();
-
-                    let exclusion = context.search_range(left_end..right_start);
-                    match check_not(root, exclusion, context) {
-                        Ok(Ok(num_passed)) => {
-                            (0..num_passed).for_each(|_| test_result.passed());
-                        }
-                        Ok(Err(info)) => {
-                            right_matched.push(Matches::from_iter([MatchResult::failed(
-                                CheckFailedError::MatchFoundButExcluded {
-                                    span: info.span,
-                                    input_file: context.input_file(),
-                                    labels: vec![RelatedLabel::error(
-                                        Label::new(info.pattern_span, "by this pattern"),
-                                        context.source_file(info.pattern_span.source_id()).unwrap(),
-                                    )],
-                                },
-                            )]));
-                        }
-                        Err(err) => {
-                            // Something went wrong with this pattern
-                            right_matched.push(Matches::from_iter([MatchResult::failed(
-                                CheckFailedError::MatchNoneErrorNote {
-                                    span: root.span(),
-                                    match_file: context
-                                        .source_file(root.span().source_id())
-                                        .unwrap(),
-                                    error: Some(RelatedError::new(err)),
-                                },
-                            )]));
+                    let bound = left_matched.then(|| {
+                        let pattern = match right.first() {
+                            Left(group) => group.first_pattern_span(),
+                            Right(patterns) => patterns.first_pattern_span(),
+                        };
+                        (pattern, right_start)
+                    });
+                    let exclusions =
+                        root.apply(context.search_range(left_end..right_start), context);
+                    let failed = exclusions.has_errors();
+                    let mut exclusions = exclusions;
+                    if let Some((pattern, offset)) = bound {
+                        for result in exclusions.iter_mut() {
+                            if let MatchType::Failed(CheckFailedError::MatchFoundButExcluded {
+                                labels,
+                                ..
+                            }) = &mut result.ty
+                            {
+                                labels.extend([
+                                    RelatedLabel::note(
+                                        Label::new(pattern, "exclusion is bounded by this pattern"),
+                                        context.source_file(pattern.source_id()).unwrap(),
+                                    ),
+                                    RelatedLabel::note(
+                                        Label::point(
+                                            context.input_file.id(),
+                                            offset as u32,
+                                            "which corresponds to this location in the input",
+                                        ),
+                                        context.input_file(),
+                                    ),
+                                ]);
+                            }
                         }
                     }
-                    Ok(Ok(right_matched))
+                    matched.push(exclusions);
+                    matched.append(&mut right_matched);
+                    Ok(if failed {
+                        ExclusionFailed(matched)
+                    } else {
+                        Matched(matched)
+                    })
                 }
-                Err(right_matched) => {
-                    // Since none of the right-hand patterns matched, we will treat the CHECK-NOT patterns
-                    // as having passed, since the error of interest is the failed match
+                Unmatched(mut right_matched) => {
+                    // A missing right boundary already explains why this region could not be checked.
                     (0..root.pattern_len()).for_each(|_| test_result.passed());
-                    Ok(Err(right_matched))
+                    matched.append(&mut right_matched);
+                    Ok(if left_matched {
+                        Matched(matched)
+                    } else {
+                        Unmatched(matched)
+                    })
+                }
+                ExclusionFailed(mut right_matched) => {
+                    matched.append(&mut right_matched);
+                    Ok(ExclusionFailed(matched))
                 }
             }
         }
-    }
-}
-
-fn check_not<'input, 'a: 'input>(
-    patterns: &MatchAny<'a>,
-    input: Input<'input>,
-    context: &mut MatchContext<'input, 'a>,
-) -> DiagResult<Result<usize, MatchInfo<'input>>> {
-    match patterns.try_match_mut(input, context)? {
-        MatchResult {
-            info: Some(info),
-            ty,
-        } if ty.is_ok() => Ok(Err(info)),
-        result => {
-            assert!(!result.is_ok());
-            Ok(Ok(patterns.pattern_len()))
+        CheckTree::MatchBefore { root, left } => {
+            let left_end = context.cursor().start();
+            let (left_matched, mut matched) = match check_tree(left, test_result, context)? {
+                Matched(matched) => (true, matched),
+                Unmatched(matched) => (false, matched),
+                ExclusionFailed(matched) => return Ok(ExclusionFailed(matched)),
+            };
+            let exclusion = if left_matched {
+                context.search_block()
+            } else {
+                context.search_range(left_end..context.cursor().end())
+            };
+            let exclusions = root.apply(exclusion, context);
+            let failed = exclusions.has_errors();
+            matched.push(exclusions);
+            Ok(if failed {
+                ExclusionFailed(matched)
+            } else if left_matched {
+                Matched(matched)
+            } else {
+                Unmatched(matched)
+            })
+        }
+        CheckTree::MatchAfter { root, right } => {
+            let left_end = context.cursor().start();
+            match check_tree(right, test_result, context)? {
+                Matched(mut matched) => {
+                    let right_start = matched
+                        .iter()
+                        .filter_map(|matches| matches.range().map(|r| r.start))
+                        .min()
+                        .unwrap();
+                    let exclusions =
+                        root.apply(context.search_range(left_end..right_start), context);
+                    let failed = exclusions.has_errors();
+                    matched.push(exclusions);
+                    Ok(if failed {
+                        ExclusionFailed(matched)
+                    } else {
+                        Matched(matched)
+                    })
+                }
+                Unmatched(matched) => {
+                    (0..root.pattern_len()).for_each(|_| test_result.passed());
+                    Ok(Unmatched(matched))
+                }
+                ExclusionFailed(matched) => Ok(ExclusionFailed(matched)),
+            }
         }
     }
 }

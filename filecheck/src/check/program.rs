@@ -1,10 +1,12 @@
+use super::ExclusionGroup;
+
 use std::collections::VecDeque;
 
 use crate::{
     ast::*,
     common::*,
     errors::InvalidCheckFileError,
-    pattern::matcher::{MatchAll, MatchAny, SimpleMatcher},
+    pattern::matcher::{MatchAll, SimpleMatcher},
     rules::*,
 };
 
@@ -19,7 +21,7 @@ pub enum CheckTree<'a> {
     /// A two-way branch of the tree, rooted at a CHECK-NOT directive
     MatchAround {
         /// Non-leaf nodes of the tree are rooted at a CHECK-NOT directive
-        root: MatchAny<'a>,
+        root: ExclusionGroup<'a>,
         /// The patterns which must match before `root`
         left: Box<CheckTree<'a>>,
         /// The patterns which must match after `root`
@@ -28,14 +30,14 @@ pub enum CheckTree<'a> {
     /// A single-branch node, rooted at a CHECK-NOT directive
     MatchBefore {
         /// Non-leaf nodes of the tree are rooted at a CHECK-NOT directive
-        root: MatchAny<'a>,
+        root: ExclusionGroup<'a>,
         /// The patterns which must match before `root`
         left: Box<CheckTree<'a>>,
     },
     /// A single-branch node, rooted at a CHECK-NOT directive
     MatchAfter {
         /// Non-leaf nodes of the tree are rooted at a CHECK-NOT directive
-        root: MatchAny<'a>,
+        root: ExclusionGroup<'a>,
         /// The patterns which must match after `root`
         right: Box<CheckTree<'a>>,
     },
@@ -45,7 +47,7 @@ impl<'a> CheckTree<'a> {
     ///
     /// This corresponds to the first node in the tree to be reached by a depth-first search that
     /// always takes the path to patterns which must be matched before other patterns.
-    pub fn first(&self) -> Either<&CheckGroup<'a>, &MatchAny<'a>> {
+    pub fn first(&self) -> Either<&CheckGroup<'a>, &ExclusionGroup<'a>> {
         match self {
             Self::MatchAll(group) => Left(group),
             Self::MatchAround { left, .. } | Self::MatchBefore { left, .. } => left.first(),
@@ -57,7 +59,7 @@ impl<'a> CheckTree<'a> {
     ///
     /// This corresponds to the last node in the tree to be reached by a depth-first search that
     /// always takes the path to patterns which must be matched after other patterns.
-    pub fn last(&self) -> Either<&CheckGroup<'a>, &MatchAny<'a>> {
+    pub fn last(&self) -> Either<&CheckGroup<'a>, &ExclusionGroup<'a>> {
         match self {
             Self::MatchAll(group) => Left(group),
             Self::MatchAround { right, .. } | Self::MatchAfter { right, .. } => right.last(),
@@ -72,7 +74,7 @@ pub enum CheckGroup<'a> {
     /// except for a CHECK-NOT in a logical group. This is
     /// a special case, but is preferable to representing
     /// this using [CheckTree]
-    Never(Box<MatchAny<'a>>),
+    Never(Box<ExclusionGroup<'a>>),
     /// A group of rules that can be matched in any order,
     /// but must not overlap each other, and must not extend
     /// past any matches in subsequent groups. This latter
@@ -206,8 +208,12 @@ impl<'a> CheckProgram<'a> {
         let mut iter = lines
             .into_iter()
             .map(|mut line| {
-                if config.options.match_full_lines && !matches!(line.kind(), Check::Not | Check::Empty) {
-                    line.pattern = line.pattern.match_full_lines(config.options.strict_whitespace);
+                if config.options.match_full_lines
+                    && !matches!(line.kind(), Check::Not | Check::Empty)
+                {
+                    line.pattern = line
+                        .pattern
+                        .match_full_lines(config.options.strict_whitespace);
                 }
                 line
             })
@@ -316,7 +322,7 @@ impl<'a> CheckProgram<'a> {
                                 break;
                             }
                         }
-                        let matcher = MatchAny::from(MatchAll::compile(nots, config)?);
+                        let matcher = ExclusionGroup::compile(nots, config)?;
                         if body.is_empty() {
                             match groups.pop() {
                                 Some(CheckGroup::Tree(left)) => groups.push(CheckGroup::Tree(

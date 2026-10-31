@@ -16,17 +16,22 @@ CHECK-NOT: foo
 CHECK: barrier
 CHECK-NOT: baz
 
-CHECK-ERRORS: multiple-check-not-failures.txt:[[#@LINE-5]]:12: error: {{C}}HECK-NOT: excluded string found in input
-CHECK-ERRORS-NEXT:      {{C}}HECK-NOT: bar
-CHECK-ERRORS-NEXT:     {{^}}           ^{{$}}
-CHECK-ERRORS-NEXT:      multiple-check-not-failures.txt:[[#@LINE-14]]:1: note: found here
-CHECK-ERRORS-NEXT:      bar
-CHECK-ERRORS-NEXT: {{^}}^~~{{$}}
-CHECK-ERRORS-NEXT:      multiple-check-not-failures.txt:[[#@LINE-10]]:12: error: {{C}}HECK-NOT: excluded string found in input
-CHECK-ERRORS-NEXT:      {{C}}HECK-NOT: foo
-CHECK-ERRORS-NEXT:     {{^}}           ^{{$}}
-CHECK-ERRORS-NEXT:      multiple-check-not-failures.txt:[[#@LINE-21]]:1: note: found here
-CHECK-ERRORS-NEXT:      foo
-CHECK-ERRORS-NEXT: {{^}}^~~{{$}}
-CHECK-ERRORS-NOT: error:
+CHECK-ERRORS: match found, but was excluded
+CHECK-ERRORS-NEXT: multiple-check-not-failures.txt:[[#@LINE-12]]:1
+CHECK-ERRORS: 8 │ bar
+CHECK-ERRORS-NEXT: · ─┬─
+CHECK-ERRORS-NEXT: ·  ╰── match found here
+CHECK-ERRORS: multiple-check-not-failures.txt:[[#@LINE-10]]:12
+CHECK-ERRORS: 14 │ {{C}}HECK-NOT: bar
+CHECK-ERRORS: by this pattern
+
+CHECK-ERRORS: match found, but was excluded
+CHECK-ERRORS-NEXT: multiple-check-not-failures.txt:[[#@LINE-22]]:1
+CHECK-ERRORS: 7 │ foo
+CHECK-ERRORS-NEXT: · ─┬─
+CHECK-ERRORS-NEXT: ·  ╰── match found here
+CHECK-ERRORS: multiple-check-not-failures.txt:[[#@LINE-18]]:12
+CHECK-ERRORS: 15 │ {{C}}HECK-NOT: foo
+CHECK-ERRORS: by this pattern
+CHECK-ERRORS-NOT: match found, but was excluded
 CHECK-ERRORS-NOT:      {{C}}HECK-NOT: baz
