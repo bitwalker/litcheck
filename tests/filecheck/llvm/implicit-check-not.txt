@@ -2,7 +2,7 @@
 
 ; Check we report an error when an unknown prefix is used together with `-implicit-check-not`.
 ; RUN: sed 's#^;.*##' %s | %ProtectFileCheckOutput not FileCheck --check-prefix=UNKNOWN-PREFIX --implicit-check-not=abc %s 2>&1 | FileCheck %s -DPREFIX=UNKNOWN-PREFIX --check-prefix CHECK-PREFIX-ERROR
-; CHECK-PREFIX-ERROR: error: no check strings found with prefix '[[PREFIX]]:'
+; CHECK-PREFIX-ERROR: no check strings found with prefix(es) '[[PREFIX]]'
 
 ; Check we report an error when the "CHECK" prefix is used explicitly with `-implicit-check-not`, but not present in the input.
 ; RUN: sed 's#^;.*##' %s | %ProtectFileCheckOutput not FileCheck --check-prefix=CHECK --implicit-check-not=abc %s 2>&1 | FileCheck %s -DPREFIX=CHECK --check-prefix CHECK-PREFIX-ERROR
@@ -21,36 +21,57 @@
 
 warning: aaa
 ; CHECK-PASS: warning: aaa
-; CHECK-ERROR1: command line:1:22: error: IMPLICIT-CHECK-NOT: excluded string found in input
-; CHECK-ERROR1-NEXT: --implicit-check-not='warning:'
-; CHECK-ERROR1: note: found here
+; CHECK-ERROR1: match found, but was excluded
+; CHECK-ERROR1: stdin:[[@LINE-3]]:1
+; CHECK-ERROR1: match found here
+; CHECK-ERROR1: --implicit-check-not:1:1
+; CHECK-ERROR1-NEXT: 1 │ warning:
+; CHECK-ERROR1: by this pattern
 ; CHECK-FAIL2: warning: aaa
 ; CHECK-FAIL3: warning: aaa
-; CHECK-ERROR4: command line:1:22: error: IMPLICIT-CHECK-NOT: excluded string found in input
-; CHECK-ERROR4-NEXT: {{-implicit-check-not='\{\{aaa\|bbb\|ccc\}\}'}}
-; CHECK-ERROR4: note: found here
-; CHECK-ERROR5: command line:1:22: error: IMPLICIT-CHECK-NOT: excluded string found in input
-; CHECK-ERROR5-NEXT: --implicit-check-not='aaa'
-; CHECK-ERROR5: note: found here
+; CHECK-ERROR4: match found, but was excluded
+; CHECK-ERROR4: stdin:[[@LINE-11]]:10
+; CHECK-ERROR4: match found here
+; CHECK-ERROR4: --implicit-check-not:1:3
+; CHECK-ERROR4-NEXT{LITERAL}: 1 │ {{aaa|bbb|ccc}}
+; CHECK-ERROR4: by this pattern
+; CHECK-ERROR5: match found, but was excluded
+; CHECK-ERROR5: stdin:[[@LINE-17]]:10
+; CHECK-ERROR5: match found here
+; CHECK-ERROR5: --implicit-check-not:1:1
+; CHECK-ERROR5-NEXT: 1 │ aaa
+; CHECK-ERROR5: by this pattern
 
 warning: bbb
 ; CHECK-PASS: warning: bbb
 ; CHECK-FAIL1: warning: bbb
-; CHECK-ERROR2: command line:1:22: error: IMPLICIT-CHECK-NOT: excluded string found in input
-; CHECK-ERROR2-NEXT: --implicit-check-not='warning:'
-; CHECK-ERROR2: note: found here
+; CHECK-ERROR2: match found, but was excluded
+; CHECK-ERROR2: stdin:[[@LINE-4]]:1
+; CHECK-ERROR2: match found here
+; CHECK-ERROR2: --implicit-check-not:1:1
+; CHECK-ERROR2-NEXT: 1 │ warning:
+; CHECK-ERROR2: by this pattern
 ; CHECK-FAIL3: warning: bbb
-; CHECK-ERROR6: command line:1:22: error: IMPLICIT-CHECK-NOT: excluded string found in input
-; CHECK-ERROR6-NEXT: --implicit-check-not='bbb'
-; CHECK-ERROR6: note: found here
+; CHECK-ERROR6: match found, but was excluded
+; CHECK-ERROR6: stdin:[[@LINE-11]]:10
+; CHECK-ERROR6: match found here
+; CHECK-ERROR6: --implicit-check-not:1:1
+; CHECK-ERROR6-NEXT: 1 │ bbb
+; CHECK-ERROR6: by this pattern
 
 warning: ccc
 ; CHECK-PASS: warning: ccc
 ; CHECK-FAIL1: warning: ccc
 ; CHECK-FAIL2: warning: ccc
-; CHECK-ERROR3: command line:1:22: error: IMPLICIT-CHECK-NOT: excluded string found in input
-; CHECK-ERROR3-NEXT: --implicit-check-not='warning:'
-; CHECK-ERROR3: note: found here
-; CHECK-ERROR7: command line:1:22: error: IMPLICIT-CHECK-NOT: excluded string found in input
-; CHECK-ERROR7-NEXT: --implicit-check-not='ccc'
-; CHECK-ERROR7: note: found here
+; CHECK-ERROR3: match found, but was excluded
+; CHECK-ERROR3: stdin:[[@LINE-5]]:1
+; CHECK-ERROR3: match found here
+; CHECK-ERROR3: --implicit-check-not:1:1
+; CHECK-ERROR3-NEXT: 1 │ warning:
+; CHECK-ERROR3: by this pattern
+; CHECK-ERROR7: match found, but was excluded
+; CHECK-ERROR7: stdin:[[@LINE-11]]:10
+; CHECK-ERROR7: match found here
+; CHECK-ERROR7: --implicit-check-not:1:1
+; CHECK-ERROR7-NEXT: 1 │ ccc
+; CHECK-ERROR7: by this pattern

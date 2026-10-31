@@ -152,11 +152,37 @@ impl<'config> CheckFileParser<'config> {
         }
 
         let unused_prefixes = lexer.unused_prefixes();
-        if !unused_prefixes.is_empty() && !self.config.options.allow_unused_prefixes {
+        let implicit_only = self.config.options.check_prefixes.is_empty()
+            && !self.config.options.implicit_check_not.is_empty();
+        if !unused_prefixes.is_empty()
+            && !self.config.options.allow_unused_prefixes
+            && !implicit_only
+        {
             return Err(ParserError::UnusedCheckPrefixes(unused_prefixes));
         }
 
         Ok(CheckFile::new(lines))
+    }
+
+    /// Parse an implicit negative with the same syntax and source spans as a CHECK-NOT pattern.
+    pub(crate) fn parse_implicit_check_not<'a>(
+        &mut self,
+        source_id: SourceId,
+        pattern: &'a str,
+    ) -> ParseResult<CheckLine<'a>> {
+        if let Some(offset) = pattern.find(['\r', '\n']) {
+            return Err(ParserError::UnrecognizedToken {
+                span: SourceSpan::from_range_unchecked(source_id, offset..offset + 1),
+                token: "newline".into(),
+                expected: vec!["a single-line pattern".into()],
+            });
+        }
+        let mut lexer = Lexer::new_pattern(source_id, pattern, self.config);
+        self.parse_pattern(
+            CheckType::new(SourceSpan::at(source_id, 0), Check::Not),
+            pattern,
+            &mut lexer,
+        )
     }
 
     fn parse_check<'a>(
@@ -166,9 +192,6 @@ impl<'config> CheckFileParser<'config> {
         lexer: &mut Lexer<'a>,
     ) -> ParseResult<CheckLine<'a>> {
         let span = ty.span();
-        let line_start = span.start().to_usize();
-        let check_end = span.end().to_usize();
-
         // Modifiers (optional)
         let mut modifiers = CheckModifier::default();
         let mut modifier_start = span.end().to_usize();
@@ -193,6 +216,20 @@ impl<'config> CheckFileParser<'config> {
         if matches!(ty.kind, Check::Count(n) if n == 0) {
             return Err(ParserError::InvalidCheckCount { span });
         }
+
+        self.parse_pattern(ty, source, lexer)
+    }
+
+    fn parse_pattern<'a>(
+        &mut self,
+        ty: CheckType,
+        source: &'a str,
+        lexer: &mut Lexer<'a>,
+    ) -> ParseResult<CheckLine<'a>> {
+        let span = ty.span();
+        let line_start = span.start().to_usize();
+        let check_end = span.end().to_usize();
+        let modifiers = ty.modifiers;
 
         // CheckPattern
         if modifiers.contains(CheckModifier::LITERAL) {

@@ -1,6 +1,68 @@
 use litcheck::Symbol;
 use litcheck_filecheck::{CheckFailedError, Config, Test, TestFailed, source_file};
 
+fn verify_patterns(
+    checks: &str,
+    input: &str,
+    patterns: &[&str],
+    prefixes: &[&str],
+) -> litcheck::diagnostics::DiagResult<()> {
+    let mut config = Config::default();
+    config.options.implicit_check_not = patterns.iter().map(Symbol::intern).collect();
+    if !prefixes.is_empty() {
+        config.options.check_prefixes = prefixes.iter().map(Symbol::intern).collect();
+    }
+    let checks = source_file!(config, "checks", checks);
+    let input = source_file!(config, "input", input);
+    Test::new(checks, &config).verify(input).map(|_| ())
+}
+
+#[test]
+fn implicit_negatives_use_filecheck_pattern_syntax() {
+    // Outside {{...}}, regular expression metacharacters are literal.
+    verify_patterns("CHECK: end\n", "axb\nend\n", &["a.b"], &[]).unwrap();
+    assert!(verify_patterns("CHECK: end\n", "a.b\nend\n", &["a.b"], &[]).is_err());
+    assert!(verify_patterns("CHECK: end\n", "bbb\nend\n", &["{{aaa|bbb}}"], &[]).is_err());
+}
+
+#[test]
+fn implicit_negatives_allow_an_absent_default_prefix_only_when_implicit() {
+    verify_patterns("no directives\n", "safe\n", &["forbidden"], &[]).unwrap();
+    for prefix in ["CHECK", "UNKNOWN"] {
+        assert!(
+            verify_patterns("no directives\n", "safe\n", &["forbidden"], &[prefix]).is_err(),
+            "explicit unused prefix {prefix} must be rejected"
+        );
+    }
+}
+
+#[test]
+fn implicit_negative_diagnostics_identify_the_matching_argument() {
+    let failure = verify_patterns("CHECK: end\n", "bbb\nend\n", &["aaa", "bbb", "ccc"], &[])
+        .unwrap_err()
+        .downcast::<TestFailed>()
+        .unwrap();
+    let error = failure
+        .errors()
+        .iter()
+        .find_map(|error| match error {
+            CheckFailedError::MatchFoundButExcluded {
+                span,
+                input_file,
+                labels,
+            } => Some((span, input_file, labels)),
+            _ => None,
+        })
+        .expect("an exclusion diagnostic");
+    assert_eq!(error.1.source_slice(*error.0), Some("bbb"));
+    assert_eq!(error.2.len(), 1);
+    assert_eq!(error.2[0].file.as_str(), "bbb");
+    assert_eq!(
+        error.2[0].file.source_slice(error.2[0].labels[0].span()),
+        Some("bbb")
+    );
+}
+
 fn verify(checks: &str, input: &str) -> Result<(), TestFailed> {
     let mut config = Config::default();
     config

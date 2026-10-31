@@ -49,7 +49,7 @@ One Line To Match
 # ERROR-NEXT:                 ───┬──
 # ERROR-NEXT:                    ╰── match found here
 
-# ERROR: see also{{[[:space:]].*}}--implicit-check-not
-# ERROR-NEXT: (sTrInG)
-# ERROR-NEXT: ────┬───
-# ERROR-NEXT:     ╰── by this pattern
+# ERROR: see also{{[[:space:]].*}}--implicit-check-not:1:1
+# ERROR-NEXT: 1 │ sTrInG
+# ERROR-NEXT: ───┬──
+# ERROR-NEXT:    ╰── by this pattern

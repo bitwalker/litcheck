@@ -208,43 +208,28 @@ impl<'a> CheckProgram<'a> {
         let mut block = vec![];
         let mut blocks: VecDeque<(Option<CheckLine<'a>>, Vec<CheckLine<'a>>)> = VecDeque::default();
 
-        // If --implicit-check-not was set, construct a CheckLine that will be inserted at the start
-        // of the file, as well as between all positive checks.
-        let implicit_check_not_pattern = if config.options.implicit_check_not.is_empty() {
-            None
-        } else {
-            // We construct a single check line representing the conjunction of all the
-            // --implicit-check-not patterns to avoid scanning the same portions of the file over
-            // and over again. We create a pseudo-source file containing the constructed pattern to
-            // be used in diagnostics.
-            let mut pattern = String::new();
-            for (i, implicit_check_not_pattern) in
-                config.options.implicit_check_not.iter().enumerate()
-            {
-                if i > 0 {
-                    pattern.push('|');
-                }
-                pattern.push('(');
-                pattern.push_str(implicit_check_not_pattern.as_str());
-                pattern.push(')');
-            }
-            let source = config
-                .source_manager()
-                .load_argument("--implicit-check-not", pattern.clone());
-            let span = source.source_span();
-            Some(CheckLine::new(
-                span,
-                CheckType::new(span, Check::Not),
-                CheckPattern::Regex(RegexPattern::new(Span::new(span, pattern.into()))),
-            ))
-        };
+        // Parse every argument independently: implicit patterns use CHECK-NOT syntax, and
+        // diagnostics must identify the argument that matched rather than a synthetic union.
+        let mut parser = crate::parse::CheckFileParser::new(config);
+        let implicit_check_not_patterns = config
+            .options
+            .implicit_check_not
+            .iter()
+            .map(|pattern| {
+                let pattern = pattern.as_str();
+                let source = config
+                    .source_manager()
+                    .load_argument("--implicit-check-not", pattern.to_owned());
+                parser
+                    .parse_implicit_check_not(source.id(), pattern)
+                    .map_err(|error| Report::new(error).with_source_code(source))
+            })
+            .collect::<DiagResult<Vec<_>>>()?;
 
         // Insert the --implicit-check-not pattern at the start of the file, to ensure that at least
         // one instance appears between the start of the file and the first positive check, and so
         // at a minimum an otherwise empty check file will contain at least this one check.
-        if let Some(implicit_check_not_pattern) = implicit_check_not_pattern.as_ref() {
-            block.push(implicit_check_not_pattern.clone());
-        }
+        block.extend(implicit_check_not_patterns.iter().cloned());
 
         while let Some(next) = iter.peek() {
             match next.kind() {
@@ -254,9 +239,7 @@ impl<'a> CheckProgram<'a> {
                     if label.is_some() || !block.is_empty() {
                         blocks.push_back((label.take(), core::mem::take(&mut block)));
                         // Insert the --implicit-check-not pattern at the start of any new block
-                        if let Some(implicit_check_not) = implicit_check_not_pattern.as_ref() {
-                            block.push(implicit_check_not.clone());
-                        }
+                        block.extend(implicit_check_not_patterns.iter().cloned());
                     }
                     label = iter.next();
                 }
@@ -281,10 +264,8 @@ impl<'a> CheckProgram<'a> {
 
                     // Consecutive DAG checks form one unordered matching unit. An intervening
                     // negative check would split the group and impose an ordering on its matches.
-                    if !continues_dag
-                        && let Some(implicit_check_not) = implicit_check_not_pattern.as_ref()
-                    {
-                        block.push(implicit_check_not.clone());
+                    if !continues_dag {
+                        block.extend(implicit_check_not_patterns.iter().cloned());
                     }
                 }
                 Check::Not => {

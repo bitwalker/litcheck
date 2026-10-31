@@ -88,7 +88,7 @@ impl<'input> Lexer<'input> {
         let mut patterns = Pattern::generate_comment_patterns(&config.options.comment_prefixes)
             .collect::<Vec<_>>();
         patterns.extend(Pattern::generate_check_patterns(
-            &config.options.check_prefixes,
+            config.options.check_prefixes(),
         ));
         let regex = Regex::builder()
             .syntax(regex_automata::util::syntax::Config::new().crlf(true))
@@ -112,8 +112,8 @@ impl<'input> Lexer<'input> {
         Lexer {
             input,
             patterns,
-            check_prefixes: config.options.check_prefixes.to_vec(),
-            seen_prefixes: vec![false; config.options.check_prefixes.len()],
+            check_prefixes: config.options.check_prefixes().to_vec(),
+            seen_prefixes: vec![false; config.options.check_prefixes().len()],
             regex,
             searcher,
             cache,
@@ -126,6 +126,17 @@ impl<'input> Lexer<'input> {
             strict_whitespace: config.options.strict_whitespace,
             match_full_lines: config.options.match_full_lines,
         }
+    }
+
+    /// Tokenize a command-line pattern without consuming a directive prefix or separator.
+    pub(crate) fn new_pattern<S>(source_id: SourceId, source: &'input S, config: &Config) -> Self
+    where
+        S: ?Sized + AsRef<str> + 'input,
+    {
+        let mut lexer = Self::new(source_id, source, config);
+        lexer.tokenize_check_pattern(false, false);
+        lexer.eof = true;
+        lexer
     }
 
     pub fn unused_prefixes(&self) -> Vec<Symbol> {
@@ -256,7 +267,7 @@ impl<'input> Lexer<'input> {
                 span.end().to_usize(),
             )));
             self.input.set_start(range.end);
-            self.tokenize_check_pattern(literal);
+            self.tokenize_check_pattern(literal, true);
             self.captures.set_pattern(None);
         } else {
             // There are no more check lines in the input
@@ -359,13 +370,15 @@ impl<'input> Lexer<'input> {
     /// We're parsing the rest of the line as a CHECK pattern, so we need to look
     /// for `[[` `]]` and `{{` `}}` markers indicating substitution/capture and regex
     /// matches respectively.
-    fn tokenize_check_pattern(&mut self, literal: bool) {
+    fn tokenize_check_pattern(&mut self, literal: bool, strip_prefix_space: bool) {
         let mut start = self.input.start();
         let eol = Newline::next_from(self.input.buffer(), start).offset();
 
         if literal {
             let raw = self.input.as_str(start..eol);
-            let stripped = if self.strict_whitespace || self.match_full_lines {
+            let stripped = if !strip_prefix_space {
+                raw
+            } else if self.strict_whitespace || self.match_full_lines {
                 raw.strip_prefix(' ').unwrap_or(raw)
             } else {
                 raw.trim_start()
@@ -375,18 +388,16 @@ impl<'input> Lexer<'input> {
                 .push_back(Ok((start + shift, Token::Raw(stripped), eol)));
             self.input.set_start(eol);
             return;
-        } else if self.strict_whitespace || self.match_full_lines {
-            // If --strict-whitespace/--match-full-lines are in use, do not remove excess leading
-            // whitespace
+        }
+
+        if strip_prefix_space {
             let raw = self.input.as_str(start..eol);
-            let stripped = raw.strip_prefix(' ').unwrap_or(raw);
-            let shift = raw.len().abs_diff(stripped.len());
-            start += shift;
-            self.input.set_start(start);
-        } else {
-            // Otherwise, remove all leading space separating prefix and pattern
-            let raw = self.input.as_str(start..eol);
-            let stripped = raw.trim_ascii_start();
+            // Preserve pattern indentation when whitespace is significant.
+            let stripped = if self.strict_whitespace || self.match_full_lines {
+                raw.strip_prefix(' ').unwrap_or(raw)
+            } else {
+                raw.trim_ascii_start()
+            };
             let shift = raw.len().abs_diff(stripped.len());
             start += shift;
             self.input.set_start(start);
@@ -429,9 +440,12 @@ impl<'input> Lexer<'input> {
                     ));
                     if delim_range.start > last_delimiter_end {
                         let raw = &self.input.buffer()[last_delimiter_end..delim_range.start];
-                        if !raw.iter().all(u8::is_ascii_whitespace) || !is_first {
+                        if !strip_prefix_space
+                            || !raw.iter().all(u8::is_ascii_whitespace)
+                            || !is_first
+                        {
                             let content = self.input.as_str(last_delimiter_end..delim_range.start);
-                            let content = if is_first {
+                            let content = if is_first && strip_prefix_space {
                                 content.strip_prefix(' ').unwrap_or(content)
                             } else {
                                 content
@@ -473,9 +487,12 @@ impl<'input> Lexer<'input> {
                     ));
                     if delim_range.start > last_delimiter_end {
                         let raw = &self.input.buffer()[last_delimiter_end..delim_range.start];
-                        if !raw.iter().all(u8::is_ascii_whitespace) || !is_first {
+                        if !strip_prefix_space
+                            || !raw.iter().all(u8::is_ascii_whitespace)
+                            || !is_first
+                        {
                             let content = self.input.as_str(last_delimiter_end..delim_range.start);
-                            let content = if is_first {
+                            let content = if is_first && strip_prefix_space {
                                 content.strip_prefix(' ').unwrap_or(content)
                             } else {
                                 content
@@ -558,8 +575,8 @@ impl<'input> Lexer<'input> {
         // The line has been sliced up in delimited parts, but we have to handle any trailing content
         if last_delimiter_end < eol && in_match.is_none() && in_regex.is_none() {
             let line = self.input.as_str(last_delimiter_end..eol);
-            if !line.trim().is_empty() {
-                let line = if is_first {
+            if !strip_prefix_space || !line.trim().is_empty() {
+                let line = if is_first && strip_prefix_space {
                     line.strip_prefix(' ').unwrap_or(line)
                 } else {
                     line

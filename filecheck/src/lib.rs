@@ -135,11 +135,11 @@ pub struct Options {
     /// Which prefixes to treat as directives.
     ///
     /// For example, in the directive `CHECK-SAME`, `CHECK` is the prefix.
+    /// An empty list selects the default `CHECK` prefix implicitly.
     #[arg(
         long,
         alias = "check-prefix",
         value_name = "PREFIX",
-        default_value = "CHECK",
         action(clap::ArgAction::Append),
         value_parser(prefix_value_parser()),
         value_delimiter(','),
@@ -290,7 +290,7 @@ impl Default for Options {
     fn default() -> Self {
         Self {
             allow_empty: false,
-            check_prefixes: vec![symbols::Check],
+            check_prefixes: vec![],
             comment_prefixes: vec![symbols::Com, symbols::Run],
             allow_unused_prefixes: false,
             strict_whitespace: false,
@@ -308,35 +308,57 @@ impl Default for Options {
 }
 
 impl Options {
+    /// The explicitly requested prefixes, or the implicit default `CHECK` prefix.
+    pub fn check_prefixes(&self) -> &[Symbol] {
+        if self.check_prefixes.is_empty() {
+            &[symbols::Check]
+        } else {
+            &self.check_prefixes
+        }
+    }
+
     pub fn validate(&self) -> DiagResult<()> {
         // Validate that we do not have overlapping check and comment prefixes
-        if self
-            .check_prefixes
-            .iter()
-            .any(|prefix| *prefix != symbols::Check)
-        {
-            for check_prefix in self.check_prefixes.iter() {
-                if self.comment_prefixes.contains(check_prefix) {
-                    return Err(Report::msg(format!(
-                        "supplied check prefix must be unique among check and comment prefixes: '{check_prefix}'"
-                    )));
-                }
-            }
-        } else if self
-            .comment_prefixes
-            .iter()
-            .any(|prefix| !matches!(*prefix, symbols::Com | symbols::Run))
-        {
-            for comment_prefix in self.comment_prefixes.iter() {
-                if self.check_prefixes.contains(comment_prefix) {
-                    return Err(Report::msg(format!(
-                        "supplied comment prefix must be unique among check and comment prefixes: '{comment_prefix}'"
-                    )));
-                }
+        for check_prefix in self.check_prefixes() {
+            if self.comment_prefixes.contains(check_prefix) {
+                let supplied = if self.check_prefixes.is_empty() {
+                    "comment"
+                } else {
+                    "check"
+                };
+                return Err(Report::msg(format!(
+                    "supplied {supplied} prefix must be unique among check and comment prefixes: '{check_prefix}'"
+                )));
             }
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod option_tests {
+    use super::*;
+
+    #[test]
+    fn prefix_conflicts_identify_the_explicit_option() {
+        let comment_options = Options {
+            comment_prefixes: vec![symbols::Check],
+            ..Options::default()
+        };
+        assert_eq!(
+            comment_options.validate().unwrap_err().to_string(),
+            "supplied comment prefix must be unique among check and comment prefixes: 'CHECK'"
+        );
+
+        let check_options = Options {
+            check_prefixes: vec![symbols::Com],
+            ..Options::default()
+        };
+        assert_eq!(
+            check_options.validate().unwrap_err().to_string(),
+            "supplied check prefix must be unique among check and comment prefixes: 'COM'"
+        );
     }
 }
 
