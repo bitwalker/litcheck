@@ -80,17 +80,15 @@ impl Command for Lit {
 
     /// The main entrypoint for the `lit` command
     fn run(self) -> DiagResult<ExitCode> {
-        let config;
-        let show_suites;
-        let show_tests;
-        match self {
+        
+        
+        
+        let (config, show_suites, show_tests) = match self {
             Self::Run(options) => {
-                config = Arc::new(lit::Config {
+                (Arc::new(lit::Config {
                     options,
                     ..Default::default()
-                });
-                show_suites = false;
-                show_tests = false;
+                }), false, false)
             }
             Self::Suites {
                 tests,
@@ -100,9 +98,7 @@ impl Command for Lit {
                 let mut cfg = Box::new(lit::Config::new(tests));
                 cfg.options.filter = filter;
                 cfg.options.filter_out = filter_out;
-                config = Arc::from(cfg);
-                show_suites = true;
-                show_tests = false;
+                (Arc::from(cfg), true, false)
             }
             Self::Tests {
                 tests,
@@ -112,11 +108,9 @@ impl Command for Lit {
                 let mut cfg = Box::new(lit::Config::new(tests));
                 cfg.options.filter = filter;
                 cfg.options.filter_out = filter_out;
-                config = Arc::from(cfg);
-                show_suites = false;
-                show_tests = true;
+                (Arc::from(cfg), false, true)
             }
-        }
+        };
 
         // Initialize the test suite manager by loading test suites
         // for the specified input paths.
