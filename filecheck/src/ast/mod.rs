@@ -10,16 +10,11 @@ pub use self::pattern::{
     Capture, CheckPattern, CheckPatternPart, Constraint, Match, Prefix, RegexPattern,
 };
 
-use crate::expr::{BinaryOp, Expr, VariableName};
+use crate::expr::{Expr, VariableName};
 
 pub(crate) struct ConstraintExpr {
     pub constraint: Constraint,
     pub expr: Expr,
-}
-
-pub(crate) struct BinaryOpAndOperand {
-    pub op: BinaryOp,
-    pub operand: Box<Expr>,
 }
 
 pub(crate) struct CaptureNumeric {

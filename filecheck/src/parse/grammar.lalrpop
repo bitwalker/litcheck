@@ -1,9 +1,6 @@
 use std::borrow::Cow;
 
-use either::Either;
-use either::Either::*;
-
-use crate::common::{Spanned, Span, Symbol, SourceId, symbols};
+use crate::common::{Span, Symbol, SourceId, symbols};
 use crate::ast::*;
 use crate::expr::*;
 use crate::parse::{LexerError, Token, ParserError, ParseError};
@@ -71,24 +68,17 @@ Comma<T>: Vec<T> = {
 /// MATCH
 
 pub Match: Match<'input> = {
-    <l:@L> "[[" <name:LineVar> <expr:CaptureExprRest> "]]" <r:@R> => {
+    <l:@L> "[[" <expr:AdditiveExpr<LineTerm>> "]]" <r:@R> => {
+        let span = span!(source_id, l, r);
         match expr {
-            Some(BinaryOpAndOperand { op, operand: rhs }) => {
-                let span = span!(source_id, l, r);
-                Match::Numeric {
-                    span,
-                    format: None,
-                    capture: None,
-                    constraint: Constraint::Eq,
-                    expr: Some(Expr::Binary {
-                        span,
-                        op,
-                        lhs: Box::new(Expr::Var(name)),
-                        rhs,
-                    }),
-                }
-            }
-            None => Match::Substitution { span: span!(source_id, l, r), name, pattern: None },
+            Expr::Var(name) => Match::Substitution { span, name, pattern: None },
+            expr => Match::Numeric {
+                span,
+                format: None,
+                capture: None,
+                constraint: Constraint::Eq,
+                expr: Some(expr),
+            },
         }
     },
 
@@ -125,30 +115,16 @@ pub Match: Match<'input> = {
 }
 
 CaptureNumericOrExpr: CaptureNumericOrExpr = {
-    <l:@L> <var:PatternOrLineVar> <ty:EitherCaptureOrExpr> => {
-        match ty {
-            Left(None) => CaptureNumericOrExpr::Capture(CaptureNumeric {
-                name: Some(var),
-                constraint: Constraint::Eq,
-                expr: None
-            }),
-            Left(Some(constraint)) => CaptureNumericOrExpr::Capture(CaptureNumeric {
-                name: Some(var),
-                constraint: constraint.constraint,
-                expr: Some(constraint.expr)
-            }),
-            Right(None) => CaptureNumericOrExpr::Expr(Expr::Var(var)),
-            Right(Some(BinaryOpAndOperand { op, operand: rhs })) => {
-                let rhs_span = rhs.span();
-                let end = rhs_span.end().to_usize();
-                CaptureNumericOrExpr::Expr(Expr::Binary {
-                    span: span!(source_id, l, end),
-                    op,
-                    lhs: Box::new(Expr::Var(var)),
-                    rhs,
-                })
-            }
-        }
+    <name:PatternOrLineVar> ":" <constraint:Constraint?> => {
+        let (constraint, expr) = match constraint {
+            None => (Constraint::Eq, None),
+            Some(ConstraintExpr { constraint, expr }) => (constraint, Some(expr)),
+        };
+        CaptureNumericOrExpr::Capture(CaptureNumeric {
+            name: Some(name),
+            constraint,
+            expr,
+        })
     },
 
     "==" <expr:Expr> => {
@@ -159,34 +135,7 @@ CaptureNumericOrExpr: CaptureNumericOrExpr = {
         })
     },
 
-    Builtin => CaptureNumericOrExpr::Expr(<>),
-
-    <l:@L> "(" <lhs:Expr> ")" <rhs:CaptureExprRest> <r:@R> => {
-        match rhs {
-            None => CaptureNumericOrExpr::Expr(lhs),
-            Some(BinaryOpAndOperand { op, operand }) => {
-                CaptureNumericOrExpr::Expr(
-                    Expr::Binary {
-                        span: span!(source_id, l, r),
-                        op,
-                        lhs: Box::new(lhs),
-                        rhs: operand,
-                    }
-                )
-            }
-        }
-    }
-}
-
-CaptureExprRest: Option<BinaryOpAndOperand> = {
-    "+" <expr:Expr> => Some(BinaryOpAndOperand { op: BinaryOp::Add, operand: Box::new(expr) }),
-    "-" <expr:Expr> => Some(BinaryOpAndOperand { op: BinaryOp::Sub, operand: Box::new(expr) }),
-    => None,
-}
-
-EitherCaptureOrExpr: Either<Option<ConstraintExpr>, Option<BinaryOpAndOperand>> = {
-    ":" <constraint:Constraint?> => Left(constraint),
-    <CaptureExprRest> => Right(<>),
+    Expr => CaptureNumericOrExpr::Expr(<>),
 }
 
 Constraint: ConstraintExpr = {
@@ -216,11 +165,17 @@ NumberFormat: NumberFormat = {
 
 /// EXPRS
 
-Expr: Expr = {
-    <l:@L> <x:Expr> "+" <y:Subexpr> <r:@R> => Expr::Binary { span: span!(source_id, l, r), op: BinaryOp::Add, lhs: Box::new(x), rhs: Box::new(y) },
-    <l:@L> <x:Expr> "-" <y:Subexpr> <r:@R> => Expr::Binary { span: span!(source_id, l, r), op: BinaryOp::Sub, lhs: Box::new(x), rhs: Box::new(y) },
-    Subexpr,
+Expr: Expr = AdditiveExpr<Subexpr>;
+
+// The first operand distinguishes legacy @LINE matches; all forms share the
+// same precedence and left associativity for subsequent operands.
+AdditiveExpr<First>: Expr = {
+    <l:@L> <x:AdditiveExpr<First>> "+" <y:Subexpr> <r:@R> => Expr::Binary { span: span!(source_id, l, r), op: BinaryOp::Add, lhs: Box::new(x), rhs: Box::new(y) },
+    <l:@L> <x:AdditiveExpr<First>> "-" <y:Subexpr> <r:@R> => Expr::Binary { span: span!(source_id, l, r), op: BinaryOp::Sub, lhs: Box::new(x), rhs: Box::new(y) },
+    First,
 }
+
+LineTerm: Expr = <LineVar> => Expr::Var(<>);
 
 Subexpr: Expr = {
     Builtin,
