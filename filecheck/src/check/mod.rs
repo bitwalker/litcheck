@@ -113,23 +113,17 @@ pub fn discover_blocks<'input, 'context: 'input>(
                                     "{loc}: remark: CHECK-LABEL: expected string found in input"
                                 );
                             }
-                            // We must compute the indices for the end of the previous block,
-                            // and the start of the current block, by looking forwards/backwards
-                            // for the nearest newlines in those directions.
+                            // Only the label match itself is excluded from the surrounding blocks.
+                            // Unmatched prefixes and suffixes on its line must remain searchable.
                             let match_start = info.span.start().to_usize();
-                            let cursor = context.cursor_mut();
-                            let eol = cursor.next_newline_from(match_start).unwrap_or(eof);
-                            let prev_block_end = cursor.prev_newline_from(match_start).unwrap_or(0);
-                            // Start subsequent searches at the newline, to ensure that rules which
-                            // match on next lines can eat the first newline, but prevent any further
-                            // matching of rules on this line
-                            cursor.set_start(eol);
+                            let match_end = info.span.end().to_usize();
+                            context.cursor_mut().set_start(match_end);
                             // Create the block info for this CHECK-LABEL to record the start index
                             let block_id = blocks.len();
                             blocks.push(BlockInfo {
                                 label_info: Some(info.into_static()),
                                 sections: Some(Range::new(i, i + 1)),
-                                start: Some(cursor.start()),
+                                start: Some(match_end),
                                 end: None,
                                 eof,
                             });
@@ -140,7 +134,7 @@ pub fn discover_blocks<'input, 'context: 'input>(
                                 .rev()
                                 .find(|bi| bi.start.is_some())
                             {
-                                prev_block.end = Some(prev_block_end);
+                                prev_block.end = Some(match_start);
                             }
                         }
                         None => {
@@ -1023,14 +1017,14 @@ pub struct BlockInfo {
     pub sections: Option<Range<usize>>,
     /// The starting byte index of the block, if known.
     ///
-    /// The index begins at the start of the next line following the CHECK-LABEL line
+    /// The index begins immediately after the CHECK-LABEL match.
     ///
     /// If None, the CHECK-LABEL pattern was never found; `end` must also be None
     /// in that case
     pub start: Option<usize>,
     /// The ending byte index of the block, if known.
     ///
-    /// The index ends at the last byte of the line preceding a subsequent CHECK-LABEL.
+    /// The index ends immediately before a subsequent CHECK-LABEL match.
     ///
     /// If subsequent blocks with start indices are recorded, this must be Some with
     /// an end index relative to the next start index in ascending order.

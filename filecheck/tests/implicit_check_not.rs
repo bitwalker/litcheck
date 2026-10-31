@@ -146,3 +146,34 @@ fn implicit_negatives_allow_forbidden_text_matched_by_positive_checks() {
     let checks = "CHECK-LABEL: function:\nCHECK: first forbidden\nCHECK: last\n";
     verify(checks, "function:\nfirst forbidden\nlast\n").unwrap();
 }
+
+#[test]
+fn implicit_negatives_cover_unmatched_text_on_label_lines() {
+    for newline in ["\n", "\r\n"] {
+        let checks = "CHECK-LABEL: one:\nCHECK-LABEL: two:\n";
+        verify(checks, &format!("one:{newline}two:")).unwrap();
+        for input in [
+            format!("forbidden one:{newline}two:"),
+            format!("one: forbidden{newline}two:"),
+            format!("one:{newline}forbidden two:"),
+            format!("one:{newline}two: forbidden"),
+        ] {
+            assert_excluded(checks, &input);
+        }
+    }
+}
+
+#[test]
+fn implicit_negatives_cover_gaps_between_same_line_labels() {
+    let checks = "CHECK-LABEL: one:\nCHECK-LABEL: two:\n";
+    assert_excluded(checks, "one: forbidden two:");
+    verify(checks, "one: two:").unwrap();
+}
+
+#[test]
+fn implicit_negatives_allow_text_consumed_by_label_matches() {
+    verify("CHECK-LABEL: forbidden\n", "forbidden").unwrap();
+    verify("CHECK-LABEL: {{start\\nend}}\n", "start\nend").unwrap();
+    assert_excluded("CHECK-LABEL: {{start\\nend}}\n", "start\nend forbidden");
+    assert_excluded("CHECK-LABEL: {{^}}\n", "forbidden\n");
+}

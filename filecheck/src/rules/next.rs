@@ -35,14 +35,17 @@ where
         let cursor = context.cursor();
         let start = cursor.start_of_next_line();
         let block_end = cursor.end();
-        let next_eol = cursor.next_newline_from(start).unwrap_or(block_end);
+        let next_eol = cursor
+            .next_newline_from(start)
+            .unwrap_or(block_end)
+            .min(block_end);
         if start >= block_end {
             // Cannot match, since the search range would
             // overflow the current block.
             let at_eof = cursor.end_of_file() == block_end;
             let mut error = CheckFailedError::match_none(
                 self.pattern.span(),
-                &context.search_range(start..block_end),
+                &context.search_range(start.min(block_end)..block_end),
                 context,
             );
             if !at_eof {

@@ -30,7 +30,7 @@ impl Rule for CheckEmpty {
             .next_newline_from(next_line_start)
             .unwrap_or_else(|| cursor.end_of_file());
         let next_line = next_line_start..next_eol;
-        if cursor.at_end_of_line() && next_line.is_empty() {
+        if next_line_start < cursor.end() && next_line.is_empty() {
             let span =
                 SourceSpan::from_range_unchecked(cursor.source_id, next_line_start..next_eol);
             // Move to the end of the empty line
@@ -41,10 +41,8 @@ impl Rule for CheckEmpty {
             }
             .into())
         } else {
-            // Report the line we required to be empty, so the failure shows what was there
-            // instead. When the cursor is mid-line, that line is included as well, since
-            // that is why we never got to consider the next one.
-            let searched = core::cmp::min(cursor.start(), next_line_start)..next_eol;
+            // Keep diagnostics inside the block even if the next physical line is outside it.
+            let searched = cursor.start()..next_eol.min(cursor.end());
             Ok(MatchResult {
                 ty: MatchType::Failed(
                     CheckFailedError::match_none(

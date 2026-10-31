@@ -227,7 +227,7 @@ impl<'a> Cursor<'a> {
     /// Get an [Input] that can be used to search the unvisited portion of the current line
     pub fn search_line(&self) -> Input<'a> {
         Input::new(self.source_id, self.buffer, self.is_crlf())
-            .bounded(self.block.start..self.end_of_line())
+            .bounded(self.block.start..self.end_of_line().min(self.block.end))
     }
 
     /// Returns true if the current position is at end of input
