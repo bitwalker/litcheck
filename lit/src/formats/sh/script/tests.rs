@@ -4,6 +4,39 @@ use regex::Regex;
 use super::*;
 
 #[test]
+fn script_substitutions_preserve_duplicate_and_undefined_key_diagnostics() {
+    for (directives, duplicate, expected_key) in [
+        (
+            "DEFINE: %{value} = first\nDEFINE: %{value} = second\nRUN: true\n",
+            true,
+            "%{value}",
+        ),
+        (
+            "REDEFINE: %{missing} = value\nRUN: true\n",
+            false,
+            "%{missing}",
+        ),
+    ] {
+        let source_manager = DefaultSourceManager::default();
+        let source = source_manager.load(Default::default(), FileName::Stdin, directives.into());
+        let mut script = TestScript::parse(source).unwrap();
+        let parent = crate::config::SubstitutionSet::default();
+        let mut substitutions = ScopedSubstitutionSet::new(&parent);
+        let error = script.apply_substitutions(&mut substitutions).unwrap_err();
+        let error = error.downcast_ref::<InvalidSubstitutionError>().unwrap();
+        match error {
+            InvalidSubstitutionError::AlreadyExists { key, .. } if duplicate => {
+                assert_eq!(key, expected_key);
+            }
+            InvalidSubstitutionError::NotDefined { key, .. } if !duplicate => {
+                assert_eq!(key, expected_key);
+            }
+            error => panic!("unexpected substitution diagnostic: {error:?}"),
+        }
+    }
+}
+
+#[test]
 fn test_script_parse_real() -> DiagResult<()> {
     const SCRIPT: &str = r#"
 ; RUN: midenc compile --stdout --emit=hir %s | filecheck %s

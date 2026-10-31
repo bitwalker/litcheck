@@ -1,0 +1,3 @@
+DEFINE: %{value} = first
+DEFINE: %{value} = second
+RUN: true

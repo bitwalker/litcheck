@@ -1,0 +1,2 @@
+REDEFINE: %{missing} = first
+RUN: true

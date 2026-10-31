@@ -1,0 +1,7 @@
+name = "define-substitutions"
+patterns = ["*.txt"]
+
+[substitutions]
+"CONFIG_([0-9]+)" = "$1"
+
+[format.shtest]

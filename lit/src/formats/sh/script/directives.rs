@@ -246,7 +246,7 @@ impl Substitution {
 
         match substitutions.find_matching(&self.key) {
             Matches::Empty if !self.replace => {
-                substitutions.insert(self.key.clone(), self.value.clone());
+                substitutions.insert_literal(self.key.clone(), self.value.clone());
                 Ok(())
             }
             Matches::Empty => Err(InvalidSubstitutionError::NotDefined {
@@ -254,7 +254,7 @@ impl Substitution {
                 key: self.key.clone(),
             }),
             Matches::Exact(_) if self.replace => {
-                substitutions.insert(self.key.clone(), self.value.clone());
+                substitutions.insert_literal(self.key.clone(), self.value.clone());
                 Ok(())
             }
             Matches::Exact(_) => Err(InvalidSubstitutionError::AlreadyExists {

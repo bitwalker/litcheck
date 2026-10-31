@@ -21,13 +21,25 @@ pub struct InvalidSubstitutionPatternError {
 
 pub struct ScopedSubstitutionSet<'a> {
     parent: &'a SubstitutionSet,
-    set: SubstitutionSet,
+    set: FxIndexMap<StaticCow<str>, ScopedReplacement>,
+}
+
+enum ScopedReplacement {
+    Regex(StaticCow<str>),
+    Literal(StaticCow<str>),
+}
+impl ScopedReplacement {
+    fn value(&self) -> &StaticCow<str> {
+        match self {
+            Self::Regex(value) | Self::Literal(value) => value,
+        }
+    }
 }
 impl<'scope> ScopedSubstitutionSet<'scope> {
     pub fn new(parent: &'scope SubstitutionSet) -> Self {
         Self {
             parent,
-            set: SubstitutionSet::default(),
+            set: FxIndexMap::default(),
         }
     }
 
@@ -42,7 +54,10 @@ impl<'scope> ScopedSubstitutionSet<'scope> {
         StaticCow<str>: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        self.set.get(pattern).or_else(|| self.parent.get(pattern))
+        self.set
+            .get(pattern)
+            .map(ScopedReplacement::value)
+            .or_else(|| self.parent.get(pattern))
     }
 
     pub fn contains<Q>(&self, pattern: &Q) -> bool
@@ -50,15 +65,17 @@ impl<'scope> ScopedSubstitutionSet<'scope> {
         StaticCow<str>: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        self.set.contains(pattern) || self.parent.contains(pattern)
+        self.set.contains_key(pattern) || self.parent.contains(pattern)
     }
 
     #[inline]
-    pub fn iter(&self) -> impl Iterator<Item = (&StaticCow<str>, &StaticCow<str>)> + '_ {
+    /// Preserve inherited rule order, apply overrides in place, then visit new local rules.
+    pub fn iter(&self) -> SubstitutionsIter<'_> {
         SubstitutionsIter {
-            set: &self.set,
-            iter: self.parent.iter(),
-            filter: true,
+            parent: self.parent,
+            inherited: self.parent.iter(),
+            local: self.set.iter(),
+            overrides: &self.set,
         }
     }
 
@@ -73,11 +90,7 @@ impl<'scope> ScopedSubstitutionSet<'scope> {
             (true, false) => Matches::Exact(pattern),
             (true, true) => Matches::Fuzzy {
                 exact: pattern,
-                keys: SubstitutionsIter {
-                    set: &self.set,
-                    iter: self.parent.iter(),
-                    filter: true,
-                },
+                keys: self.iter(),
             },
         }
     }
@@ -88,10 +101,9 @@ impl<'scope> ScopedSubstitutionSet<'scope> {
         StaticCow<str>: From<V>,
         I: IntoIterator<Item = (K, V)>,
     {
-        let substitutions = substitutions
-            .into_iter()
-            .map(|(k, v)| (StaticCow::from(k), StaticCow::from(v)));
-        self.set.extend(substitutions);
+        for (pattern, replacement) in substitutions {
+            self.insert(pattern, replacement);
+        }
     }
 
     pub fn insert<K, V>(&mut self, pattern: K, replacement: V)
@@ -99,8 +111,22 @@ impl<'scope> ScopedSubstitutionSet<'scope> {
         StaticCow<str>: From<K>,
         StaticCow<str>: From<V>,
     {
-        self.set
-            .insert(StaticCow::from(pattern), StaticCow::from(replacement));
+        self.set.insert(
+            StaticCow::from(pattern),
+            ScopedReplacement::Regex(StaticCow::from(replacement)),
+        );
+    }
+
+    /// Define a script substitution, whose key and replacement are both literal text.
+    pub fn insert_literal<K, V>(&mut self, pattern: K, replacement: V)
+    where
+        StaticCow<str>: From<K>,
+        StaticCow<str>: From<V>,
+    {
+        self.set.insert(
+            StaticCow::from(pattern),
+            ScopedReplacement::Literal(StaticCow::from(replacement)),
+        );
     }
 
     pub fn apply<'a>(
@@ -124,13 +150,25 @@ impl<'scope> ScopedSubstitutionSet<'scope> {
                     needs_escaping = false;
                 }
             }
-            let re =
-                regex::Regex::new(pattern).map_err(|error| InvalidSubstitutionPatternError {
+            let literal = matches!(self.set.get(pattern), Some(ScopedReplacement::Literal(_)));
+            let regex_pattern = if literal {
+                Cow::Owned(regex::escape(pattern))
+            } else {
+                Cow::Borrowed(pattern.as_ref())
+            };
+            let re = regex::Regex::new(&regex_pattern).map_err(|error| {
+                InvalidSubstitutionPatternError {
                     span,
                     error,
                     pattern: pattern.clone().into_owned(),
-                })?;
-            if let Cow::Owned(replaced) = re.replace_all(&buffer, replacement) {
+                }
+            })?;
+            let replaced = if literal {
+                re.replace_all(&buffer, regex::NoExpand(replacement.as_ref()))
+            } else {
+                re.replace_all(&buffer, replacement)
+            };
+            if let Cow::Owned(replaced) = replaced {
                 buffer = Cow::Owned(replaced);
                 needs_escaping = true;
             }
@@ -148,27 +186,29 @@ impl<'scope> ScopedSubstitutionSet<'scope> {
 }
 
 pub struct SubstitutionsIter<'a> {
-    set: &'a SubstitutionSet,
-    iter: indexmap::map::Iter<'a, StaticCow<str>, StaticCow<str>>,
-    filter: bool,
+    parent: &'a SubstitutionSet,
+    inherited: indexmap::map::Iter<'a, StaticCow<str>, StaticCow<str>>,
+    local: indexmap::map::Iter<'a, StaticCow<str>, ScopedReplacement>,
+    overrides: &'a FxIndexMap<StaticCow<str>, ScopedReplacement>,
 }
 impl<'a> Iterator for SubstitutionsIter<'a> {
     type Item = (&'a StaticCow<str>, &'a StaticCow<str>);
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.filter {
-            let result = self
-                .iter
-                .next()
-                .and_then(|item @ (k, _)| self.set.get(k).map(|v| (k, v)).or(Some(item)));
-            if result.is_none() {
-                self.iter = self.set.iter();
-                self.filter = false;
-            } else {
-                return result;
+        if let Some((key, value)) = self.inherited.next() {
+            return Some((
+                key,
+                self.overrides
+                    .get(key)
+                    .map_or(value, ScopedReplacement::value),
+            ));
+        }
+        for (key, value) in self.local.by_ref() {
+            if !self.parent.contains(key) {
+                return Some((key, value.value()));
             }
         }
-        self.iter.next()
+        None
     }
 }
 
@@ -284,5 +324,32 @@ impl<'a> Iterator for Matches<'a> {
                 }
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scoped_overrides_apply_once_at_the_inherited_rule_position() {
+        let parent = SubstitutionSet::new([("%token", "original"), ("second", "done")]);
+        let mut scoped = ScopedSubstitutionSet::new(&parent);
+        scoped.insert("%token", "%token%token");
+        assert_eq!(
+            scoped
+                .apply(Span::new(SourceSpan::UNKNOWN, "%token"))
+                .unwrap(),
+            "%token%token"
+        );
+
+        // The override still runs before the parent's subsequent `second` rule.
+        scoped.insert("%token", "second");
+        assert_eq!(
+            scoped
+                .apply(Span::new(SourceSpan::UNKNOWN, "%token"))
+                .unwrap(),
+            "done"
+        );
     }
 }
