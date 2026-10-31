@@ -90,8 +90,10 @@ impl<'input> Lexer<'input> {
         patterns.extend(Pattern::generate_check_patterns(
             &config.options.check_prefixes,
         ));
-        let regex =
-            Regex::new_many(&patterns).expect("expected valid prefix searcher configuration");
+        let regex = Regex::builder()
+            .syntax(regex_automata::util::syntax::Config::new().crlf(true))
+            .build_many(&patterns)
+            .expect("expected valid prefix searcher configuration");
         let searcher = RegexSearcher::new(input.into());
         let eof = input.is_empty();
         let captures = regex.create_captures();
@@ -178,6 +180,11 @@ impl<'input> Lexer<'input> {
             }
             (offset, b'\n') => {
                 let next_offset = offset + 1;
+                self.input.set_start(next_offset);
+                self.buffer.push_back(Ok((offset, Token::Lf, next_offset)));
+            }
+            (offset, b'\r') if self.input.buffer().get(offset + 1) == Some(&b'\n') => {
+                let next_offset = offset + 2;
                 self.input.set_start(next_offset);
                 self.buffer.push_back(Ok((offset, Token::Lf, next_offset)));
             }
@@ -354,7 +361,7 @@ impl<'input> Lexer<'input> {
     /// matches respectively.
     fn tokenize_check_pattern(&mut self, literal: bool) {
         let mut start = self.input.start();
-        let eol = self.input.next_newline().unwrap_or(self.input.end());
+        let eol = Newline::next_from(self.input.buffer(), start).offset();
 
         if literal {
             let raw = self.input.as_str(start..eol);

@@ -36,6 +36,7 @@ impl<'a> RegexMatcher<'a> {
             .syntax(
                 syntax::Config::new()
                     .multi_line(true)
+                    .crlf(true)
                     .case_insensitive(config.options.ignore_case),
             )
             .build(pattern.as_ref())
@@ -77,6 +78,7 @@ impl<'a> RegexMatcher<'a> {
             .syntax(
                 syntax::Config::new()
                     .multi_line(true)
+                    .crlf(true)
                     .case_insensitive(config.options.ignore_case),
             )
             .build(pattern.inner().as_ref())

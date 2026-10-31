@@ -105,6 +105,7 @@ impl<'a, 'config> SmartMatcherBuilder<'a, 'config> {
             .syntax(
                 regex_automata::util::syntax::Config::new()
                     .multi_line(true)
+                    .crlf(true)
                     .case_insensitive(self.config.options.ignore_case),
             )
             .build(source.as_ref())

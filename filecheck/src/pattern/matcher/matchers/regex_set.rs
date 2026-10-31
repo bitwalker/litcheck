@@ -195,6 +195,7 @@ impl<'a> RegexSetMatcher<'a> {
             .syntax(
                 syntax::Config::new()
                     .multi_line(true)
+                    .crlf(true)
                     .case_insensitive(config.options.ignore_case),
             )
             .build_many(&patterns)
@@ -211,6 +212,7 @@ impl<'a> RegexSetMatcher<'a> {
                     syntax::Config::new()
                         .utf8(false)
                         .multi_line(true)
+                        .crlf(true)
                         .case_insensitive(config.options.ignore_case),
                 )
                 .thompson(thompson::Config::new().utf8(false))
@@ -223,6 +225,7 @@ impl<'a> RegexSetMatcher<'a> {
                             .syntax(
                                 syntax::Config::new()
                                     .multi_line(true)
+                                    .crlf(true)
                                     .case_insensitive(config.options.ignore_case),
                             )
                             .build_many(&patterns)
