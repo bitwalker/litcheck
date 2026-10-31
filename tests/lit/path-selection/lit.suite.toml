@@ -1,0 +1,4 @@
+name = "path-selection"
+patterns = ["*.txt"]
+
+[format.shtest]

@@ -128,8 +128,8 @@ fn get_file_based_tests(
         let test_path = test_entry.into_path();
         log::trace!(target: "lit:test:registry", "found test file: {}", test_path.display());
         let relative_path = test_path
-            .strip_prefix(search_path)
-            .expect("expected path relative to search_path");
+            .strip_prefix(suite.source_dir())
+            .expect("expected test path within its suite source directory");
         tests.push_back(Arc::new(Test::new(
             relative_path.to_path_buf(),
             suite.clone(),
