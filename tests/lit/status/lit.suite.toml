@@ -1,0 +1,5 @@
+name = "status"
+patterns = ["*.txt"]
+available_features = ["present"]
+
+[format.shtest]

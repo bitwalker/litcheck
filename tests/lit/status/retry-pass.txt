@@ -1,0 +1,2 @@
+ALLOWED_RETRIES: 1
+RUN: if test -f %t; then true; else touch %t; false; fi

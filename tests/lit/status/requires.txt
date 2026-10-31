@@ -1,0 +1,2 @@
+REQUIRES: absent
+RUN: echo unexpected > "${LIT_MARKER}"

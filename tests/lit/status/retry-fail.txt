@@ -1,0 +1,2 @@
+ALLOWED_RETRIES: 1
+RUN: if test -f %t.second; then true; elif test -f %t.first; then touch %t.second; false; else touch %t.first; false; fi

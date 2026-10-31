@@ -1,0 +1,2 @@
+UNSUPPORTED: present
+RUN: echo unexpected > "${LIT_MARKER}"
