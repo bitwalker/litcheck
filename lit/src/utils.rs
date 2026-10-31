@@ -1,6 +1,5 @@
 use std::borrow::Cow;
 use std::ffi::OsStr;
-use std::io::Write;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -63,89 +62,30 @@ impl ShellCommand {
         self
     }
 
-    pub fn wait_with_timeout(mut self, timeout: Duration) -> TestResult {
-        self.command
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped());
+    /// Capture the command's output, allowing at most `timeout` for both the
+    /// command and its pipes. A zero timeout waits without a deadline.
+    ///
+    /// Finite deadlines require Unix process groups and nonblocking pipes;
+    /// other platforms report an unresolved result instead of ignoring a limit.
+    pub fn wait_with_timeout(self, timeout: Duration) -> TestResult {
         let started_at = Instant::now();
-        match self.command.spawn() {
-            Ok(mut child) => {
-                if let (Some(bytes), Some(mut stdin)) = (self.pipe_stdin.take(), child.stdin.take())
-                {
-                    let _ = std::thread::scope(move |scope| {
-                        scope.spawn(move || stdin.write_all(&bytes)).join()
-                    });
-                }
-                let stdout_handle = child.stdout.take().map(read);
-                let stderr_handle = child.stderr.take().map(read);
-
-                loop {
-                    match child.try_wait() {
-                        Ok(None) => {
-                            let elapsed = started_at.elapsed();
-                            if timeout.is_zero() || elapsed < timeout {
-                                continue;
-                            }
-                            let stdout = stdout_handle
-                                .and_then(|t| t.join().ok())
-                                .unwrap_or_default();
-                            let stderr = stderr_handle
-                                .and_then(|t| t.join().ok())
-                                .unwrap_or_default();
-                            let _ = child.kill();
-                            let status = child.try_wait().transpose();
-                            let result = TestResult::new(TestStatus::Timeout)
-                                .with_stdout(stdout)
-                                .with_stderr(stderr)
-                                .with_start(started_at)
-                                .with_elapsed(elapsed);
-                            if let Some(Ok(status)) = status {
-                                break result.with_exit_status(status);
-                            } else {
-                                break result;
-                            }
-                        }
-                        Ok(Some(status)) => {
-                            let elapsed = started_at.elapsed();
-                            let stdout = stdout_handle
-                                .and_then(|t| t.join().ok())
-                                .unwrap_or_default();
-                            let stderr = stderr_handle
-                                .and_then(|t| t.join().ok())
-                                .unwrap_or_default();
-                            break TestResult::from(std::process::Output {
-                                status,
-                                stdout,
-                                stderr,
-                            })
-                            .with_start(started_at)
-                            .with_elapsed(elapsed);
-                        }
-                        Err(wait_err) => {
-                            let elapsed = started_at.elapsed();
-                            let stdout = stdout_handle
-                                .and_then(|t| t.join().ok())
-                                .unwrap_or_default();
-                            let mut stderr = stderr_handle
-                                .and_then(|t| t.join().ok())
-                                .unwrap_or_default();
-                            if stderr.is_empty() {
-                                write!(&mut stderr, "Unexpected error occurred waiting on child process: {wait_err}").unwrap();
-                            } else {
-                                write!(&mut stderr, "\n\nUnexpected error occurred waiting on child process: {wait_err}").unwrap();
-                            }
-                            break TestResult::new(TestStatus::Unresolved)
-                                .with_start(started_at)
-                                .with_elapsed(elapsed)
-                                .with_stdout(stdout)
-                                .with_stderr(stderr);
-                        }
-                    };
+        let result = match process::run(self.command, self.pipe_stdin, timeout, started_at) {
+            Ok((output, timed_out)) => {
+                if timed_out {
+                    TestResult::new(TestStatus::Timeout)
+                        .with_exit_status(output.status)
+                        .with_stdout(output.stdout)
+                        .with_stderr(output.stderr)
+                } else {
+                    TestResult::from(output)
                 }
             }
-            Err(spawn_err) => TestResult::new(TestStatus::Unresolved)
-                .with_stderr(format!("Failed to spawn process: {spawn_err}").into_bytes()),
-        }
+            Err(error) => TestResult::new(TestStatus::Unresolved)
+                .with_stderr(format!("Failed to run process: {error}").into_bytes()),
+        };
+        result
+            .with_start(started_at)
+            .with_elapsed(started_at.elapsed())
     }
 
     #[allow(unused)]
@@ -154,12 +94,131 @@ impl ShellCommand {
     }
 }
 
-fn read<R: std::io::Read + Send + 'static>(mut input: R) -> std::thread::JoinHandle<Vec<u8>> {
-    std::thread::spawn(move || {
-        let mut buffer = vec![];
-        match input.read_to_end(&mut buffer) {
-            Ok(_) => buffer,
-            Err(_) => buffer,
+#[cfg(unix)]
+mod process;
+
+#[cfg(not(unix))]
+mod process {
+    use std::io::{self, Write};
+    use std::process::{Command, Output, Stdio};
+    use std::time::{Duration, Instant};
+
+    pub(super) fn run(
+        mut command: Command,
+        input: Option<Vec<u8>>,
+        timeout: Duration,
+        _started_at: Instant,
+    ) -> io::Result<(Output, bool)> {
+        if !timeout.is_zero() {
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "command timeouts are only supported on Unix",
+            ));
         }
-    })
+        let mut child = command
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+        // There is deliberately no deadline on this platform. Feed stdin while
+        // wait_with_output drains both output streams to avoid pipe deadlocks.
+        std::thread::scope(|scope| {
+            if let (Some(mut stdin), Some(input)) = (child.stdin.take(), input) {
+                scope.spawn(move || {
+                    let _ = stdin.write_all(&input);
+                });
+            }
+            child.wait_with_output().map(|output| (output, false))
+        })
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    const TIMEOUT: Duration = Duration::from_millis(150);
+
+    fn shell(script: &str) -> ShellCommand {
+        let mut command = ShellCommand::new("/bin/sh");
+        command.args(["-c", script]);
+        command
+    }
+
+    fn assert_timeout(command: ShellCommand) -> TestResult {
+        let started = Instant::now();
+        let result = command.wait_with_timeout(TIMEOUT);
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "timeout took {:?}",
+            started.elapsed()
+        );
+        assert_eq!(result.status(), TestStatus::Timeout);
+        result
+    }
+
+    #[test]
+    fn timeout_terminates_sleeping_command() {
+        assert_timeout(shell("sleep 3"));
+    }
+
+    #[test]
+    fn timeout_preserves_captured_output() {
+        let result = assert_timeout(shell("printf stdout; printf stderr >&2; sleep 3"));
+        assert_eq!(result.stdout(), "stdout");
+        assert_eq!(result.stderr(), "stderr");
+    }
+
+    #[test]
+    fn timeout_includes_blocked_stdin() {
+        let mut command = shell("sleep 3");
+        command.pipe_stdin(vec![b'x'; 2 * 1024 * 1024]);
+        assert_timeout(command);
+    }
+
+    #[test]
+    fn timeout_includes_pipes_held_by_descendants_after_child_exit() {
+        assert_timeout(shell("sleep 3 &"));
+    }
+
+    #[test]
+    fn timeout_reaps_child_and_terminates_descendants() {
+        let directory = tempdir::TempDir::new("litcheck-timeout").unwrap();
+        let marker = directory.path().join("survived");
+        let mut command = shell("echo $$; (sleep 1; touch \"$1\") & wait");
+        command.args([OsStr::new("litcheck-test"), marker.as_os_str()]);
+        let result = assert_timeout(command);
+        let pid: i32 = result.stdout().trim().parse().unwrap();
+        let mut status = 0;
+        // SAFETY: status points to writable storage and pid names the command
+        // started by this test. WNOHANG prevents an accidental blocking wait.
+        assert_eq!(
+            unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) },
+            -1
+        );
+        assert_eq!(
+            std::io::Error::last_os_error().raw_os_error(),
+            Some(libc::ECHILD)
+        );
+        std::thread::sleep(Duration::from_millis(1100));
+        assert!(!marker.exists(), "a descendant survived the timeout");
+    }
+
+    #[test]
+    fn large_input_and_output_make_progress_together() {
+        let mut command = shell("head -c 1048576 /dev/zero; head -c 1048576 /dev/zero >&2; cat");
+        command.pipe_stdin(vec![b'x'; 1024 * 1024]);
+        let started = Instant::now();
+        let result = command.wait_with_timeout(Duration::from_secs(2));
+        assert!(started.elapsed() < Duration::from_secs(3));
+        assert_eq!(result.status(), TestStatus::Pass);
+        assert_eq!(result.stdout().len(), 2 * 1024 * 1024);
+        assert!(result.stdout().as_bytes()[..1024 * 1024]
+            .iter()
+            .all(|byte| *byte == 0));
+        assert!(result.stdout().as_bytes()[1024 * 1024..]
+            .iter()
+            .all(|byte| *byte == b'x'));
+        assert_eq!(result.stderr().len(), 1024 * 1024);
+        assert!(result.stderr().as_bytes().iter().all(|byte| *byte == 0));
+    }
 }

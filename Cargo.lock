@@ -707,6 +707,7 @@ dependencies = [
  "indexmap",
  "intrusive-collections",
  "itertools",
+ "libc",
  "litcheck-core",
  "log",
  "parking_lot",

@@ -1,0 +1,1 @@
+RUN: printf timeout-stdout; printf timeout-stderr >&2; sleep 3

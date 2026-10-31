@@ -36,5 +36,8 @@ tempdir = "0.3"
 thiserror.workspace = true
 toml.workspace = true
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 pretty_assertions.workspace = true
