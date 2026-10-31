@@ -284,10 +284,16 @@ impl<'a> CheckProgram<'a> {
                 | Check::Same
                 | Check::Dag
                 | Check::Empty => {
-                    block.push(iter.next().unwrap());
+                    let line = iter.next().unwrap();
+                    let continues_dag = matches!(line.kind(), Check::Dag)
+                        && matches!(iter.peek().map(CheckLine::kind), Some(Check::Dag));
+                    block.push(line);
 
-                    // Insert the --implicit-check-not pattern after every positive check
-                    if let Some(implicit_check_not) = implicit_check_not_pattern.as_ref() {
+                    // Consecutive DAG checks form one unordered matching unit. An intervening
+                    // negative check would split the group and impose an ordering on its matches.
+                    if !continues_dag
+                        && let Some(implicit_check_not) = implicit_check_not_pattern.as_ref()
+                    {
                         block.push(implicit_check_not.clone());
                     }
                 }
