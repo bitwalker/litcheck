@@ -72,6 +72,14 @@ impl<'check> Rule for CheckDag<'check> {
         };
         match result {
             Ok(result) if result.is_ok() => {
+                if guard.config().remarks_enabled() {
+                    for matched in result.iter().filter_map(|matched| matched.info.as_ref()) {
+                        if let Ok(loc) = guard.source_manager().file_line_col(matched.pattern_span)
+                        {
+                            eprintln!("{loc}: remark: CHECK-DAG: expected string found in input");
+                        }
+                    }
+                }
                 guard.save();
                 Ok(result)
             }
