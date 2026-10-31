@@ -70,19 +70,12 @@ impl ShellCommand {
         let started_at = Instant::now();
         match self.command.spawn() {
             Ok(mut child) => {
-                let pipe_stdin = self.pipe_stdin.take();
-                let mut stdin = child.stdin.take().unwrap();
-                let _ = std::thread::scope(move |scope| {
-                    scope
-                        .spawn(move || {
-                            if let Some(bytes) = pipe_stdin {
-                                stdin.write_all(&bytes)
-                            } else {
-                                Ok(())
-                            }
-                        })
-                        .join()
-                });
+                if let (Some(bytes), Some(mut stdin)) = (self.pipe_stdin.take(), child.stdin.take())
+                {
+                    let _ = std::thread::scope(move |scope| {
+                        scope.spawn(move || stdin.write_all(&bytes)).join()
+                    });
+                }
                 let stdout_handle = child.stdout.take().map(read);
                 let stderr_handle = child.stderr.take().map(read);
 

@@ -1,0 +1,4 @@
+name = "executable-fail"
+patterns = ["*.sh"]
+
+[format.executable]

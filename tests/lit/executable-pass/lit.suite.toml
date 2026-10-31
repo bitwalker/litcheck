@@ -1,0 +1,4 @@
+name = "executable-pass"
+patterns = ["*.sh"]
+
+[format.executable]
