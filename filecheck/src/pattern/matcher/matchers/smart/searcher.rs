@@ -515,7 +515,18 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
             Left(rhs) => {
                 let lhs = lhs.as_numeric(span, rhs.format, context)?;
                 if lhs.value != rhs.value {
-                    self.captures.set_pattern(None);
+                    return Ok(MatchResult::failed(
+                        CheckFailedError::MatchFoundConstraintFailed {
+                            span: lhs.span(),
+                            input_file: context.input_file(),
+                            pattern: Some(RelatedCheckError {
+                                span,
+                                match_file: context.source_file(span.source_id()).unwrap(),
+                            }),
+                            error: None,
+                            help: Some(format!("expected {rhs}, got {lhs}")),
+                        },
+                    ));
                 }
 
                 log::trace!(target: "smart:searcher", "constraint was applied successfully");
