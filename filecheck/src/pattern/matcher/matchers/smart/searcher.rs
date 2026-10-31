@@ -577,7 +577,7 @@ impl<'a, 'input> SmartSearcher<'a, 'input> {
                 }
                 _ => format!("{num}"),
             }),
-            Right(s) => s,
+            Right(s) => Cow::Owned(regex_syntax::escape(&s)),
         };
         log::trace!(target: "smart:searcher", "resolved substitution expression to pattern: '{pattern_source}'");
         let pattern = Regex::builder()
