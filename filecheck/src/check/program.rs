@@ -259,16 +259,6 @@ impl<'a> CheckProgram<'a> {
                         }
                     }
                     label = iter.next();
-                    while let Some(next) = iter.peek() {
-                        match next.kind() {
-                            Check::Label => {
-                                break;
-                            }
-                            _ => {
-                                block.push(iter.next().unwrap());
-                            }
-                        }
-                    }
                 }
                 Check::Empty | Check::Same | Check::Next
                     if !can_insert_dependent_positive_check(&block, label.as_ref()) =>
