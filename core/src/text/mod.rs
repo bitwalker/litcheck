@@ -125,17 +125,7 @@ pub fn find_next_lf_or_eof(buffer: &[u8], range: Range<usize>) -> Option<usize> 
 }
 
 pub fn find_next_crlf_or_eof(buffer: &[u8], range: Range<usize>) -> Option<usize> {
-    match memchr::memchr(b'\n', &buffer[range]) {
-        Some(0) => None,
-        Some(index) => {
-            let line_end = index - 1;
-            match unsafe { *buffer.get_unchecked(line_end) } {
-                b'\r' => Some(line_end),
-                _ => None,
-            }
-        }
-        None => None,
-    }
+    memchr::memmem::find(&buffer[range], b"\r\n").map(|index| range.start + index)
 }
 
 pub fn find_prev_lf_or_eof(buffer: &[u8], range: Range<usize>) -> Option<usize> {
@@ -143,17 +133,7 @@ pub fn find_prev_lf_or_eof(buffer: &[u8], range: Range<usize>) -> Option<usize> 
 }
 
 pub fn find_prev_crlf_or_eof(buffer: &[u8], range: Range<usize>) -> Option<usize> {
-    match memchr::memrchr(b'\n', &buffer[range]) {
-        Some(0) => None,
-        Some(index) => {
-            let line_end = index - 1;
-            match unsafe { *buffer.get_unchecked(line_end) } {
-                b'\r' => Some(line_end),
-                _ => None,
-            }
-        }
-        None => None,
-    }
+    memchr::memmem::rfind(&buffer[range], b"\r\n").map(|index| range.start + index)
 }
 
 /// Returns true if `offset` in the underlying buffer falls on a valid UTF-8 codepoint boundary.
@@ -202,5 +182,54 @@ fn is_non_canonical_horizontal_whitespace(c: char) -> bool {
         | '\u{205F}'
         | '\u{3000}' => true,
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn next_crlf_search_returns_absolute_offsets_within_bounds() {
+        let input = b"head\r\n\r\ntail\r\nlast";
+        for (range, expected) in [
+            (0..18, Some(4)),
+            (6..18, Some(6)),
+            (8..18, Some(12)),
+            (5..8, Some(6)),
+            (0..4, None),
+            (5..6, None),
+            (6..7, None),
+            (8..13, None),
+            (18..18, None),
+        ] {
+            assert_eq!(
+                find_next_crlf_or_eof(input, Range::new(range.start, range.end)),
+                expected,
+                "searching {range:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn previous_crlf_search_returns_absolute_offsets_within_bounds() {
+        let input = b"head\r\n\r\ntail\r\nlast";
+        for (range, expected) in [
+            (0..18, Some(12)),
+            (6..18, Some(12)),
+            (6..8, Some(6)),
+            (4..7, Some(4)),
+            (0..4, None),
+            (5..6, None),
+            (6..7, None),
+            (8..13, None),
+            (18..18, None),
+        ] {
+            assert_eq!(
+                find_prev_crlf_or_eof(input, Range::new(range.start, range.end)),
+                expected,
+                "searching {range:?}"
+            );
+        }
     }
 }

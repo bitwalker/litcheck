@@ -177,3 +177,14 @@ fn implicit_negatives_allow_text_consumed_by_label_matches() {
     assert_excluded("CHECK-LABEL: {{start\\nend}}\n", "start\nend forbidden");
     assert_excluded("CHECK-LABEL: {{^}}\n", "forbidden\n");
 }
+
+#[test]
+fn implicit_negatives_preserve_dependent_checks_with_crlf() {
+    let checks = "CHECK-LABEL: function:\nCHECK-SAME: suffix\nCHECK-NEXT: first\nCHECK-EMPTY:\nCHECK-NEXT: last\n";
+    verify(checks, "function: suffix\r\nfirst\r\n\r\nlast\r\n").unwrap();
+    assert_excluded(
+        checks,
+        "function: forbidden suffix\r\nfirst\r\n\r\nlast\r\n",
+    );
+    assert_excluded(checks, "function: suffix\r\nfirst\r\n\r\nlast\r\nforbidden");
+}

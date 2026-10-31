@@ -88,3 +88,10 @@ fn empty_checks_accept_a_label_suffix_before_the_empty_line() {
     let checks = "CHECK-LABEL: one:\nCHECK-EMPTY:\nCHECK-NEXT: value\n";
     verify(checks, "one: suffix\n\nvalue\n").unwrap();
 }
+
+#[test]
+fn empty_checks_follow_crlf_labels() {
+    let checks = "CHECK-LABEL: one:\nCHECK-EMPTY:\nCHECK-NEXT: value\n";
+    verify(checks, "one:\r\n\r\nvalue\r\n").unwrap();
+    verify(checks, "one: suffix\r\n\r\nvalue\r\n").unwrap();
+}
