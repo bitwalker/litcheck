@@ -49,10 +49,11 @@ impl<'a> Checker<'a> {
             ));
         }
 
-        let mut result = match discover_blocks(&self.program, &mut context) {
-            Ok(blocks) => check_blocks(blocks, &self.program, &mut context),
-            Err(failed) => TestResult::from_error(failed),
-        };
+        let (blocks, errors) = discover_blocks(&self.program, &mut context);
+        let mut result = check_blocks(blocks, &self.program, &mut context);
+        for error in errors {
+            result.failed(error);
+        }
         result.attach_input_dump(&context);
         result
     }
@@ -67,7 +68,7 @@ impl<'a> Checker<'a> {
 pub fn discover_blocks<'input, 'context: 'input>(
     program: &CheckProgram<'context>,
     context: &mut MatchContext<'input, 'context>,
-) -> Result<SmallVec<[BlockInfo; 2]>, TestFailed> {
+) -> (SmallVec<[BlockInfo; 2]>, Vec<CheckFailedError>) {
     // Traverse the code of the program and try to identify
     // the byte ranges corresponding to block starts of the
     // program. Once the block starts are recorded, we can
@@ -175,11 +176,7 @@ pub fn discover_blocks<'input, 'context: 'input>(
     // Reset the context bounds
     context.cursor_mut().reset();
 
-    if errors.is_empty() {
-        Ok(blocks)
-    } else {
-        Err(TestFailed::new(errors, context))
-    }
+    (blocks, errors)
 }
 
 /// Evaluate all check operations in the given blocks

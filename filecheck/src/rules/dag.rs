@@ -312,7 +312,8 @@ block3(v11):
         let mut program = context.compile(check_file)?;
 
         let mut mctx = context.match_context();
-        let mut blocks = crate::check::discover_blocks(&program, &mut mctx)?;
+        let (mut blocks, errors) = crate::check::discover_blocks(&program, &mut mctx);
+        assert!(errors.is_empty(), "{errors:?}");
         assert_eq!(blocks.len(), 2);
 
         blocks.pop().unwrap();
@@ -380,7 +381,8 @@ block3(v11):
         let program = context.compile(check_file)?;
 
         let mut mctx = context.match_context();
-        let blocks = crate::check::discover_blocks(&program, &mut mctx)?;
+        let (blocks, errors) = crate::check::discover_blocks(&program, &mut mctx);
+        assert!(errors.is_empty(), "{errors:?}");
         assert_eq!(blocks.len(), 2);
 
         let block = &blocks[0];

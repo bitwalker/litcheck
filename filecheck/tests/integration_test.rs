@@ -766,8 +766,7 @@ mod input_dump {
         );
     }
 
-    /// A failure raised while discovering CHECK-LABEL blocks aborts before any other check
-    /// runs, so the dump must still be produced -- this is the case that motivated it.
+    /// A missing CHECK-LABEL must still produce a dump, retaining matches in known regions.
     #[test]
     fn dump_is_attached_when_a_check_label_fails() {
         let failed = failure(
@@ -782,7 +781,7 @@ mod input_dump {
             "{rendered}"
         );
         assert!(
-            rendered.contains("no checks matched anywhere in this input"),
+            rendered.contains("matched by the check on line 1"),
             "{rendered}"
         );
     }
