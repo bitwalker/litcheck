@@ -1114,6 +1114,9 @@ impl<'a, 'iter> Iterator for CheckPatternVarIter<'a, 'iter> {
                             Some(Expr::Var(name)) => {
                                 buffer.push_back(name.span());
                             }
+                            Some(Expr::Format { expr, .. }) => {
+                                worklist.push_back(expr);
+                            }
                             Some(Expr::Binary { lhs, rhs, .. }) => {
                                 worklist.push_back(lhs);
                                 worklist.push_back(rhs);

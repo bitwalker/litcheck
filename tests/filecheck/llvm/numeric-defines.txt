@@ -84,20 +84,44 @@ CHECKNUM4: Numeric value #4 = [[#NUMVAL4]]
 NUMNOT2-NOT: Numeric value #3 = [[#NUMVAL3]]
 NUMNOT2-NOT: Numeric value #4 = [[#NUMVAL4]]
 
-NUMERRMSG3: defines.txt:[[#@LINE-5]]:12: error: CHECKNUM3: expected string not found in input
-NUMERRMSG3: defines.txt:1:1: note: scanning from here
-NUMERRMSG3: defines.txt:1:1: note: with "NUMVAL3" equal to "7"
-NUMERRMSG3: defines.txt:[[#@LINE-10]]:1: note: possible intended match here
+NUMERRMSG3-LABEL: no matches were found for expected pattern
+NUMERRMSG3-NEXT: numeric-defines.txt:[[#@LINE-6]]:12
+NUMERRMSG3-NEXT: Numeric value #4 = C
+NUMERRMSG3-NEXT{LITERAL}: Numeric value #3 = [[#NUMVAL3]]
+NUMERRMSG3-NEXT{LITERAL}: ───────────────┬───────────────
+NUMERRMSG3-NEXT{LITERAL}:                ╰── pattern at this location was not matched
 
-NUMERRMSG4: defines.txt:[[#@LINE-9]]:12: error: CHECKNUM4: expected string not found in input
-NUMERRMSG4: defines.txt:1:1: note: scanning from here
-NUMERRMSG4: defines.txt:1:1: note: with "NUMVAL4" equal to "8"
-NUMERRMSG4: defines.txt:[[#@LINE-14]]:1: note: possible intended match here
+NUMERRMSG4-LABEL: no matches were found for expected pattern
+NUMERRMSG4-NEXT: numeric-defines.txt:[[#@LINE-12]]:12
+NUMERRMSG4-NEXT{LITERAL}: Numeric value #3 = [[#NUMVAL3]]
+NUMERRMSG4-NEXT{LITERAL}: Numeric value #4 = [[#NUMVAL4]]
+NUMERRMSG4-NEXT{LITERAL}: ───────────────┬───────────────
+NUMERRMSG4-NEXT{LITERAL}:                ╰── pattern at this location was not matched
 
-NOT-NUMERRMSG3: defines.txt:[[#@LINE-13]]:14: error: {{NUMNOT2}}-NOT: excluded string found in input
-NOT-NUMERRMSG3: defines.txt:[[#@LINE-18]]:1: note: found here
-NOT-NUMERRMSG3: defines.txt:[[#@LINE-19]]:1: note: with "NUMVAL3" equal to "8"
+NOT-NUMERRMSG3-LABEL: match found, but was excluded
+NOT-NUMERRMSG3-NEXT: numeric-defines.txt:[[#@LINE-22]]:1
+NOT-NUMERRMSG3-NEXT: [[#@LINE-24]]
+NOT-NUMERRMSG3-NEXT: Numeric value #3 = 8
+NOT-NUMERRMSG3-NEXT{LITERAL}: ──────────┬─────────
+NOT-NUMERRMSG3-NEXT{LITERAL}:           ╰── match found here
 
-NOT-NUMERRMSG4: defines.txt:[[#@LINE-16]]:14: error: {{NUMNOT2}}-NOT: excluded string found in input
-NOT-NUMERRMSG4: defines.txt:[[#@LINE-21]]:1: note: found here
-NOT-NUMERRMSG4: defines.txt:[[#@LINE-22]]:1: note: with "NUMVAL4" equal to "C"
+NOT-NUMERRMSG3-LABEL: see also
+NOT-NUMERRMSG3-NEXT: numeric-defines.txt:[[#@LINE-25]]:14
+NOT-NUMERRMSG3-NEXT{LITERAL}: Numeric value #4 = [[#NUMVAL4]]
+NOT-NUMERRMSG3-NEXT{LITERAL}: Numeric value #3 = [[#NUMVAL3]]
+NOT-NUMERRMSG3-NEXT{LITERAL}:          ───────────────┬───────────────
+NOT-NUMERRMSG3-NEXT{LITERAL}:                         ╰── by this pattern
+
+NOT-NUMERRMSG4-LABEL: match found, but was excluded
+NOT-NUMERRMSG4-NEXT: numeric-defines.txt:[[#@LINE-35]]:1
+NOT-NUMERRMSG4-NEXT: Numeric value #3 = 8
+NOT-NUMERRMSG4-NEXT: Numeric value #4 = C
+NOT-NUMERRMSG4-NEXT{LITERAL}: ──────────┬─────────
+NOT-NUMERRMSG4-NEXT{LITERAL}:           ╰── match found here
+
+NOT-NUMERRMSG4-LABEL: see also
+NOT-NUMERRMSG4-NEXT: numeric-defines.txt:[[#@LINE-38]]:14
+NOT-NUMERRMSG4-NEXT{LITERAL}: Numeric value #3 = [[#NUMVAL3]]
+NOT-NUMERRMSG4-NEXT{LITERAL}: Numeric value #4 = [[#NUMVAL4]]
+NOT-NUMERRMSG4-NEXT{LITERAL}:          ───────────────┬───────────────
+NOT-NUMERRMSG4-NEXT{LITERAL}:                         ╰── by this pattern

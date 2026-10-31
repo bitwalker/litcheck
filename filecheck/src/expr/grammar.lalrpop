@@ -54,7 +54,7 @@ Comma<T>: Vec<T> = {
 
 pub NumericVar: Variable<'input> = {
     "#" <format:NumberFormat> <name:("," <Var>)> <value:("=" <Expr>)> => {
-        Variable { name, value: Value::Num(value) }
+        Variable { name, value: Value::Num(Expr::Format { format, expr: Box::new(value) }) }
     },
 
     "#" <name:Var> <value:("=" <Expr>)> => {

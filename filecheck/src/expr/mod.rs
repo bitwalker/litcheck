@@ -26,6 +26,11 @@ pub struct TypedVariable {
 pub enum Expr {
     Num(Number),
     Var(VariableName),
+    /// Apply an explicit format to the result of a numeric definition.
+    Format {
+        format: NumberFormat,
+        expr: Box<Expr>,
+    },
     Binary {
         span: SourceSpan,
         op: BinaryOp,
@@ -38,6 +43,7 @@ impl Spanned for Expr {
         match self {
             Self::Num(spanned) => spanned.span(),
             Self::Var(spanned) => spanned.span(),
+            Self::Format { expr, .. } => expr.span(),
             Self::Binary { span, .. } => *span,
         }
     }
@@ -92,6 +98,16 @@ impl PartialEq for Expr {
             (Self::Num(a), Self::Num(b)) => a == b,
             (Self::Var(a), Self::Var(b)) => a == b,
             (
+                Self::Format {
+                    format: a,
+                    expr: ae,
+                },
+                Self::Format {
+                    format: b,
+                    expr: be,
+                },
+            ) => a == b && ae == be,
+            (
                 Self::Binary {
                     op: aop,
                     lhs: al,
@@ -125,6 +141,18 @@ impl Ord for Expr {
             (Self::Var(_), _) => Ordering::Less,
             (_, Self::Var(_)) => Ordering::Greater,
             (
+                Self::Format {
+                    format: a,
+                    expr: ae,
+                },
+                Self::Format {
+                    format: b,
+                    expr: be,
+                },
+            ) => a.cmp(b).then_with(|| ae.cmp(be)),
+            (Self::Format { .. }, _) => Ordering::Less,
+            (_, Self::Format { .. }) => Ordering::Greater,
+            (
                 Self::Binary {
                     op: lop,
                     lhs: ll,
@@ -152,6 +180,7 @@ impl fmt::Display for Expr {
             Self::Var(variables::VariableName::Pseudo(v)) => write!(f, "@{v}"),
             Self::Var(variables::VariableName::User(v)) => write!(f, "{v}"),
             Self::Num(n) => write!(f, "{n}"),
+            Self::Format { format, expr } => write!(f, "{format},({expr})"),
             Self::Binary { op, lhs, rhs, .. } => {
                 if matches!(op, BinaryOp::Min | BinaryOp::Max) {
                     write!(f, "{op}({lhs}, {rhs})")

@@ -343,7 +343,7 @@ impl fmt::Display for Number {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u8)]
 pub enum NumberFormat {
     Unsigned {
@@ -359,7 +359,7 @@ pub enum NumberFormat {
     },
 }
 
-#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u8)]
 pub enum CasingStyle {
     #[default]

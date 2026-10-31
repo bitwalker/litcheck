@@ -617,6 +617,16 @@ fn evaluate_expr<'input>(
 ) -> DiagResult<Either<Number, Cow<'input, str>>> {
     match expr {
         Expr::Num(num) => Ok(Left(num.clone())),
+        Expr::Format { format, expr } => {
+            evaluate_expr(span, expr, Some(ValueType::Number(Some(*format))), context).map(
+                |value| {
+                    value.map_left(|num| Number {
+                        format: Some(*format),
+                        ..num
+                    })
+                },
+            )
+        }
         Expr::Var(var) => {
             let var_span = var.span();
             let value = match var {
