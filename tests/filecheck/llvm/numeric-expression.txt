@@ -369,12 +369,12 @@ FMT-CONFLICT2-LABEL: VAR USE IMPL FMT CONFLICT
 FMT-CONFLICT2-NEXT: [[#UNSI + UNSIa + LHEX]]
 
 FMT-CONFLICT2-MSG: implicit format conflict, need an explicit format specifier
-FMT-CONFLICT2-MSG-NEXT: numeric-expression.txt:[[#@LINE-3]]:31
+FMT-CONFLICT2-MSG-NEXT: numeric-expression.txt:[[#@LINE-3]]:24
 FMT-CONFLICT2-MSG-NEXT: FMT-CONFLICT2-LABEL
 FMT-CONFLICT2-MSG-NEXT{LITERAL}: [[#UNSI + UNSIa + LHEX]]
-FMT-CONFLICT2-MSG-NEXT:                    ──┬──   ──┬─
-FMT-CONFLICT2-MSG-NEXT:                      │       ╰── the format of this operand is %x
-FMT-CONFLICT2-MSG-NEXT:                      ╰── the format of this operand is %u
+FMT-CONFLICT2-MSG-NEXT:             ──────┬─────   ──┬─
+FMT-CONFLICT2-MSG-NEXT:                   │          ╰── the format of this operand is %x
+FMT-CONFLICT2-MSG-NEXT:                   ╰── the format of this operand is %u
 
 ; Explicitly specified format can override conflicting implicit formats.
 VAR USE IMPL OVERRIDE FMT CONFLICT  // CHECK-LABEL: VAR USE IMPL OVERRIDE FMT CONFLICT
@@ -479,18 +479,26 @@ CONFLICT1-NEXT: redef1 [[#NUMVAR:]]
 CONFLICT2: [[NUMVAR:foo.*]]
 CONFLICT3: [[STRVAR:foo.*]]
 CONFLICT4: redef2 [[#STRVAR:]]
-INPUT-STR-CONFLICT: numeric-expression.txt:[[#@LINE-3]]:14: error: numeric variable with name 'NUMVAR' already exists
-INPUT-STR-CONFLICT-NEXT: {{C}}ONFLICT2: {{\[\[NUMVAR:foo\.\*\]\]}}
-INPUT-STR-CONFLICT-NEXT:    {{^}}             ^{{$}}
-CLI-STR-CONFLICT: Global defines:2:19: error: numeric variable with name 'NUMVAR' already exists
-CLI-STR-CONFLICT-NEXT:      Global define #2: NUMVAR=foobar
-CLI-STR-CONFLICT-NEXT: {{^}}                  ^{{$}}
-INPUT-NUM-CONFLICT: numeric-expression.txt:[[#@LINE-7]]:22: error: string variable with name 'STRVAR' already exists
- INPUT-NUM-CONFLICT-NEXT: CONFLICT4: redef2 {{\[\[#STRVAR:\]\]}}
-INPUT-NUM-CONFLICT-NEXT: {{^}}                     ^{{$}}
-CLI-NUM-CONFLICT: Global defines:2:45: error: string variable with name 'STRVAR' already exists
- CLI-NUM-CONFLICT-NEXT: Global define #2: #STRVAR=42 (parsed as: {{\[\[#STRVAR:42\]\]}})
-CLI-NUM-CONFLICT-NEXT: {{^}}                                            ^{{$}}
+INPUT-STR-CONFLICT-LABEL: numeric variable with name 'NUMVAR' already exists
+INPUT-STR-CONFLICT-NEXT: numeric-expression.txt:[[#@LINE-4]]:14
+INPUT-STR-CONFLICT{LITERAL}: [[NUMVAR:foo.*]]
+INPUT-STR-CONFLICT-NEXT: ┬
+INPUT-STR-CONFLICT-NEXT: ╰── occurs here
+CLI-STR-CONFLICT-LABEL: numeric variable with name 'NUMVAR' already exists
+CLI-STR-CONFLICT-NEXT: -D:1:1
+CLI-STR-CONFLICT{LITERAL}: NUMVAR=foobar
+CLI-STR-CONFLICT-NEXT: ┬
+CLI-STR-CONFLICT-NEXT: ╰── occurs here
+INPUT-NUM-CONFLICT-LABEL: string variable with name 'STRVAR' already exists
+INPUT-NUM-CONFLICT-NEXT: numeric-expression.txt:[[#@LINE-12]]:22
+INPUT-NUM-CONFLICT{LITERAL}: [[#STRVAR:]]
+INPUT-NUM-CONFLICT-NEXT: ┬
+INPUT-NUM-CONFLICT-NEXT: ╰── occurs here
+CLI-NUM-CONFLICT-LABEL: string variable with name 'STRVAR' already exists
+CLI-NUM-CONFLICT-NEXT: -D:1:2
+CLI-NUM-CONFLICT{LITERAL}: #STRVAR=42
+CLI-NUM-CONFLICT-NEXT: ┬
+CLI-NUM-CONFLICT-NEXT: ╰── occurs here
 
 ; Numeric variable definition with big value.
 RUN: FileCheck --check-prefix BIGVAL --input-file %s %s
@@ -512,9 +520,11 @@ DEF EXPR WRONG MATCH
 DEF-EXPR-FAIL-LABEL: DEF EXPR WRONG MATCH
 DEF-EXPR-FAIL-NEXT: [[# VAR20:]]
 DEF-EXPR-FAIL-NEXT: [[# VAR42: VAR20+22]]
-DEF-EXPR-FAIL-MSG: numeric-expression.txt:[[#@LINE-1]]:21: error: {{D}}EF-EXPR-FAIL-NEXT: is not on the line after the previous match
-DEF-EXPR-FAIL-MSG-NEXT: {{D}}EF-EXPR-FAIL-NEXT: {{\[\[# VAR42: VAR20\+22\]\]}}
-DEF-EXPR-FAIL-MSG-NEXT:   {{^}}                    ^{{$}}
+DEF-EXPR-FAIL-MSG-LABEL: no matches were found for expected pattern
+DEF-EXPR-FAIL-MSG-NEXT: numeric-expression.txt:[[#@LINE-2]]:21
+DEF-EXPR-FAIL-MSG{LITERAL}: [[# VAR42: VAR20+22]]
+DEF-EXPR-FAIL-MSG-NEXT: ┬
+DEF-EXPR-FAIL-MSG-NEXT: ╰── pattern at this location was not matched
 
 ; Verify that using a numeric variable defined on the same line (whether from
 ; input or from an expression) is rejected.
@@ -531,16 +541,20 @@ SAME LINE USE
 SAME-LINE-USE1-LABEL: SAME LINE USE
 SAME-LINE-USE1-NEXT: [[#]]
 SAME-LINE-USE1-NEXT: [[#UNSI:]] [[#UNSI+1]]
-SAME-LINE-USE-MSG1: numeric-expression.txt:[[#@LINE-1]]:36: error: numeric variable 'UNSI' defined earlier in the same CHECK directive
-SAME-LINE-USE-MSG1-NEXT: {{S}}AME-LINE-USE1-NEXT: {{\[\[#UNSI:\]\] \[\[#UNSI\+1\]\]}}
-SAME-LINE-USE-MSG1-NEXT:        {{^}}                                   ^{{$}}
+SAME-LINE-USE-MSG1-LABEL: numeric variable 'UNSI' defined earlier in the same CHECK directive
+SAME-LINE-USE-MSG1-NEXT: numeric-expression.txt:[[#@LINE-2]]:36
+SAME-LINE-USE-MSG1{LITERAL}: [[#UNSI:]] [[#UNSI+1]]
+SAME-LINE-USE-MSG1-NEXT: ┬
+SAME-LINE-USE-MSG1-NEXT: ╰── occurs here
 
 SAME-LINE-USE2-LABEL: SAME LINE USE
 SAME-LINE-USE2-NEXT: [[#UNSI:]]
 SAME-LINE-USE2-NEXT: [[#UNSI2:UNSI+1]] [[#UNSI2+1]]
-SAME-LINE-USE-MSG2: numeric-expression.txt:[[#@LINE-1]]:43: error: numeric variable 'UNSI2' defined earlier in the same CHECK directive
-SAME-LINE-USE-MSG2-NEXT: {{S}}AME-LINE-USE2-NEXT: {{\[\[#UNSI2:UNSI\+1\]\] \[\[#UNSI2\+1\]\]}}
-SAME-LINE-USE-MSG2-NEXT:        {{^}}                                          ^{{$}}
+SAME-LINE-USE-MSG2-LABEL: numeric variable 'UNSI2' defined earlier in the same CHECK directive
+SAME-LINE-USE-MSG2-NEXT: numeric-expression.txt:[[#@LINE-2]]:43
+SAME-LINE-USE-MSG2{LITERAL}: [[#UNSI2:UNSI+1]] [[#UNSI2+1]]
+SAME-LINE-USE-MSG2-NEXT: ┬
+SAME-LINE-USE-MSG2-NEXT: ╰── occurs here
 
 ; Invalid change of format in variable redefinition.
 RUN: %ProtectFileCheckOutput \
@@ -553,9 +567,11 @@ DC
 REDEF-NEW-FMT-LABEL: VAR REDEF FMT CHANGE
 REDEF-NEW-FMT-NEXT: [[#UNSI:]]
 REDEF-NEW-FMT-NEXT: [[#%X,UNSI:]]
-REDEF-NEW-FMT-MSG: numeric-expression.txt:[[#@LINE-1]]:31: error: format different from previous variable definition
-REDEF-NEW-FMT-MSG-NEXT: {{R}}EDEF-NEW-FMT-NEXT: {{\[\[#%X,UNSI:\]\]}}
-REDEF-NEW-FMT-MSG-NEXT:    {{^}}                              ^{{$}}
+REDEF-NEW-FMT-MSG-LABEL: format different from previous variable definition
+REDEF-NEW-FMT-MSG-NEXT: numeric-expression.txt:[[#@LINE-2]]:27
+REDEF-NEW-FMT-MSG{LITERAL}: [[#%X,UNSI:]]
+REDEF-NEW-FMT-MSG-NEXT: ┬
+REDEF-NEW-FMT-MSG-NEXT: ╰── occurs here
 
 ; Numeric expression with big resulting value.
 RUN: FileCheck --check-prefix OVERFLOW --input-file %s %s
@@ -581,9 +597,12 @@ CALL MISSING CLOSING BRACKET
 30
 CALL-MISSING-CLOSING-BRACKET-LABEL: CALL MISSING CLOSING BRACKET
 CALL-MISSING-CLOSING-BRACKET-NEXT: [[#add(NUMVAR,3]]
-CALL-MISSING-CLOSING-BRACKET-MSG: numeric-expression.txt:[[#@LINE-1]]:51: error: missing ')' at end of call expression
-CALL-MISSING-CLOSING-BRACKET-MSG-NEXT: {{C}}ALL-MISSING-CLOSING-BRACKET-NEXT: {{\[\[#add\(NUMVAR,3\]\]}}
-CALL-MISSING-CLOSING-BRACKET-MSG-NEXT:      {{^}}                                                  ^{{$}}
+CALL-MISSING-CLOSING-BRACKET-MSG-LABEL: unrecognized token
+CALL-MISSING-CLOSING-BRACKET-MSG-NEXT: numeric-expression.txt:[[#@LINE-2]]:51
+CALL-MISSING-CLOSING-BRACKET-MSG{LITERAL}: [[#add(NUMVAR,3]]
+CALL-MISSING-CLOSING-BRACKET-MSG-NEXT: ┬
+CALL-MISSING-CLOSING-BRACKET-MSG-NEXT: ╰── lexed a ]] here
+CALL-MISSING-CLOSING-BRACKET-MSG: help: expected one of: ")"
 
 RUN: %ProtectFileCheckOutput \
 RUN: not FileCheck -D#NUMVAR=10 --check-prefix CALL-MISSING-ARGUMENT --input-file %s %s 2>&1 \
@@ -593,9 +612,12 @@ CALL MISSING ARGUMENT
 30
 CALL-MISSING-ARGUMENT-LABEL: CALL MISSING ARGUMENT
 CALL-MISSING-ARGUMENT-NEXT: [[#add(NUMVAR,)]]
-CALL-MISSING-ARGUMENT-MSG: numeric-expression.txt:[[#@LINE-1]]:43: error: missing argument
-CALL-MISSING-ARGUMENT-MSG-NEXT: {{C}}ALL-MISSING-ARGUMENT-NEXT: {{\[\[#add\(NUMVAR,\)\]\]}}
-CALL-MISSING-ARGUMENT-MSG-NEXT:      {{^}}                                          ^{{$}}
+CALL-MISSING-ARGUMENT-MSG-LABEL: unrecognized token
+CALL-MISSING-ARGUMENT-MSG-NEXT: numeric-expression.txt:[[#@LINE-2]]:43
+CALL-MISSING-ARGUMENT-MSG{LITERAL}: [[#add(NUMVAR,)]]
+CALL-MISSING-ARGUMENT-MSG-NEXT: ┬
+CALL-MISSING-ARGUMENT-MSG-NEXT: ╰── lexed a ) here
+CALL-MISSING-ARGUMENT-MSG: help: expected one of: ident, number, "(", "$", "@", "-", "{{(add|sub|mul|div|min|max)}}"
 
 RUN: %ProtectFileCheckOutput \
 RUN: not FileCheck -D#NUMVAR=10 --check-prefix CALL-WRONG-ARGUMENT-COUNT --input-file %s %s 2>&1 \
@@ -605,9 +627,12 @@ CALL WRONG ARGUMENT COUNT
 30
 CALL-WRONG-ARGUMENT-COUNT-LABEL: CALL WRONG ARGUMENT COUNT
 CALL-WRONG-ARGUMENT-COUNT-NEXT: [[#add(NUMVAR)]]
-CALL-WRONG-ARGUMENT-COUNT-MSG: numeric-expression.txt:[[#@LINE-1]]:36: error: function 'add' takes 2 arguments but 1 given
-CALL-WRONG-ARGUMENT-COUNT-MSG-NEXT: {{C}}ALL-WRONG-ARGUMENT-COUNT-NEXT: {{\[\[#add\(NUMVAR\)\]\]}}
-CALL-WRONG-ARGUMENT-COUNT-MSG-NEXT:    {{^}}                                   ^{{$}}
+CALL-WRONG-ARGUMENT-COUNT-MSG-LABEL: unrecognized token
+CALL-WRONG-ARGUMENT-COUNT-MSG-NEXT: numeric-expression.txt:[[#@LINE-2]]:46
+CALL-WRONG-ARGUMENT-COUNT-MSG{LITERAL}: [[#add(NUMVAR)]]
+CALL-WRONG-ARGUMENT-COUNT-MSG-NEXT: ┬
+CALL-WRONG-ARGUMENT-COUNT-MSG-NEXT: ╰── lexed a ) here
+CALL-WRONG-ARGUMENT-COUNT-MSG: help: expected one of: ","
 
 RUN: %ProtectFileCheckOutput \
 RUN: not FileCheck -D#NUMVAR=10 --check-prefix CALL-UNDEFINED-FUNCTION --input-file %s %s 2>&1 \
@@ -617,6 +642,8 @@ CALL UNDEFINED FUNCTION
 30
 CALL-UNDEFINED-FUNCTION-LABEL: CALL UNDEFINED FUNCTION
 CALL-UNDEFINED-FUNCTION-NEXT: [[#bogus_function(NUMVAR)]]
-CALL-UNDEFINED-FUNCTION-MSG: numeric-expression.txt:[[#@LINE-1]]:34: error: call to undefined function 'bogus_function'
-CALL-UNDEFINED-FUNCTION-MSG-NEXT: {{C}}ALL-UNDEFINED-FUNCTION-NEXT: {{\[\[#bogus_function\(NUMVAR\)\]\]}}
-CALL-UNDEFINED-FUNCTION-MSG-NEXT:    {{^}}                                 ^{{$}}
+CALL-UNDEFINED-FUNCTION-MSG-LABEL: undefined function
+CALL-UNDEFINED-FUNCTION-MSG-NEXT: numeric-expression.txt:[[#@LINE-2]]:34
+CALL-UNDEFINED-FUNCTION-MSG{LITERAL}: [[#bogus_function(NUMVAR)]]
+CALL-UNDEFINED-FUNCTION-MSG-NEXT: ┬
+CALL-UNDEFINED-FUNCTION-MSG-NEXT: ╰── no such function defined in this context

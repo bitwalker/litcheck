@@ -80,59 +80,7 @@ impl Number {
     /// precision of 6, and the other is arbitrary precision, then the output format will specify
     /// a precision of 6.
     pub fn infer_expression_format(&self, other: &Self) -> Option<NumberFormat> {
-        match (self.format, other.format) {
-            (format @ Some(_), None) | (None, format @ Some(_)) => format,
-            (None, None) => Some(NumberFormat::default()),
-            (
-                Some(NumberFormat::Hex {
-                    require_prefix: lprefixed,
-                    casing: lcasing,
-                    precision: lprecision,
-                }),
-                Some(NumberFormat::Hex {
-                    require_prefix: rprefixed,
-                    casing: rcasing,
-                    precision: rprecision,
-                }),
-            ) if lprefixed == rprefixed
-                && (lprecision == rprecision || lprecision == 0 || rprecision == 0)
-                && (lcasing == rcasing
-                    || lcasing == CasingStyle::Any
-                    || rcasing == CasingStyle::Any) =>
-            {
-                let precision = core::cmp::max(lprecision, rprecision);
-                Some(NumberFormat::Hex {
-                    precision,
-                    require_prefix: lprefixed,
-                    casing: lcasing,
-                })
-            }
-            (
-                Some(NumberFormat::Signed {
-                    precision: lprecision,
-                }),
-                Some(NumberFormat::Signed {
-                    precision: rprecision,
-                }),
-            ) if lprecision == rprecision || lprecision == 0 || rprecision == 0 => {
-                Some(NumberFormat::Signed {
-                    precision: core::cmp::max(lprecision, rprecision),
-                })
-            }
-            (
-                Some(NumberFormat::Unsigned {
-                    precision: lprecision,
-                }),
-                Some(NumberFormat::Unsigned {
-                    precision: rprecision,
-                }),
-            ) if lprecision == rprecision || lprecision == 0 || rprecision == 0 => {
-                Some(NumberFormat::Unsigned {
-                    precision: core::cmp::max(lprecision, rprecision),
-                })
-            }
-            _ => None,
-        }
+        NumberFormat::infer_expression_format(self.format, other.format)
     }
 
     pub fn parse_with_format(
@@ -387,6 +335,63 @@ impl fmt::Display for CasingStyle {
 }
 
 impl NumberFormat {
+    /// Infer the result format from operand metadata, without evaluating their values.
+    pub(crate) fn infer_expression_format(lhs: Option<Self>, rhs: Option<Self>) -> Option<Self> {
+        match (lhs, rhs) {
+            (format @ Some(_), None) | (None, format @ Some(_)) => format,
+            (None, None) => Some(NumberFormat::default()),
+            (
+                Some(NumberFormat::Hex {
+                    require_prefix: lprefixed,
+                    casing: lcasing,
+                    precision: lprecision,
+                }),
+                Some(NumberFormat::Hex {
+                    require_prefix: rprefixed,
+                    casing: rcasing,
+                    precision: rprecision,
+                }),
+            ) if lprefixed == rprefixed
+                && (lprecision == rprecision || lprecision == 0 || rprecision == 0)
+                && (lcasing == rcasing
+                    || lcasing == CasingStyle::Any
+                    || rcasing == CasingStyle::Any) =>
+            {
+                let precision = core::cmp::max(lprecision, rprecision);
+                Some(NumberFormat::Hex {
+                    precision,
+                    require_prefix: lprefixed,
+                    casing: lcasing,
+                })
+            }
+            (
+                Some(NumberFormat::Signed {
+                    precision: lprecision,
+                }),
+                Some(NumberFormat::Signed {
+                    precision: rprecision,
+                }),
+            ) if lprecision == rprecision || lprecision == 0 || rprecision == 0 => {
+                Some(NumberFormat::Signed {
+                    precision: core::cmp::max(lprecision, rprecision),
+                })
+            }
+            (
+                Some(NumberFormat::Unsigned {
+                    precision: lprecision,
+                }),
+                Some(NumberFormat::Unsigned {
+                    precision: rprecision,
+                }),
+            ) if lprecision == rprecision || lprecision == 0 || rprecision == 0 => {
+                Some(NumberFormat::Unsigned {
+                    precision: core::cmp::max(lprecision, rprecision),
+                })
+            }
+            _ => None,
+        }
+    }
+
     pub fn describe(&self) -> Cow<'static, str> {
         match self {
             Self::Unsigned { precision: 0 } => Cow::Borrowed("any unsigned 128-bit integer"),

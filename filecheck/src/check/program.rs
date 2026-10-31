@@ -204,20 +204,6 @@ impl<'a> CheckProgram<'a> {
 
     /// Preprocess lines into blocks/groups
     fn compile_lines(&mut self, lines: Vec<CheckLine<'a>>, config: &Config) -> DiagResult<()> {
-        // Divide up input lines into blocks
-        let mut iter = lines
-            .into_iter()
-            .map(|mut line| {
-                if config.options.match_full_lines
-                    && !matches!(line.kind(), Check::Not | Check::Empty)
-                {
-                    line.pattern = line
-                        .pattern
-                        .match_full_lines(config.options.strict_whitespace);
-                }
-                line
-            })
-            .peekable();
         let mut label = None;
         let mut block = vec![];
         let mut blocks: VecDeque<(Option<CheckLine<'a>>, Vec<CheckLine<'a>>)> = VecDeque::default();
@@ -239,6 +225,23 @@ impl<'a> CheckProgram<'a> {
                     .map_err(|error| Report::new(error).with_source_code(source))
             })
             .collect::<DiagResult<Vec<_>>>()?;
+
+        super::variables::validate(&lines, &implicit_check_not_patterns, config)?;
+
+        // Divide up input lines into blocks
+        let mut iter = lines
+            .into_iter()
+            .map(|mut line| {
+                if config.options.match_full_lines
+                    && !matches!(line.kind(), Check::Not | Check::Empty)
+                {
+                    line.pattern = line
+                        .pattern
+                        .match_full_lines(config.options.strict_whitespace);
+                }
+                line
+            })
+            .peekable();
 
         // Insert the --implicit-check-not pattern at the start of the file, to ensure that at least
         // one instance appears between the start of the file and the first positive check, and so

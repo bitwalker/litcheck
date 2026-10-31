@@ -7,17 +7,24 @@ use crate::common::*;
 use super::{Value, parser::NumericVarParser};
 
 #[derive(Debug, Clone)]
-pub struct CliVariable(super::Variable<'static>);
+pub struct CliVariable {
+    variable: super::Variable<'static>,
+    definition: String,
+}
 
 impl CliVariable {
     #[inline(always)]
     pub const fn name(&self) -> VariableName {
-        self.0.name
+        self.variable.name
     }
 
     #[inline(always)]
     pub const fn value(&self) -> &Value<'static> {
-        &self.0.value
+        &self.variable.value
+    }
+
+    pub(crate) fn definition(&self) -> &str {
+        &self.definition
     }
 }
 
@@ -37,17 +44,22 @@ impl TypedVariable for CliVariable {
     type Variable<'a> = CliVariable;
 
     fn try_parse<'input>(input: Span<&'input str>) -> Result<Self::Variable<'input>, Report> {
-        if input.starts_with('#') {
+        let definition = input.inner().to_string();
+        let variable = if input.starts_with('#') {
             let mut parser = NumericVarParser;
             let var = parser.parse(input)?;
             let name = var.name;
-            Ok(Self(match var.value {
+            match var.value {
                 Value::Undef => super::Variable::new(name, Value::Undef),
                 Value::Num(n) => super::Variable::new(name, Value::Num(n)),
                 Value::Str(s) => super::Variable::new(name, Value::Str(Cow::Owned(s.into_owned()))),
-            }))
+            }
         } else {
-            super::Variable::<'static>::try_parse(input).map(Self)
-        }
+            super::Variable::<'static>::try_parse(input)?
+        };
+        Ok(Self {
+            variable,
+            definition,
+        })
     }
 }
